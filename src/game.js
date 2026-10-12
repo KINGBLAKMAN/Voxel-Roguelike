@@ -81,8 +81,11 @@ function onNet(m){
     case'hello':if(!NET.host)return;{const r=peerOf(m.from);r.name=cleanName(m.n);
       send({t:'welcome',to:m.from,seed:G.seed,time:G.time,day:G.day,hp:G.state==='playing'?pk(P.pos):null,hn:P.name});toast(r.name+' joined','',2);renderCoop();renderParty();}break;
     case'welcome':NET.welcomed=true;{const h=peerOf(m.from);h.name=cleanName(m.hn);}
-      if(G.seed!==m.seed)newWorld(m.seed);G.time=m.time;NET.spawnAt=m.hp?new V3().fromArray(m.hp):null;
-      coopStatus(`Joined ${cleanName(m.hn)}'s world. Pick a class to drop in.`);renderCoop();break;
+      NET.spawnAt=m.hp?new V3().fromArray(m.hp):null;
+      {const done=()=>{G.time=m.time;coopStatus(`Joined ${cleanName(m.hn)}'s world. Pick a class to drop in.`);renderCoop();};
+        if(G.seed!==m.seed){NET.welcomed=false;const L=$('#loading');L.firstChild.textContent='Joining world…';L.hidden=false;
+          setTimeout(()=>{newWorld(m.seed);L.hidden=true;NET.welcomed=true;done();},40);}else done();}
+      break;
     case'newworld':if(!NET.host){newWorld(m.seed);G.time=0.06;G.over=false;NET.spawnAt=null;if(G.state!=='menu'){$('#death').hidden=true;toMenu(false);}coopStatus('The host started a new world. Pick a class.');}break;
     case'ps':onPeerState(m);break;
     case'mods':{const r=peerOf(m.from);r.mods=m.mods||{};Object.assign(r.st,m.st||{});}break;
