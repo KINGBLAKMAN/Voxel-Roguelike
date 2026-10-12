@@ -1004,7 +1004,8 @@ function updateCamera(dt){
   let sh=0.75;for(let s=0.25;s<=0.75;s+=0.25)if(world.solid(_tgt.x+right.x*s,_tgt.y,_tgt.z+right.z*s)){sh=Math.max(0,s-0.3);break;}
   _tgt.addScaledVector(right,sh);
   let dist=5.6;const back=_t1.copy(f).negate();
-  for(let d=0.3;d<=dist;d+=0.2){const x=_tgt.x+back.x*d,y=_tgt.y+back.y*d,z=_tgt.z+back.z*d;if(world.solid(x,y,z)||world.solid(x,y+0.3,z)||world.solid(x,y-0.3,z)){dist=Math.max(0.5,d-0.35);break;}}
+  // exact voxel raycast from the shoulder back to the camera, plus two offset rays so blocks just off the line don't fill the screen
+  for(const oy of[0,0.35,-0.35]){_t3.set(_tgt.x,_tgt.y+oy,_tgt.z);const hit=voxelRay(_t3,back,dist);if(hit)dist=Math.max(0.5,hit.t-0.3);}
   camPos.copy(_tgt).addScaledVector(back,dist);
   if(G.shake>0){const s=G.shake*G.shake*0.35;camPos.x+=rand(-s,s);camPos.y+=rand(-s,s);camPos.z+=rand(-s,s);G.shake=Math.max(0,G.shake-dt*2.2);}
   camera.position.copy(camPos);camera.lookAt(_t2.copy(camPos).add(f));
