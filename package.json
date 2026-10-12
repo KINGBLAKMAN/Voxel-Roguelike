@@ -1,0 +1,29 @@
+{
+  "name": "emberwild",
+  "productName": "Emberwild",
+  "version": "0.2.0",
+  "description": "Voxel roguelike survival with co-op.",
+  "main": "desktop/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "relay": "node desktop/relay.js",
+    "dist:win": "electron-builder --win portable nsis --x64 --publish never"
+  },
+  "dependencies": {
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.emberwild.game",
+    "productName": "Emberwild",
+    "files": ["index.html", "src/**", "vendor/**", "desktop/**", "package.json"],
+    "directories": { "output": "dist" },
+    "win": { "target": ["portable", "nsis"] },
+    "portable": { "artifactName": "Emberwild-${version}-portable.exe" },
+    "nsis": { "artifactName": "Emberwild-${version}-setup.exe", "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
