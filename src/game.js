@@ -1102,7 +1102,7 @@ function frame(now){
   sky.position.copy(camera.position);stars.position.copy(camera.position);stars.rotation.y=G.time*TAU*0.5;
   const cd=clouds.userData.d,co=clouds.userData.o;for(let i=0;i<cd.length;i++){const c=cd[i];c.x+=dt*1.6;const rx=((c.x-camT.x+300)%600+600)%600-300,rz=((c.z-camT.z+300)%600+600)%600-300;
     co.position.set(camT.x+rx,c.y,camT.z+rz);co.scale.set(c.sx,c.sy,c.sz);co.updateMatrix();clouds.setMatrixAt(i,co.matrix);}clouds.instanceMatrix.needsUpdate=true;
-  if(!document.hidden)renderer.render(scene,camera);
+  if(!document.hidden&&!frame.noRender)renderer.render(scene,camera);
 }
 /* keep the host's world running while its window is in the background */
 setInterval(()=>{if(document.hidden&&NET.on)frame(performance.now());},50);
@@ -1118,5 +1118,5 @@ function boot(){
   newWorld((Math.random()*1e9)>>>0);buildMenu();$('#loading').hidden=true;requestAnimationFrame(t=>{last=t;loop(t);});
 }
 window.__game={G,P,NET,Q,get world(){return world;},get ents(){return ents;},get projs(){return projs;},get pickups(){return pickups;},startRun,useAbility,spawnEnt,swapWeapon,newWorld,gainXp,openPerks,mouse,keys,applyQuality,
-  netConnect,send,tick:(n,dt=1/60)=>{for(let i=0;i<n;i++){frame(last+dt*1000);}}};
+  netConnect,send,tick:(n,dt=1/60)=>{frame.noRender=true;try{for(let i=0;i<n;i++)frame(last+dt*1000);}finally{frame.noRender=false;}}};
 setTimeout(boot,30);

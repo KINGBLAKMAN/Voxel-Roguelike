@@ -9,25 +9,37 @@ on:
 permissions:
   contents: write
 
+# The repository name ends with a period, and Windows can't create a folder with that name,
+# so actions/checkout can't use the default workspace. Clone into C:\emberwild instead.
 jobs:
   build:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run dist:win
+      - name: Clone
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git clone --depth 1 --branch "${{ github.ref_name }}" "https://x-access-token:$env:TOKEN@github.com/${{ github.repository }}" C:\emberwild
+      - name: Install
+        working-directory: C:\emberwild
+        run: npm ci
+      - name: Build exe
+        working-directory: C:\emberwild
+        run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
           name: Emberwild-windows
-          path: |
-            dist/*.exe
+          path: C:\emberwild\dist\*.exe
           if-no-files-found: error
       - name: Attach to release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: C:\emberwild\dist\*.exe
