@@ -181,6 +181,8 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 .perk.relic{background:linear-gradient(160deg,rgba(121,208,255,.1),rgba(0,0,0,.35) 60%)}
 .perk.mastery{background:linear-gradient(160deg,rgba(255,211,90,.16),rgba(0,0,0,.35) 60%);border-color:color-mix(in srgb,var(--c) 60%,transparent);box-shadow:0 0 22px -10px var(--c)}
 .perk.mastery em{color:#ffd35a}
+.perk.chaos{background:linear-gradient(160deg,rgba(255,74,216,.16),rgba(40,0,40,.4) 60%);border-color:color-mix(in srgb,var(--c) 55%,transparent);box-shadow:0 0 26px -10px var(--c)}
+.perk.chaos em{color:#ff8ae8}
 @media (max-width:900px){#topbar{width:calc(100vw - 200px)}#h-timer{font-size:26px}}
 @media (prefers-reduced-motion:reduce){.cls,.slot{transition:none;animation:none}}
 @media (max-width:700px){.slot{width:44px;height:44px}.slot canvas{width:30px;height:30px}.slot.wep{width:54px;height:54px}.slot .nm{display:none}#mini canvas{width:96px;height:96px}#buffs{top:140px}}
@@ -273,8 +275,11 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 
 <script src="vendor/three.min.js"></script>
 <script src="src/core.js"></script>
+<script src="src/render.js"></script>
+<script src="src/vfx.js"></script>
 <script src="src/game.js"></script>
 <script src="src/relics.js"></script>
+<script src="src/augments.js"></script>
 <script src="src/director.js"></script>
 </body>
 </html>

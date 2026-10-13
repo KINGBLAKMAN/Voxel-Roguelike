@@ -1,11 +1,8 @@
-## Emberwild 0.3.0: the horde update
+## Emberwild 0.4.0: chaos and glow
 
-**Download:** `Emberwild-0.3.0-portable.exe` runs without installing; `Emberwild-0.3.0-setup.exe` installs it. Windows may show a SmartScreen warning because the exe isn't code-signed: click *More info*, then *Run anyway*.
+**Download:** `Emberwild-0.4.0-portable.exe` runs without installing; `Emberwild-0.4.0-setup.exe` installs it. Windows may show a SmartScreen warning because the exe isn't code-signed: click *More info*, then *Run anyway*.
 
-- **Survivors-style horde:** enemies rise from the ground all around you and hunt you, with more and tougher ones every minute. There are horde events and a golem boss every 5 minutes.
-- **New enemies:** bats, bloaters (they burst and set off chain reactions) and club-swinging brutes.
-- **7 relics** that fire on their own, a **Mastery** for every ability, new weapon upgrades, rerolls, and a blast that knocks enemies back when you level up.
-- **New world:** flatter, gentler land with lakes, reeds, lily pads, flower meadows, puffier clouds and nicer water. Breakable urns with pickups, and cursed altar trials.
-- **More effects and animation:** lightning, shockwaves, enemies rising from the ground and toppling over, capes, and music that builds with the fight.
-- **Camera fixes:** ignores bogus mouse jumps, and no longer pops in and out when you turn near trees.
-- **Desktop app:** launches fullscreen (F11 toggles), with a Quit to desktop button.
+- **New renderer:** an HDR pipeline with bloom, sun shafts through the terrain, filmic tone mapping, colour grading and anti-aliasing. Fire, magic and glowing blocks now really glow.
+- **Every ability reworked visually:** each has its own cast pose (pushing, raising, praying, shouting, kneeling, throwing, lunging), and effects like rotating rune circles, sweeping weapon trails, scorch and crack marks, erupting ice and rock spikes, light flares, energy shells and dash afterimages.
+- **Chaos augments:** 10 new run-bending upgrades that stack into mayhem: Chain Reaction, Echo, Arcane Surge, Stormcaller, Frenzy, Gravity Well, Overload, Ricochet, Phoenix Heart and Berserker.
+- **Rebuilt bows:** the limbs now curve the right way, with recurved tips, and the string pulls back with a nocked arrow as you draw. Skeletons carry the same bow.

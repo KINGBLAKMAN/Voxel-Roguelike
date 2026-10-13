@@ -47,6 +47,10 @@ Each level-up offers three picks (with a couple of rerolls per run) drawn from g
 - **Cluster Fire, Explosive Snare, Vortex, Decoy:** change how an ability plays.
 - **Masteries** transform an ability: Hail of Arrows (Volley fires three waves), Mirror Image, Absolute Zero, Singularity, Armageddon, Bladestorm, Fissures, Warlord, Lifebloom, Judgment, Holy March and more.
 
+## Chaos augments
+
+Chaos augments bend the rules of the whole run rather than strengthening one ability, and they stack into mayhem: **Chain Reaction** (kills explode), **Echo** (abilities recast themselves), **Arcane Surge** (every cast fires seeking bolts), **Stormcaller** (crits call lightning), **Frenzy** (kills cut cooldowns), **Gravity Well** (black holes swallow the horde), **Overload** (every 5th cast is a huge nova), **Ricochet** (projectiles bounce), **Phoenix Heart** (cheat death once) and **Berserker** (stronger at low health).
+
 ## Relics
 
 Relics are auto-firing weapons any class can pick up. You can carry 4, and each has 5 ranks.
@@ -73,6 +77,10 @@ Monsters don't wander: they hunt you. A director spawns packs in a ring just aro
 
 Enemy health scales with the number of players. To keep big fights smooth, the game caps enemies (130 hunting at once on High graphics, fewer on lower settings), projectiles, effects and pickups, and draws each enemy with a handful of merged meshes. It also lowers view distance, shadows and particles automatically when the frame rate drops. You can lock the graphics level in the pause menu.
 
+## Graphics
+
+The scene renders into an HDR buffer with bloom, sun shafts, a filmic tone curve, colour grading and FXAA, so fire, magic and glowing blocks actually glow. Every ability has its own cast pose and effects: magic circles, sweeping weapon trails, scorch and crack decals, ice and rock spikes, light flares and afterimages. **Low** graphics turns post-processing off; **Medium** keeps bloom and anti-aliasing but drops the sun shafts.
+
 ## The world
 
 Gently rolling meadows, forests that open into glades, lakes with reeds and lily pads, deserts, tundra and rare mountain ranges. Ruins and camps hold chests, shrines bless you, and altars offer trials. The day and night cycle continues, and the music builds as the horde closes in.
@@ -91,8 +99,11 @@ The host runs the enemies and the world clock. Everyone shares the world, the XP
 |---|---|
 | `index.html` | Menus, HUD and styles |
 | `src/core.js` | World generation, chunk meshing, audio, particles and effects, models, class data |
+| `src/render.js` | Post-processing: HDR, bloom, sun shafts, tone mapping, grading, FXAA |
+| `src/vfx.js` | Procedural effect textures and the ability effect primitives |
 | `src/game.js` | Players, abilities and upgrades, enemies, pickups, co-op networking, HUD and game flow |
 | `src/relics.js` | Auto-firing relic weapons |
+| `src/augments.js` | Chaos augments |
 | `src/director.js` | Horde spawning, events, bosses, urns, altar trials and the generative music |
 | `vendor/three.min.js` | three.js r128 |
 | `desktop/` | Electron shell (`main.js`, `preload.js`) and the co-op relay (`relay.js`) |

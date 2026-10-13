@@ -461,7 +461,7 @@ const pillarMat=c=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,b
 const bubbleMat=c=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{c:{value:new THREE.Color(c)},o:{value:1}},
   vertexShader:`varying vec3 vN;varying vec3 vV;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);vN=normalize(normalMatrix*normal);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}`,
   fragmentShader:`uniform vec3 c;uniform float o;varying vec3 vN;varying vec3 vV;void main(){float f=pow(1.0-abs(dot(vN,vV)),2.2);gl_FragColor=vec4(c*(f*1.2+0.06)*o,1.0);}`});
-function addFx(mesh,life,upd){if(FXL.length>=CAP.fx){const o=FXL.shift();scene.remove(o.mesh);o.mesh.traverse(q=>{if(q.material)q.material.dispose();});}scene.add(mesh);const f={mesh,t:0,life,upd};FXL.push(f);return f;}
+function addFx(mesh,life,upd){if(FXL.length>=CAP.fx){const o=FXL.shift();scene.remove(o.mesh);o.mesh.traverse(q=>{if(q.material&&!q.material.userData.shared)q.material.dispose();});}scene.add(mesh);const f={mesh,t:0,life,upd};FXL.push(f);return f;}
 function basicAdd(c,op=1){return new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});}
 const fx={
   burst(pos,c,n,speed,life=0.6,size=0.35,o={}){const cc=new THREE.Color(c);for(let i=0;i<n;i++){const u=rand(-1,1),a=rand(0,TAU),r=Math.sqrt(1-u*u),sp=speed*rand(0.3,1);
@@ -493,7 +493,7 @@ const fx={
   sparks(pos,c,n,speed=9,life=0.3){const cc=new THREE.Color(c);for(let i=0;i<n;i++){const u=rand(-0.3,1),a=rand(0,TAU),r=Math.sqrt(Math.max(0,1-u*u)),sp=speed*rand(0.5,1);
     PA.emit(pos.x,pos.y,pos.z,Math.cos(a)*r*sp,u*sp,Math.sin(a)*r*sp,life*rand(0.6,1),0.22,0.02,cc,14,3,1);}},
 };
-function updateFx(dt){for(let i=FXL.length-1;i>=0;i--){const f=FXL[i];f.t+=dt;const t=Math.min(1,f.t/f.life);f.upd(f,t);if(f.t>=f.life){scene.remove(f.mesh);f.mesh.traverse(o=>{if(o.material)o.material.dispose();});FXL.splice(i,1);}}
+function updateFx(dt){for(let i=FXL.length-1;i>=0;i--){const f=FXL[i];f.t+=dt;const t=Math.min(1,f.t/f.life);f.upd(f,t);if(f.t>=f.life){scene.remove(f.mesh);f.mesh.traverse(o=>{if(o.material&&!o.material.userData.shared)o.material.dispose();});FXL.splice(i,1);}}
   for(const L of lights){if(L.t>0){L.t-=dt;L.l.intensity=Math.max(0,L.i0*(L.t/L.max));}else L.l.intensity=0;}}
 
 /* floating combat text */
@@ -530,9 +530,18 @@ function humanoid(o){
 }
 function tipOf(g,z,x=0,y=0){const t=new THREE.Object3D();t.position.set(x,y,z);g.add(t);g.userData.tip=t;}
 const WMODEL={
-  longbow(mats){const g=new THREE.Group();const w=matL(mats,0x7a4e2a),s=matL(mats,0xe8e0c8),gr=matL(mats,0x3f6b35);
-    const segs=[[0,0,0.0],[0.06,0.22,0.0],[0.14,0.44,0],[0.24,0.62,0]];for(const sg of[1,-1])for(const[x,z]of segs.map(q=>[q[0],q[1]]))mk(g,0.07,0.07,0.24,w,-x,0,z*sg);
-    mk(g,0.09,0.1,0.18,gr,0,0,0);mk(g,0.015,0.015,1.45,s,-0.28,0,0);tipOf(g,0,0.2);return g;},
+  /* held in the left hand with the arm pointing at the target: local -y is forward, +y is back towards the archer.
+     Limbs run along z (vertical in hand) and sweep back towards the archer to recurved tips; draw(k) pulls the string. */
+  longbow(mats){const g=new THREE.Group();const w=matL(mats,0x6a4224),wl=matL(mats,0x8a5a32),s=matL(mats,0xeee6cc),gr=matL(mats,0x3a2a1a),gd=matL(mats,0xc9a24a);
+    const P=t=>[0.26*t*t-(t>0.86?(t-0.86)*0.9:0),0.04+0.68*t];const N=7;let tip=null;
+    for(const sg of[1,-1]){for(let i=0;i<N;i++){const[y0,z0]=P(i/N),[y1,z1]=P((i+1)/N);const len=Math.hypot(y1-y0,z1-z0);const th=0.075-i*0.006;
+      const m=mk(g,0.06+(N-i)*0.004,th,len+0.02,i%2?w:wl,0,(y0+y1)/2,sg*(z0+z1)/2);m.rotation.x=Math.atan2(-(y1-y0),(z1-z0))*sg;}
+      const[ty,tz]=P(1);mk(g,0.05,0.05,0.07,gd,0,ty,sg*tz);if(sg>0)tip=[ty,tz];}
+    mk(g,0.09,0.11,0.2,gr,0,0.01,0);mk(g,0.1,0.04,0.04,gd,0,0.01,0.11);mk(g,0.1,0.04,0.04,gd,0,0.01,-0.11);
+    const st1=mk(g,0.016,0.016,1,s),st2=mk(g,0.016,0.016,1,s);const arrow=new THREE.Group();g.add(arrow);
+    mk(arrow,0.03,0.7,0.03,matL(mats,0x7a5a3a),0,-0.35,0);mk(arrow,0.06,0.1,0.06,matL(mats,0xd8dde4),0,-0.72,0);mk(arrow,0.1,0.12,0.012,matL(mats,0xf0f0f0),0,-0.04,0);
+    const draw=k=>{const ny=tip[0]+0.03+k*0.42;for(const[m,sg]of[[st1,1],[st2,-1]]){const dy=tip[0]-ny,dz=sg*tip[1];const len=Math.hypot(dy,dz);m.scale.z=len;m.position.set(0,(tip[0]+ny)/2,dz/2);m.rotation.x=Math.atan2(-dy,dz);}
+      arrow.position.y=ny;arrow.visible=k>0.02;};draw(0);g.userData.draw=draw;tipOf(g,0,0,-0.15);return g;},
   daggers(mats){const g=new THREE.Group();const b=matL(mats,0xd8dde4),h=matL(mats,0x3a2a1c);mk(g,0.05,0.03,0.42,b,0,0,0.28);mk(g,0.16,0.04,0.05,h,0,0,0.06);mk(g,0.05,0.05,0.14,h,0,0,-0.03);tipOf(g,0.5);return g;},
   firestaff(mats){const g=new THREE.Group();const w=matL(mats,0x4a2f1c),gd=matL(mats,0xd9a640),o=matB(mats,0xff7a22);mk(g,0.07,0.07,1.5,w,0,0,0.35);mk(g,0.14,0.14,0.08,gd,0,0,1.06);
     mk(g,0.05,0.18,0.05,gd,0.08,0,1.15);mk(g,0.05,0.18,0.05,gd,-0.08,0,1.15);const orb=mk(g,0.17,0.17,0.17,o,0,0,1.2);orb.rotation.set(0.6,0.6,0);tipOf(g,1.22);return g;},
@@ -705,6 +714,7 @@ function drawIcon(cv,kind,color){const c=cv.getContext('2d'),S=cv.width;c.clearR
     case'flask':c.beginPath();c.moveTo(20,6);c.lineTo(28,6);c.lineTo(28,17);c.lineTo(38,36);c.quadraticCurveTo(40,42,34,42);c.lineTo(14,42);c.quadraticCurveTo(8,42,10,36);c.lineTo(20,17);c.closePath();c.stroke();
       c.beginPath();c.moveTo(15,30);c.lineTo(33,30);c.lineTo(37,38);c.quadraticCurveTo(38,40,34,40);c.lineTo(14,40);c.quadraticCurveTo(10,40,11,38);c.closePath();c.fill();break;
     case'halo':for(let i=0;i<8;i++){const a=i*TAU/8;L(24+Math.cos(a)*8,24+Math.sin(a)*8,24+Math.cos(a)*20,24+Math.sin(a)*20);}C(24,24,4,1);break;
+    case'chaos':for(let i=0;i<8;i++){const a=i/8*TAU;c.save();c.translate(24,24);c.rotate(a);c.beginPath();c.moveTo(0,-4);c.lineTo(3,-12);c.lineTo(0,-21);c.lineTo(-3,-12);c.closePath();c.fill();c.restore();}C(24,24,5,1);break;
     case'reroll':c.beginPath();c.arc(24,24,14,-0.3,TAU-1.2);c.stroke();L(34,6,37,14,29,15);break;
   }c.restore();}
 
