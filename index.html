@@ -105,12 +105,12 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 #charge{position:absolute;left:50%;top:calc(50% + 22px);width:46px;height:4px;transform:translateX(-50%);background:rgba(0,0,0,.5)}
 #charge i{display:block;height:100%;background:var(--ranger);transform-origin:left}
 #prompt{position:absolute;left:50%;top:62%;transform:translateX(-50%);background:var(--slate);border:1px solid var(--line);padding:6px 12px;font-size:14px}
-#toast{position:absolute;left:50%;top:18%;transform:translateX(-50%);text-align:center;font-family:var(--fd);font-size:34px;text-shadow:0 3px 0 #000,0 0 30px rgba(0,0,0,.6);opacity:0;transition:opacity .4s;white-space:nowrap}
+#toast{position:absolute;left:50%;top:22%;transform:translateX(-50%);text-align:center;font-family:var(--fd);font-size:34px;text-shadow:0 3px 0 #000,0 0 30px rgba(0,0,0,.6);opacity:0;transition:opacity .4s;white-space:nowrap}
 #toast small{display:block;font-family:var(--fb);font-size:15px;color:var(--ink2)}
-#boss{position:absolute;left:50%;top:22px;transform:translateX(-50%);width:min(520px,60vw);text-align:center;font-family:var(--fd);font-size:16px;display:flex;flex-direction:column;gap:4px}
+#boss{position:absolute;left:50%;top:92px;transform:translateX(-50%);width:min(520px,60vw);text-align:center;font-family:var(--fd);font-size:16px;display:flex;flex-direction:column;gap:4px}
 #boss .bar{height:12px}
 #vig{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(200,20,10,.55));opacity:0;transition:opacity .25s}
-#buffs{position:absolute;left:16px;top:150px;display:flex;flex-wrap:wrap;gap:6px;max-width:300px}
+#buffs{position:absolute;left:16px;top:var(--below,150px);display:flex;flex-wrap:wrap;gap:6px;max-width:300px}
 #buffs span{background:var(--slate);border:1px solid var(--line);border-left:3px solid var(--c);padding:2px 8px;font-size:11px}
 #fx{position:fixed;inset:0;pointer-events:none;z-index:9;overflow:hidden}
 .dmg{position:absolute;left:0;top:0;font-family:var(--fd);font-weight:700;font-size:18px;color:#fff;text-shadow:0 2px 0 #000,0 0 6px rgba(0,0,0,.6);white-space:nowrap;will-change:transform}
@@ -164,6 +164,24 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 .rv{display:inline-block;width:60px;height:5px;background:linear-gradient(90deg,#8dff9e calc(var(--p)*100%),rgba(0,0,0,.5) 0);vertical-align:middle;margin-left:6px}
 .setrow{display:flex;gap:10px;align-items:center;color:var(--ink2);font-size:14px}
 .setrow select{font-family:var(--fb);font-size:14px;background:rgba(0,0,0,.4);color:var(--ink);border:1px solid var(--line);padding:6px 8px}
+/* survival timer, kill count and the run-wide experience bar */
+#topbar{position:absolute;left:50%;top:0;transform:translateX(-50%);width:min(560px,calc(100vw - 380px));display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:10px}
+.xpb{position:relative;width:100%;height:12px;background:rgba(0,0,0,.55);border:1px solid rgba(121,208,255,.35);overflow:hidden;box-shadow:0 0 18px -6px var(--xp)}
+.xpb i{position:absolute;inset:0;transform-origin:left;background:linear-gradient(90deg,#3a8ad8,var(--xp) 70%,#c8f0ff);transition:transform .12s}
+.xpb b{position:absolute;right:6px;top:0;font-family:var(--fd);font-size:11px;line-height:12px;text-shadow:0 1px 0 #000}
+#timer{display:flex;align-items:baseline;gap:12px;font-family:var(--fd);text-shadow:0 2px 0 #000,0 0 18px rgba(0,0,0,.6)}
+#h-timer{font-size:34px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+#timer small{font-size:14px;color:var(--ink2)}
+#h-threat{font-size:13px;letter-spacing:.12em;text-transform:uppercase}
+#relics{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+#relics .rel{position:relative;width:30px;height:30px;background:rgba(0,0,0,.4);border:1px solid color-mix(in srgb,var(--c) 55%,transparent)}
+#relics canvas{width:100%;height:100%;display:block}
+#relics b{position:absolute;right:1px;bottom:-1px;font-family:var(--fd);font-size:11px;color:var(--c);text-shadow:0 1px 0 #000}
+#flash{position:fixed;inset:0;background:#fffbe8;opacity:0;pointer-events:none;z-index:11;mix-blend-mode:screen}
+.perk.relic{background:linear-gradient(160deg,rgba(121,208,255,.1),rgba(0,0,0,.35) 60%)}
+.perk.mastery{background:linear-gradient(160deg,rgba(255,211,90,.16),rgba(0,0,0,.35) 60%);border-color:color-mix(in srgb,var(--c) 60%,transparent);box-shadow:0 0 22px -10px var(--c)}
+.perk.mastery em{color:#ffd35a}
+@media (max-width:900px){#topbar{width:calc(100vw - 200px)}#h-timer{font-size:26px}}
 @media (prefers-reduced-motion:reduce){.cls,.slot{transition:none;animation:none}}
 @media (max-width:700px){.slot{width:44px;height:44px}.slot canvas{width:30px;height:30px}.slot.wep{width:54px;height:54px}.slot .nm{display:none}#mini canvas{width:96px;height:96px}#buffs{top:140px}}
 </style>
@@ -171,6 +189,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 <body>
 <canvas id="c" tabindex="0"></canvas>
 <div id="fx"></div>
+<div id="flash"></div>
 
 <div id="hud" hidden>
   <div id="vig"></div>
@@ -180,7 +199,9 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
     <div class="row"><label>Stamina</label><div class="bar thin"><i id="h-st" style="--c:var(--stam)"></i></div></div>
     <div class="row"><label>Hunger</label><div class="bar thin"><i id="h-fd" style="--c:var(--food)"></i></div></div>
     <div class="row"><label>XP</label><div class="bar thin"><i id="h-xp" style="--c:var(--xp)"></i></div></div>
+    <div id="relics" hidden></div>
   </div>
+  <div id="topbar"><div class="xpb"><i id="h-xp2"></i><b id="h-lv2">LV 1</b></div><div id="timer"><span id="h-threat">Calm</span><span id="h-timer">00:00</span><small id="h-kills">0 slain</small></div></div>
   <div id="buffs"></div>
   <div id="party" hidden></div>
   <div id="mini"><canvas id="minimap" width="128" height="128"></canvas><div id="clock"><span id="h-day">Day 1</span><span id="h-time">07:00</span></div><div id="daybar"><i id="h-dayi"></i></div></div>
@@ -197,7 +218,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
   <div class="menu-in">
     <div class="brand">
       <h1>EMBER<span>WILD</span></h1>
-      <p>A voxel roguelike about lasting one more night. Pick a class, forage, loot the ruins and level up. When you die, the world is gone for good.</p>
+      <p>A voxel horde survival roguelike. The dead rise from every direction and there are more of them every minute. Level up, stack relics and ability masteries, and see how long you last.</p>
     </div>
     <div class="classes" id="classes"></div>
     <div class="coop">
@@ -215,6 +236,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
         <span><kbd>WASD</kbd> move</span><span><kbd>Mouse</kbd> aim</span><span><kbd>LMB</kbd> attack</span><span><kbd>1</kbd>–<kbd>4</kbd> abilities</span><span><kbd>Q</kbd> swap weapon</span><span><kbd>Shift</kbd> sprint</span><span><kbd>Space</kbd> jump</span><span><kbd>E</kbd> interact</span><span><kbd>F</kbd> eat</span><span><kbd>M</kbd> mute</span><span><kbd>Esc</kbd> pause</span>
       </div>
       <div class="best" id="best"></div>
+      <button class="btn" id="quit-app" hidden>Quit game</button>
     </div>
   </div>
 </div>
@@ -224,6 +246,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
     <h2 id="lv-title">Level up</h2>
     <p id="lv-sub">Choose one upgrade. It lasts until you die.</p>
     <div class="perks" id="perks"></div>
+    <div class="btns"><button class="btn" id="reroll-perks">Reroll (2)</button><span style="color:var(--ink3);font-size:13px;align-self:center"><kbd>1</kbd>–<kbd>3</kbd> pick · <kbd>R</kbd> reroll</span></div>
   </div>
 </div>
 
@@ -233,7 +256,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
     <p id="pause-paused">The night will wait for you.</p>
     <p id="pause-note" hidden>Co-op games keep running while you're paused.</p>
     <div class="setrow"><label for="gfx">Graphics</label><select id="gfx"><option value="auto">Auto (recommended)</option><option value="2">High</option><option value="1">Medium</option><option value="0">Low</option></select></div>
-    <div class="btns"><button class="btn primary" id="resume">Resume</button><button class="btn" id="quit">Abandon run</button></div>
+    <div class="btns"><button class="btn primary" id="resume">Resume</button><button class="btn" id="fullscreen" hidden>Toggle fullscreen (F11)</button><button class="btn" id="quit">Abandon run</button><button class="btn" id="quit-app2" hidden>Quit to desktop</button></div>
   </div>
 </div>
 
@@ -251,5 +274,7 @@ kbd{font-family:var(--fd);font-size:12px;background:var(--slate2);border:1px sol
 <script src="vendor/three.min.js"></script>
 <script src="src/core.js"></script>
 <script src="src/game.js"></script>
+<script src="src/relics.js"></script>
+<script src="src/director.js"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 {
   "name": "emberwild",
   "productName": "Emberwild",
-  "version": "0.2.0",
-  "description": "Voxel roguelike survival with co-op.",
+  "version": "0.3.0",
+  "description": "Voxel horde-survival roguelike with co-op.",
   "main": "desktop/main.js",
   "private": true,
   "scripts": {
