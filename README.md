@@ -1,16 +1,16 @@
 # Emberwild
 
-A voxel horde-survival roguelike for 1 to 4 players, in the spirit of Vampire Survivors. Pick one of four classes and fight an endless horde that rises from the ground all around you and grows every minute. Level up, stack relics and ability masteries, crack open urns and altars, and see how long you last. When everyone falls, the run is over.
+A voxel horde-survival roguelike in the spirit of Vampire Survivors. Pick one of four classes and fight an endless horde that rises from the ground all around you and grows every minute. Level up, stack relics and ability masteries, crack open urns and altars, and see how long you last. When you fall, the run is over.
 
 ## Play
 
-Emberwild is a Windows desktop game. It opens fullscreen (F11 toggles windowed), and the pause menu has **Quit to desktop**.
+Emberwild is a native Windows game written in Rust on the [Bevy](https://bevyengine.org) engine. It opens fullscreen; set `EMBERWILD_WINDOWED=1` to run it in a window. The pause menu has **Quit to desktop**.
 
-**Download:** `Emberwild-<version>-portable.exe` (runs without installing) or `Emberwild-<version>-setup.exe` (installer). Every push builds both: open the **Actions** tab, pick the latest **Build Windows exe** run, and download *Emberwild-windows* under *Artifacts*. Tagged versions (`v*`) also attach them to a GitHub release.
+**Download:** grab `Emberwild-<version>.exe` from the latest GitHub release. It is a single file with no installer. Every push also builds it: open the **Actions** tab, pick the latest **Build Windows exe** run, and download *Emberwild-windows* under *Artifacts*.
 
-**From source:** `npm install` then `npm start`. To build the exe yourself on Windows: `npm run dist:win` (output in `dist/`).
+**From source:** install Rust, then `cd rust && cargo run --release`. On Linux you need the usual Bevy packages (`libasound2-dev libudev-dev libxkbcommon-x11-0`).
 
-`index.html` still opens in a browser for quick testing, but hosting co-op and the fullscreen and quit controls need the desktop app.
+The original browser version (with co-op) is still in `index.html` and `src/`, with its Electron wrapper in `desktop/`. Co-op hasn't been ported to the Rust build yet.
 
 ## Controls
 
@@ -20,14 +20,13 @@ Emberwild is a Windows desktop game. It opens fullscreen (F11 toggles windowed),
 | Mouse | Aim |
 | Left mouse | Attack (hold to draw the bow) |
 | 1 to 4 | Abilities |
-| Q or mouse wheel | Swap weapon |
+| Q | Swap weapon |
 | 1 to 3, R | On level-up: pick an upgrade, reroll |
 | Shift | Sprint |
 | Space | Jump or swim |
-| E | Interact: chests, shrines, berries; hold to revive a teammate |
+| E | Interact: chests, shrines, altars |
 | F | Eat |
-| Esc | Pause and graphics settings |
-| F11 | Fullscreen (desktop app) |
+| Esc | Pause |
 | M | Mute |
 
 ## Classes
@@ -42,7 +41,6 @@ Emberwild is a Windows desktop game. It opens fullscreen (F11 toggles windowed),
 Each level-up offers three picks (with a couple of rerolls per run) drawn from general boons, **relics**, and **upgrades for a specific ability or weapon**. Each ability has 3 upgrades plus a **Mastery** that unlocks once you've put 2 ranks into it, and each weapon has 3. Levelling up also blasts nearby enemies back. Some examples:
 
 - **Splitting Arrows / Splitting Orb / Splitting Light:** projectiles burst into more projectiles on impact.
-- **Prayer of Healing, Aegis, Rallying Cry, Sanctuary:** heal, shield or buff every teammate nearby.
 - **Meteor Shower, Chain Smite, Aftershock, Shatterburst:** one cast becomes several.
 - **Cluster Fire, Explosive Snare, Vortex, Decoy:** change how an ability plays.
 - **Masteries** transform an ability: Hail of Arrows (Volley fires three waves), Mirror Image, Absolute Zero, Singularity, Armageddon, Bladestorm, Fissures, Warlord, Lifebloom, Judgment, Holy March and more.

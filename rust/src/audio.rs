@@ -1,6 +1,6 @@
 //! Procedural sound: every effect is synthesised into an in-memory WAV at startup (oscillators with pitch
 //! sweeps and envelopes, filtered noise), so the game ships as a single exe with no audio files.
-use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
+use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -91,6 +91,7 @@ fn make(name: &str) -> (Vec<u8>, f32) {
         "snap" => { s.tone(1600.0, 400.0, 0.06, Square, 0.5, 0.0); s.hiss(0.12, 4000.0, 1500.0, 0.8, 2, 0.0); s.tone(120.0, 60.0, 0.15, Sine, 0.6, 0.02); 0.5 }
         "eat" => { s.hiss(0.1, 900.0, 900.0, 0.8, 2, 0.0); s.hiss(0.1, 700.0, 700.0, 0.8, 2, 0.12); 0.3 }
         "spawn" => { s.tone(70.0, 40.0, 0.6, Sine, 0.6, 0.0); 0.3 }
+        "swap" => { s.hiss(0.14, 1500.0, 3200.0, 0.8, 2, 0.0); s.tone(660.0, 990.0, 0.06, Tri, 0.3, 0.05); 0.25 }
         "rumble" => { s.hiss(1.5, 300.0, 60.0, 1.0, 0, 0.0); s.tone(45.0, 30.0, 1.4, Sine, 0.8, 0.0); 0.6 }
         _ => { s.tone(440.0, 440.0, 0.1, Sine, 0.2, 0.0); 0.1 }
     };
@@ -101,7 +102,7 @@ fn make(name: &str) -> (Vec<u8>, f32) {
 }
 
 pub const NAMES: &[&str] = &["swing", "heavy", "hit", "crit", "bow", "fire", "boom", "ice", "arcane", "holy", "heal", "level", "hurt", "pick", "gem", "dash", "die", "chest", "shout",
-    "zap", "horn", "glass", "swell", "squelch", "whoosh", "rise", "relic", "bomb", "thud", "snap", "eat", "spawn", "rumble"];
+    "zap", "horn", "glass", "swell", "squelch", "whoosh", "rise", "relic", "bomb", "thud", "snap", "eat", "spawn", "rumble", "swap"];
 
 #[derive(Resource, Default)]
 pub struct Sfx { pub queue: Vec<&'static str>, handles: HashMap<&'static str, (Handle<AudioSource>, f32)>, gate: HashMap<&'static str, f64>, pub muted: bool, pub master: f32 }
@@ -120,5 +121,55 @@ pub fn play_sfx(mut c: Commands, mut sfx: ResMut<Sfx>, time: Res<Time>, keys: Re
         if let Some(t) = sfx.gate.get(n) { if now - t < 0.05 { continue; } }
         sfx.gate.insert(n, now);
         if let Some((h, v)) = sfx.handles.get(n) { c.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::new(v * sfx.master)))); }
+    }
+}
+
+// ---------------- music ----------------
+// A small generative score rendered once at startup: a minor pad, bass and a pentatonic pluck line in one loop,
+// and a drum loop of the same length layered on top. The drums swell with how hot the fight is.
+const BEAT: f32 = 0.17;
+const STEPS: usize = 16 * 8;
+fn mf(semi: f32) -> f32 { 110.0 * 2f32.powf(semi / 12.0) }
+fn music_loop(drums: bool) -> Vec<u8> {
+    use Wave::*;
+    let len = STEPS as f32 * BEAT;
+    let mut s = Synth::new(len + 2.0);
+    let scale = [0.0, 3.0, 5.0, 7.0, 10.0, 12.0, 15.0, 17.0, 19.0];
+    let mut seed = 0x51f2u32;
+    let mut rnd = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };
+    for step in 0..STEPS {
+        let (bar, k) = (step / 16, step % 16); let t = step as f32 * BEAT;
+        let root = [0.0, -4.0, -2.0, -5.0][bar % 4];
+        if !drums {
+            if k == 0 { for iv in [0.0, 7.0, 10.0, 15.0] { s.tone(mf(root + iv - 12.0), mf(root + iv - 12.0), BEAT * 17.0, Tri, 0.05, t); } s.tone(mf(root - 24.0), mf(root - 24.0), BEAT * 16.0, Sine, 0.14, t); }
+            if k % 2 == 0 && rnd() < 0.45 { let n = scale[(rnd() * scale.len() as f32) as usize % scale.len()] + if rnd() < 0.3 { 12.0 } else { 0.0 }; s.tone(mf(root + n), mf(root + n), 0.4, Sine, 0.07, t); }
+        } else {
+            if k % 4 == 0 { s.tone(130.0, 38.0, 0.25, Sine, 0.5, t); }
+            if k % 4 == 2 { s.hiss(0.05, 7000.0, 7000.0, 0.12, 1, t); }
+            if k % 2 == 1 && rnd() < 0.6 { s.hiss(0.03, 8000.0, 8000.0, 0.07, 1, t); }
+            if k % 8 == 4 { s.tone(mf(root - 12.0), mf(root - 12.0), 0.25, Saw, 0.08, t); s.hiss(0.12, 1800.0, 900.0, 0.18, 2, t); }
+        }
+    }
+    // fold the tail back over the start so the loop is seamless
+    let n = (len * SR) as usize;
+    let tail: Vec<f32> = s.buf[n..].to_vec();
+    for (i, v) in tail.iter().enumerate() { if i < n { s.buf[i] += v; } }
+    s.buf.truncate(n);
+    s.wav()
+}
+#[derive(Component)]
+pub struct MusicLayer(pub u8);
+pub fn setup_music(mut c: Commands, mut sources: ResMut<Assets<AudioSource>>) {
+    for k in 0..2u8 {
+        let h = sources.add(AudioSource { bytes: music_loop(k == 1).into() });
+        c.spawn((AudioPlayer(h), PlaybackSettings::LOOP.with_volume(Volume::new(0.0)), MusicLayer(k)));
+    }
+}
+pub fn update_music(q: Query<(&MusicLayer, &AudioSink)>, sfx: Res<Sfx>, g: Res<crate::game::Game>, ui: Res<crate::hud::UiState>) {
+    let playing = ui.screen != crate::hud::Screen::Menu;
+    for (l, sink) in q.iter() {
+        let v = if sfx.muted { 0.0 } else if l.0 == 0 { 0.32 } else if playing { 0.4 * ((g.dir.heat - 0.15) / 0.6).clamp(0.0, 1.0) } else { 0.0 };
+        let cur = sink.volume();
+        sink.set_volume(cur + (v - cur) * 0.05);
     }
 }

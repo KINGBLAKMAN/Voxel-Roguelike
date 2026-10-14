@@ -60,8 +60,8 @@ fn main() {
     .init_resource::<audio::Sfx>()
     .init_resource::<hud::UiState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
-    .add_systems(Startup, (start_world, audio::setup_audio, hud::setup_hud))
-    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, hud::menu_camera, audio::play_sfx).chain());
+    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, hud::setup_hud))
+    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }

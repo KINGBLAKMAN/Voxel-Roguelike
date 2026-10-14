@@ -81,6 +81,14 @@ pub fn seek_bolt(cx: &mut Ctx, from: Vec3, dir: Vec3, dmg: f32, col: u32, pierce
     spawn_proj(cx, p);
 }
 
+fn flask_dmg(r: u32) -> f32 { let mut d = 7.0f32; if r >= 4 { d *= 1.3; } if r >= 5 { d *= 1.3; } d.floor() + if d.fract() >= 0.5 { 1.0 } else { 0.0 } }
+fn flask_land(cx: &mut Ctx, pos: Vec3, rad: f32, life: f32, dmg: f32, slow: bool) {
+    let mut c = pos; c.y = cx.ground(c.x, c.z, c.y + 1.0);
+    cx.play("glass");
+    cx.fx.burst(c + Vec3::Y * 0.4, 0xff8a3a, 26, 6.0, 0.5, 0.45, 2.0, 0.0);
+    cx.gfx().debris(c + Vec3::Y * 0.4, &[0xd8e2ec, 0xff6a3a], 6, 4.0, 0.12, 5.0);
+    fire_pool(cx, c, rad, life, dmg, slow);
+}
 pub fn update_relics(cx: &mut Ctx) {
     let dt = cx.dt;
     // decoys tick down
@@ -234,14 +242,8 @@ pub fn update_relics(cx: &mut Ctx) {
             let e = flask_mesh(cx);
             let mut p = Proj::new(from, v); p.e = Some(e); p.grav = g; p.r = 0.3; p.life = 3.0; p.orient = Orient::Tumble;
             p.trail = Some(Box::new(|cx, p, _| { if cx.r() < 0.5 { cx.fx.emit(true, p.pos + Vec3::Y * 0.25, Vec3::Y * 0.5, 0.3, 0.25, 0.04, hexc(0xffb03a) * 2.5, 0.0, 0.0, 1.0); } }));
-            let land = move |cx: &mut Ctx, p: &mut Proj, _: Option<usize>| {
-                let mut c = p.pos; c.y = cx.ground(c.x, c.z, c.y + 1.0);
-                cx.play("glass");
-                cx.fx.burst(c + Vec3::Y * 0.4, 0xff8a3a, 26, 6.0, 0.5, 0.45, 2.0, 0.0);
-                cx.gfx().debris(c + Vec3::Y * 0.4, &[0xd8e2ec, 0xff6a3a], 6, 4.0, 0.12, 5.0);
-                let a = cx.g.st.area;
-                fire_pool(cx, c, 2.2 * if r >= 3 { 1.3 } else { 1.0 } * a, 3.0 + if r >= 3 { 1.5 } else { 0.0 }, (7.0f32 * if r >= 4 { 1.3 } else { 1.0 } * if r >= 5 { 1.3 } else { 1.0 }).round(), r >= 5);
-            };
+            let (prad, plife, pdmg, pslow) = (2.2 * if r >= 3 { 1.3 } else { 1.0 } * area, 3.0 + if r >= 3 { 1.5 } else { 0.0 }, flask_dmg(r), r >= 5);
+            let land = move |cx: &mut Ctx, p: &mut Proj, _: Option<usize>| flask_land(cx, p.pos, prad, plife, pdmg, pslow);
             p.on_hit = Some(Box::new(land)); p.on_world = Some(Box::new(land)); p.on_expire = Some(Box::new(land));
             spawn_proj(cx, p);
         }

@@ -216,7 +216,7 @@ fn fmt_t(t: f32) -> String { let s = t.max(0.0) as u32; format!("{}:{:02}", s / 
 
 /// screen flow: menus, level-ups, pause and death
 pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Query<(&Interaction, &UiBtn), Changed<Interaction>>, mut g: ResMut<Game>, mut p: ResMut<Player>,
-    mut paused: ResMut<crate::Paused>, mut ctl: ResMut<Controls>, time: Res<Time>, mut sfx: ResMut<crate::audio::Sfx>, mut exit: EventWriter<AppExit>) {
+    mut paused: ResMut<crate::Paused>, mut ctl: ResMut<Controls>, time: Res<Time>, mut sfx: ResMut<crate::audio::Sfx>, mut exit: EventWriter<AppExit>, test: Option<Res<crate::testkit::TestCfg>>) {
     let mut clicked = None;
     for (i, b) in btns.iter() { if *i == Interaction::Pressed { clicked = Some(*b); } }
     match ui.screen {
@@ -237,6 +237,7 @@ pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Q
             let mut pick = None;
             for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3].into_iter().enumerate() { if keys.just_pressed(k) { pick = Some(i); } }
             if let Some(UiBtn::Card(i)) = clicked { pick = Some(i); }
+            if test.as_ref().map(|t| t.autopick).unwrap_or(false) && !ui.cards.is_empty() { pick = Some((ui.rnd() * ui.cards.len() as f32) as usize % ui.cards.len()); }
             if keys.just_pressed(KeyCode::KeyR) && g.rerolls > 0 { g.rerolls -= 1; ui.cards_dirty = true; sfx.play("pick"); }
             if let Some(i) = pick { if let Some(card) = ui.cards.get(i).cloned() {
                 apply(&mut g, &mut p, &card);
