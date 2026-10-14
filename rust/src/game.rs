@@ -76,6 +76,8 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn rr(&self, a: f32, b: f32) -> f32 { self.fx.rr(a, b) }
     pub fn pick<T: Copy>(&self, v: &[T]) -> T { v[(self.r() * v.len() as f32) as usize % v.len()] }
     pub fn m(&self, k: &str) -> u32 { self.g.m(k) }
+    /// a quick lens punch and a white impact frame for the big moments
+    pub fn punch(&mut self, s: f32) { self.cam.punch = self.cam.punch.max(s.min(1.0)); self.g.flash = self.g.flash.max(0.05 * s); }
     pub fn shake(&mut self, s: f32) { self.cam.shake = (self.cam.shake + s * self.cam.shake_mul).min(1.0); }
     pub fn play(&mut self, name: &'static str) { self.sfx.play(name); }
     pub fn toast(&mut self, a: &str, b: &str, d: f32) { self.g.toasts.push((a.to_string(), b.to_string(), d)); }
@@ -111,7 +113,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         if !o.quiet || self.r() < 0.5 { self.pop(pos + Vec3::Y * (h + 0.2), format!("{}", a as i32), if crit { 1 } else { 0 }); }
         if crit {
             self.play("crit");
-            if self.g.run_t > *self.g.flags.get("crit_flare").unwrap_or(&0.0) { self.g.flags.insert("crit_flare", self.g.run_t + 0.08); self.gfx().flare(hp, 0xffe8a0, 1.8, 0.18, true); }
+            if self.g.run_t > *self.g.flags.get("crit_flare").unwrap_or(&0.0) { self.g.flags.insert("crit_flare", self.g.run_t + 0.08); self.gfx().impact(hp, 0xffe8a0, 1.1); }
             crate::augments::on_crit(self, i);
         } else { self.play("hit"); }
         let col = if o.col == 0 { 0xffffff } else { o.col };

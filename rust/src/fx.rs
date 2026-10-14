@@ -39,7 +39,7 @@ impl Tween {
 pub struct Debris { pub e: Entity, pub pos: Vec3, pub vel: Vec3, pub rot: Vec3, pub rv: Vec3, pub life: f32, pub max: f32, pub s: f32 }
 
 #[derive(Clone)]
-pub struct Tex { pub glow: Handle<Image>, pub smoke: Handle<Image>, pub star: Handle<Image>, pub ring: Handle<Image>, pub crack: Handle<Image>, pub scorch: Handle<Image>, pub circles: HashMap<&'static str, Handle<Image>> }
+pub struct Tex { pub glow: Handle<Image>, pub smoke: Handle<Image>, pub star: Handle<Image>, pub ring: Handle<Image>, pub crack: Handle<Image>, pub scorch: Handle<Image>, pub circles: HashMap<&'static str, Handle<Image>>, pub burst: Handle<Image>, pub crescent: Handle<Image>, pub glint: Handle<Image> }
 
 #[derive(Resource)]
 pub struct Fx {
@@ -135,6 +135,72 @@ fn rune_circle(images: &mut Assets<Image>, pts: usize, runes: usize, seed: u32) 
     c.ring(0.21, 0.016); c.ring(0.08, 0.024);
     c.finish(images, 0.7)
 }
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 { let t = ((x - a) / (b - a)).clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
+fn h1(i: i32, s: u32) -> f32 { crate::noise::hash2(i, 7, s) }
+/// crisp, hard-edged anime shapes for ground and burst decals
+fn motif(images: &mut Assets<Image>, kind: &str) -> Handle<Image> {
+    let k = kind.to_string();
+    img(images, 256, move |x, y| {
+        let d = (x * x + y * y).sqrt(); let a = y.atan2(x); let u = (a / TAU + 1.0).fract();
+        let edge = |v: f32| smoothstep(0.0, 0.02, v);
+        // n wedges around the circle: distance (in turns) from the nearest wedge centre
+        let wedge = |n: f32, off: f32| { let f = (u * n + off).fract(); (f - 0.5).abs() * 2.0 };
+        match k.as_str() {
+            "holy" => {
+                let i = (u * 16.0).floor() as i32; let long = i % 2 == 0;
+                let reach = if long { 0.98 } else { 0.68 };
+                let w = 0.35 * (1.0 - d / reach).max(0.0);
+                let ray = edge(w - (wedge(16.0, 0.0) * 0.5).max(0.0) * 1.0) * (d > 0.22) as i32 as f32 * (d < reach) as i32 as f32;
+                ray.max(edge(0.02 - (d - 0.2).abs())).max(1.0 - smoothstep(0.1, 0.12, d))
+            }
+            "war" => {
+                // a comic-book "BAM" starburst: jagged outline plus speed lines
+                let i = (u * 14.0).floor() as i32; let f = (u * 14.0).fract();
+                let amp = 0.18 + 0.2 * h1(i, 3);
+                let r = 0.55 + amp * (1.0 - (f - 0.5).abs() * 2.0);
+                let outline = edge(0.03 - (d - r).abs()) + edge(0.02 - (d - r * 0.62).abs()) * 0.8;
+                let lines = { let j = (u * 40.0).floor() as i32; let r0 = 0.82 + 0.1 * h1(j, 9); (h1(j, 4) < 0.6) as i32 as f32 * edge(0.012 * (1.0 - (d - r0) / 0.2) - (wedge(40.0, 0.0) * 0.5 / 40.0 * TAU * d).abs()) * (d > r0) as i32 as f32 * (d < 1.0) as i32 as f32 };
+                outline.max(lines).min(1.0)
+            }
+            "blood" => {
+                // three claw slashes
+                let mut m = 0.0f32;
+                for k in 0..3 { let off = (k as f32 - 1.0) * 0.32; let q = Vec2::new(x - off - y * 0.35, y); let w = 0.07 * (1.0 - (q.y / 0.85).powi(2)).max(0.0); m = m.max(edge(w - q.x.abs()) * (q.y.abs() < 0.85) as i32 as f32); }
+                m
+            }
+            "arcane" => {
+                // a crisp ring and four big four-point sparkles
+                let mut m = edge(0.018 - (d - 0.9).abs()).max(edge(0.01 - (d - 0.8).abs()));
+                for k in 0..4 { let an = k as f32 * TAU / 4.0 + 0.4; let c = Vec2::new(an.cos(), an.sin()) * 0.55; let p = Vec2::new(x, y) - c; let ax = p.x.abs(); let ay = p.y.abs();
+                    let sp = edge(0.3 - (ax.sqrt() + ay.sqrt()) * 0.55); m = m.max(sp); }
+                let ax = x.abs(); let ay = y.abs(); m.max(edge(0.42 - (ax.sqrt() + ay.sqrt()) * 0.6))
+            }
+            "frost" => {
+                let i = (u * 12.0).floor() as i32; let long = i % 2 == 0;
+                let reach = if long { 0.98 } else { 0.55 };
+                let w = 0.42 * (1.0 - d / reach).max(0.0);
+                let shard = edge(w - wedge(12.0, 0.0)) * (d < reach) as i32 as f32 * (d > 0.08) as i32 as f32;
+                let hexr = { let a6 = (a.rem_euclid(TAU / 6.0)) - TAU / 12.0; d * a6.cos() };
+                shard.max(edge(0.02 - (hexr - 0.3).abs()))
+            }
+            "fire" | "nature" => {
+                // a pinwheel of curved tongues (flames) or blades (leaves)
+                let n = if k == "fire" { 7.0 } else { 6.0 };
+                let twist = if k == "fire" { 0.22 } else { 0.14 };
+                let uu = (u - d * twist).rem_euclid(1.0);
+                let f = (uu * n).fract();
+                let w = if k == "fire" { 0.42 * (1.0 - d).max(0.0) * (d * 1.6).min(1.0) } else { 0.45 * (1.0 - (d * 2.0 - 1.0).powi(2)).max(0.0) };
+                edge(w - (f - 0.5).abs() * 2.0) * (d < 0.97) as i32 as f32 * (d > 0.12) as i32 as f32
+            }
+            _ => {
+                // "lines": radial speed lines of random length around an empty centre
+                let j = (u * 48.0).floor() as i32; let r0 = 0.28 + 0.25 * h1(j, 5); let r1 = 0.7 + 0.3 * h1(j, 6);
+                let w = 0.5 * ((d - r0) / (r1 - r0)).clamp(0.0, 1.0) * (1.0 - ((d - r0) / (r1 - r0)).clamp(0.0, 1.0)) * 2.0;
+                (h1(j, 8) < 0.7) as i32 as f32 * edge(w * 0.5 - wedge(48.0, 0.0)) * (d > r0) as i32 as f32 * (d < r1) as i32 as f32
+            }
+        }
+    })
+}
 fn crack_tex(images: &mut Assets<Image>) -> Handle<Image> {
     let mut rng = crate::noise::mulberry32(91);
     let mut c = Canvas::new(256);
@@ -177,15 +243,25 @@ fn dyn_mesh() -> Mesh {
 }
 
 fn setup_fx(mut c: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, mut images: ResMut<Assets<Image>>, mut pal: ResMut<Palette>) {
-    let glow = img(&mut images, 64, |x, y| { let d = (x * x + y * y).sqrt(); ((1.0 - d).max(0.0)).powf(2.2) });
+    // cel-style energy: a hard, flat-bright core with a soft halo, rather than a smooth gaussian
+    let glow = img(&mut images, 64, |x, y| { let d = (x * x + y * y).sqrt(); let core = 1.0 - smoothstep(0.3, 0.36, d); let halo = (1.0 - d).max(0.0).powf(1.6) * 0.45; core.max(halo) });
     let smoke = img(&mut images, 64, |x, y| { let d = (x * x + y * y).sqrt(); let n = ((x * 7.0).sin() * (y * 6.0).cos()) * 0.12; ((1.0 - d + n).max(0.0) * 1.3).min(1.0).powf(1.5) });
     let star = img(&mut images, 128, |x, y| { let d = (x * x + y * y).sqrt(); let core = (1.0 - d * 3.0).max(0.0).powf(2.0); let a = (1.0 - y.abs() * 30.0).max(0.0) * (1.0 - x.abs()).max(0.0); let b = (1.0 - x.abs() * 30.0).max(0.0) * (1.0 - y.abs()).max(0.0); core + a + b + (1.0 - d).max(0.0).powf(6.0) * 0.6 });
     let ring = img(&mut images, 128, |x, y| { let d = (x * x + y * y).sqrt(); (1.0 - ((d - 0.85).abs() * 9.0)).max(0.0).powf(1.5) });
     let scorch = img(&mut images, 128, |x, y| { let d = (x * x + y * y).sqrt(); let n = (x * 9.1).sin() * (y * 7.3).cos() * 0.15 + (x * 21.0 + y * 13.0).sin() * 0.06; ((1.0 - d + n) * 1.4).clamp(0.0, 1.0).powf(1.2) * 0.85 });
     let crack = crack_tex(&mut images);
+    // anime motifs in place of rune circles: sunbursts, comic starbursts, claw slashes, sparkles, crystal spikes, pinwheels
     let mut circles = HashMap::new();
-    for (k, pts, runes, seed) in [("arcane", 6, 12, 1u32), ("holy", 8, 16, 2), ("nature", 5, 10, 3), ("frost", 6, 18, 4), ("fire", 3, 9, 5), ("war", 4, 8, 6), ("blood", 5, 14, 7)] { circles.insert(k, rune_circle(&mut images, pts, runes, seed)); }
-    let tex = Tex { glow: glow.clone(), smoke: smoke.clone(), star, ring, crack, scorch, circles };
+    for k in ["arcane", "holy", "nature", "frost", "fire", "war", "blood"] { circles.insert(k, motif(&mut images, k)); }
+    let burst = motif(&mut images, "lines");
+    let crescent = img(&mut images, 128, |x, y| {
+        // a moon-shaped slash, thick in the middle and tapering to points, brightest along its outer edge
+        let o = ((x * x) + (y + 0.55).powi(2)).sqrt(); let i = ((x * x) + (y + 0.95).powi(2)).sqrt();
+        let inside = (1.0 - smoothstep(1.2, 1.24, o)) * smoothstep(1.3, 1.34, i) * (y > -0.55) as i32 as f32;
+        inside * (0.55 + 0.45 * smoothstep(1.05, 1.2, o)) * (1.0 - x.abs()).powf(0.4)
+    });
+    let glint = img(&mut images, 128, |x, y| { let ax = x.abs(); let ay = y.abs(); let l = (1.0 - smoothstep(0.0, 0.05 + (1.0 - ay) * 0.07, ax)) * (1.0 - ay).max(0.0) + (1.0 - smoothstep(0.0, 0.05 + (1.0 - ax) * 0.07, ay)) * (1.0 - ax).max(0.0); let d = (x * x + y * y).sqrt(); (l * 1.2 + (1.0 - smoothstep(0.08, 0.14, d))).min(1.0) });
+    let tex = Tex { glow: glow.clone(), smoke: smoke.clone(), star, ring, crack, scorch, circles, burst, crescent, glint };
     let add_mesh = meshes.add(dyn_mesh());
     let blend_mesh = meshes.add(dyn_mesh());
     let add_mat = mats.add(StandardMaterial { base_color_texture: Some(glow), unlit: true, alpha_mode: AlphaMode::Add, fog_enabled: false, ..default() });
@@ -245,6 +321,7 @@ fn update_fx(time: Res<Time>, mut fx: ResMut<Fx>, mut q: Query<&mut Transform>, 
 fn render_particles(fx: Res<Fx>, cam: Query<&Transform, With<crate::scene::MainCam>>, mut meshes: ResMut<Assets<Mesh>>) {
     let Ok(ct) = cam.get_single() else { return };
     let (right, up) = (ct.right().as_vec3(), ct.up().as_vec3());
+    let fwd = ct.forward().as_vec3();
     for (list, h) in [(&fx.add, &fx.add_mesh), (&fx.blend, &fx.blend_mesh)] {
         let n = list.len().max(1);
         let (mut p, mut c, mut uv, mut nn, mut idx) = (Vec::with_capacity(n * 4), Vec::with_capacity(n * 4), Vec::with_capacity(n * 4), Vec::with_capacity(n * 4), Vec::with_capacity(n * 6));
@@ -252,8 +329,12 @@ fn render_particles(fx: Res<Fx>, cam: Query<&Transform, With<crate::scene::MainC
             let t = 1.0 - q.life / q.max;
             let s = q.s0 + (q.s1 - q.s0) * t;
             let a = q.a0 * (t * 12.0).min(1.0) * ((1.0 - t) * 2.2).min(1.0);
+            // fast glowing sparks stretch along their motion into streaks
+            let (mut ax, mut ay) = (right * s, up * s);
+            let sp = q.vel.length();
+            if std::ptr::eq(list, &fx.add) && sp > 3.0 { let v = q.vel - fwd * q.vel.dot(fwd); if v.length_squared() > 1e-4 { let d = v.normalize(); ax = d * s * (1.0 + sp * 0.06).min(4.0); ay = fwd.cross(d).normalize_or_zero() * s * 0.45; } }
             for (dx, dy, u, v) in [(-1.0, -1.0, 0.0, 1.0), (1.0, -1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 0.0), (-1.0, 1.0, 0.0, 0.0)] {
-                p.push((q.pos + right * dx * s + up * dy * s).to_array()); c.push([q.col.x, q.col.y, q.col.z, a]); uv.push([u, v]); nn.push([0.0, 1.0, 0.0]);
+                p.push((q.pos + ax * dx + ay * dy).to_array()); c.push([q.col.x, q.col.y, q.col.z, a]); uv.push([u, v]); nn.push([0.0, 1.0, 0.0]);
             }
             let b = (i * 4) as u32; idx.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
         }
@@ -309,6 +390,47 @@ impl<'a, 'w, 's> Gfx<'a, 'w, 's> {
         let m = self.fmat(hex, 4.0, Some(tex), Blend::Add, true); let mesh = self.fx.quad.clone();
         let e = self.spawn_tween(mesh, m, life, pos, |t| { t.s0 = Vec3::splat(size * 0.4); t.s1 = Vec3::splat(size); t.fade_in = 0.05; t.fade_out = 0.8; });
         self.c.entity(e).insert(Billboard);
+    }
+    /// a camera-facing textured quad that pops out with a spin; stretched by (sx, sz)
+    pub fn card(&mut self, pos: Vec3, hex: u32, tex: Handle<Image>, s0: Vec3, s1: Vec3, life: f32, roll: f32, spin: f32, glow: f32) -> Entity {
+        let m = self.fmat(hex, glow, Some(tex), Blend::Add, true); let mesh = self.fx.quad.clone();
+        let e = self.spawn_tween(mesh, m, life, pos, |t| { t.s0 = s0; t.s1 = s1; t.ease = Ease::Pop; t.fade_in = 0.02; t.fade_out = 0.6; });
+        self.c.entity(e).insert((Billboard, Roll(roll, spin)));
+        e
+    }
+    /// an anime hit: a white flash, a starburst of speed lines, sparkle glints and streaking sparks
+    pub fn impact(&mut self, pos: Vec3, hex: u32, size: f32) {
+        let tex = self.fx.tex.glow.clone(); self.card(pos, 0xffffff, tex, Vec3::splat(size * 0.5), Vec3::splat(size * 1.1), 0.1, 0.0, 0.0, 8.0);
+        let lines = self.fx.tex.burst.clone(); let roll = self.fx.rr(0.0, TAU);
+        self.card(pos, hex, lines, Vec3::splat(size * 0.6), Vec3::splat(size * 2.0), 0.22, roll, 0.0, 6.0);
+        let star = self.fx.tex.circles.get("war").cloned().unwrap_or(self.fx.tex.star.clone());
+        self.card(pos, 0xffffff, star, Vec3::splat(size * 0.3), Vec3::splat(size * 1.0), 0.14, roll + 0.3, 0.0, 5.0);
+        for _ in 0..3 { let o = Vec3::new(self.fx.rr(-1.0, 1.0), self.fx.rr(-0.6, 1.0), self.fx.rr(-1.0, 1.0)) * size * 0.6; self.glint(pos + o, hex, size * self.fx.rr(0.25, 0.45), 0.35); }
+        let c = hexc(hex) * 3.0;
+        for _ in 0..14 { let d = Vec3::new(self.fx.rr(-1.0, 1.0), self.fx.rr(-0.4, 1.0), self.fx.rr(-1.0, 1.0)).normalize_or_zero(); self.fx.emit(true, pos, d * self.fx.rr(10.0, 22.0) * size.min(2.0), self.fx.rr(0.12, 0.25), 0.12 * size.min(2.0), 0.02, c, 6.0, 4.0, 1.0); }
+    }
+    /// a four-point sparkle that pops and spins away
+    pub fn glint(&mut self, pos: Vec3, hex: u32, size: f32, life: f32) {
+        let tex = self.fx.tex.glint.clone(); let roll = self.fx.rr(-0.3, 0.3); let spin = self.fx.rr(-4.0, 4.0);
+        let e = self.card(pos, hex, tex, Vec3::splat(size * 0.2), Vec3::splat(size), life, roll, spin, 6.0);
+        if let Some(t) = self.fx.tweens.iter_mut().find(|t| t.e == e) { t.ease = Ease::Pop; t.fade_out = 0.7; }
+    }
+    /// a crescent slash mark in the air, rolled to the angle of the cut
+    pub fn slash(&mut self, pos: Vec3, hex: u32, len: f32, life: f32, roll: f32) {
+        let tex = self.fx.tex.crescent.clone();
+        self.card(pos, hex, tex.clone(), Vec3::new(len * 0.4, 1.0, len * 0.15), Vec3::new(len, 1.0, len * 0.38), life, roll, 0.0, 6.0);
+        self.card(pos, 0xffffff, tex, Vec3::new(len * 0.35, 1.0, len * 0.08), Vec3::new(len * 0.9, 1.0, len * 0.18), life * 0.7, roll, 0.0, 8.0);
+    }
+    /// anime speed lines streaming past a point along `dir`
+    pub fn speed_lines(&mut self, pos: Vec3, dir: Vec3, n: usize, len: f32, spread: f32, hex: u32, life: f32) {
+        let d = dir.normalize_or_zero(); if d == Vec3::ZERO { return; }
+        let side = d.cross(Vec3::Y).normalize_or_zero(); let up = side.cross(d).normalize_or_zero();
+        for _ in 0..n {
+            let a = self.fx.rr(0.0, TAU); let r = spread * self.fx.rr(0.35, 1.0);
+            let o = pos + (side * a.cos() + up * a.sin()) * r + d * self.fx.rr(-len * 0.5, len * 0.5);
+            let l = len * self.fx.rr(0.5, 1.0);
+            self.streak(o - d * l * 0.5, o + d * l * 0.5, hex, life * self.fx.rr(0.6, 1.0), self.fx.rr(0.025, 0.06));
+        }
     }
     /// a rotating rune circle on the ground, or standing up facing `dir`
     pub fn circle(&mut self, pos: Vec3, hex: u32, r: f32, life: f32, style: &str, spin: f32, dir: Option<Vec3>, follow: Option<Entity>) {
@@ -413,11 +535,15 @@ impl<'a, 'w, 's> Gfx<'a, 'w, 's> {
 
 #[derive(Component)]
 pub struct Billboard;
-pub fn face_camera(cam: Query<&Transform, (With<crate::scene::MainCam>, Without<Billboard>)>, mut q: Query<&mut Transform, With<Billboard>>) {
+/// a billboard's spin about the view axis (angle, angular speed)
+#[derive(Component)]
+pub struct Roll(pub f32, pub f32);
+pub fn face_camera(time: Res<Time>, cam: Query<&Transform, (With<crate::scene::MainCam>, Without<Billboard>)>, mut q: Query<(&mut Transform, Option<&mut Roll>), With<Billboard>>) {
     let Ok(ct) = cam.get_single() else { return };
     // quads are XZ planes: tip their normal (+Y) toward the camera
     let r = Quat::from_rotation_arc(Vec3::Y, -ct.forward().as_vec3());
-    for mut t in q.iter_mut() { t.rotation = r; }
+    let dt = time.delta_secs();
+    for (mut t, roll) in q.iter_mut() { t.rotation = match roll { Some(mut ro) => { ro.0 += ro.1 * dt; r * Quat::from_rotation_y(ro.0) } None => r }; }
 }
 
 /// life in the air around the camera: fireflies over grass at night, sunlit pollen by day, leaves drifting down in forests

@@ -158,6 +158,7 @@ fn volley_wave(cx: &mut Ctx, n: u32, fire: bool, split: u32) {
     }
     // the string snaps: a spray of leaves and wind lines fanning out with the arrows
     cx.fx.burst(from, glow, 18, 5.0, 0.35, 0.25, 0.0, 0.0);
+    { let mut g = cx.gfx(); g.speed_lines(from + base * 3.0, base, 12, 5.0, 1.4, 0xf4ffe8, 0.22); g.glint(from, glow, 1.4, 0.3); g.card(from + base * 0.6, glow, g.fx.tex.burst.clone(), Vec3::splat(0.4), Vec3::splat(2.2), 0.18, 0.0, 0.0, 6.0); }
     for _ in 0..8 { let d = Quat::from_rotation_y(cx.rr(-0.6, 0.6)) * base; let a = from + Vec3::new(cx.rr(-0.3, 0.3), cx.rr(-0.3, 0.3), cx.rr(-0.3, 0.3)); let l = cx.rr(3.0, 6.0); cx.gfx().streak(a, a + d * l, 0xeaffd8, 0.18, 0.035); }
     let lc = hexc(0x6fb83a);
     for _ in 0..10 { let v = Quat::from_rotation_y(cx.rr(-0.7, 0.7)) * base * cx.rr(4.0, 9.0) + Vec3::Y * cx.rr(0.0, 2.0); cx.fx.emit(false, from, v, cx.rr(0.6, 1.0), 0.12, 0.1, lc, 4.0, 2.0, 1.0); }
@@ -173,6 +174,7 @@ fn roll(cx: &mut Ctx) -> bool {
     cx.play("dash");
     let pp = cx.p.body.pos;
     cx.fx.smoke(pp, 0xd8d0c0, 10, 2.0, 0.7, 0.9);
+    cx.gfx().speed_lines(pp + Vec3::Y * 0.9 - d * 1.2, d, 10, 3.0, 0.8, 0xffffff, 0.25);
     kick_dirt(cx, pp, 8, 4.0);
     afterimage(cx, 0x9be07a, 0.35);
     if cx.m("roll.decoy") > 0 { spawn_decoy(cx, pp); }
@@ -306,6 +308,7 @@ fn storm(cx: &mut Ctx) -> bool {
     let life = 4.0 + 1.5 * cx.m("storm.long") as f32 + if eye { 2.0 } else { 0.0 };
     let frost = cx.m("storm.frost") > 0;
     cx.p.pose(Pose::BowUp, 0.5); cx.play("bow");
+    { let pp = cx.p.body.pos + Vec3::Y * 3.0; cx.gfx().speed_lines(pp, Vec3::Y, 12, 5.0, 0.8, 0xeaffd8, 0.3); }
     // a single glowing arrow shot straight up calls the storm
     let from = cx.p.body.pos + Vec3::Y * 1.8;
     let e = arrow_mesh(cx, 0x4a7a3a, 0xd8dde4, Some(0xd8ffb8));
@@ -399,6 +402,8 @@ fn blink(cx: &mut Ctx) -> bool {
     if cx.m("blink.mirror") > 0 { mirror_image(cx, from); }
     cx.p.body.pos = to; cx.p.vis_y = to.y; cx.p.body.vel = Vec3::ZERO; cx.p.invuln = 0.25;
     blink_rift(cx, to, f, false);
+    { let mid = from.lerp(to, 0.5) + Vec3::Y; let len = from.distance(to); let mut g = cx.gfx(); g.speed_lines(mid, f, 18, len, 1.1, 0xe8dcff, 0.3); g.impact(to + Vec3::Y, 0xc4a8ff, 1.5); g.glint(from + Vec3::Y * 1.2, 0xffffff, 1.2, 0.3); }
+    cx.punch(0.25);
     for i in 0..40 { let t = i as f32 / 40.0; let p = from.lerp(to, t) + Vec3::Y * (1.0 + (t * PI).sin() * 0.6); let v = Vec3::new(cx.rr(-0.6, 0.6), cx.rr(-0.6, 0.6), cx.rr(-0.6, 0.6)) + f * 6.0; let c = hexc(if i % 3 == 0 { 0xffffff } else { 0xa183ff }) * 2.5; cx.fx.emit(true, p, v, 0.45, 0.3, 0.04, c, 0.0, 3.0, 1.0); }
     if cx.m("blink.wake") > 0 {
         for p in [from, to] {
@@ -453,6 +458,8 @@ fn nova(cx: &mut Ctx) -> bool {
 /// three rings of ice crystals punch out of the ground one after another, frost spreads, and everything inside freezes solid
 fn nova_pulse(cx: &mut Ctx, p0: Vec3, r: f32, fr: f32, dmg: f32) {
     cx.play("ice"); cx.shake(0.25);
+    cx.gfx().impact(p0 + Vec3::Y, 0xbff4ff, 2.4); cx.punch(0.35);
+    { let mut g = cx.gfx(); for _ in 0..6 { let an = g.fx.rr(0.0, TAU); let rr = g.fx.rr(1.0, r * 0.8); g.glint(p0 + Vec3::new(an.cos() * rr, g.fx.rr(0.3, 1.8), an.sin() * rr), 0xe8fbff, 0.8, 0.5); } }
     { let mut g = cx.gfx(); g.ring(p0, 0xffffff, 0.5, r, 0.4); g.flare(p0 + Vec3::Y, 0xbff4ff, 5.0, 0.3, true); }
     // a sheet of hoarfrost on the ground
     { let tx = cx.fx.tex.circles["frost"].clone(); let m = cx.gfx().fmat(0xe8fbff, 1.2, Some(tx), Blend::Add, true); let mesh = cx.fx.quad.clone(); let rot = Quat::from_rotation_y(cx.rr(0.0, TAU));
@@ -508,7 +515,8 @@ fn orb_burst(cx: &mut Ctx, c: Vec3, sc: f32, split: u32) {
     let r = 3.5 * sc;
     { let m = cx.gfx().fmat(0xb46aff, 3.0, None, Blend::Add, true); let mesh = cx.pal.sphere.clone(); cx.gfx().spawn_tween(mesh, m, 0.14, c, |t| { t.s0 = Vec3::splat(r * 0.6); t.s1 = Vec3::splat(0.1); t.ease = Ease::Lin; t.alpha = 0.5; t.fade_in = 0.01; t.fade_out = 0.01; }); }
     cx.later(0.14, move |cx| {
-        cx.play("boom");
+
+        cx.gfx().impact(c, 0xd08aff, 2.0 * sc); cx.punch(0.2 * sc);        cx.play("boom");
         { let mut g = cx.gfx(); g.flare(c, 0xd08aff, 6.0 * sc, 0.35, true); g.sphere(c, 0xb46aff, 0.3, r, 0.35); g.ring(c - Vec3::Y * 0.5, 0xd08aff, 0.5, r, 0.4); g.shock(c - Vec3::Y * 0.8, 0xd08aff, 0.4, r, 0.35, 1.4); }
         cx.fx.burst(c, 0xd08aff, 40, 6.0, 0.5, 0.45, 0.0, 0.0); cx.shake(0.15);
         cx.aoe(c, r, &mut |cx, i, _| cx.damage(i, (20.0 * sc).round(), Hit { kb: 6.0, src: Some(c), col: 0xd08aff, ..default() }));
@@ -603,6 +611,8 @@ fn call_meteor(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bool
 }
 fn meteor_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bool, s: f32) {
     cx.play("boom"); cx.shake(if big { 1.0 } else { 0.4 }); if big { cx.g.hitstop = 0.08; }
+    cx.gfx().impact(c + Vec3::Y * 1.2, 0xffb03a, if big { 5.0 } else { 2.2 }); if big { cx.punch(1.0); }
+    if big { let war = cx.fx.tex.circles["war"].clone(); let mut g = cx.gfx(); g.card(c + Vec3::Y * 2.0, 0xffd27a, war, Vec3::splat(2.0), Vec3::splat(r * 2.2), 0.3, 0.0, 0.0, 6.0); }
     cx.fx.burst(c + Vec3::Y * 0.5, 0xff7a22, if big { 90 } else { 35 }, r * 3.0, 0.8, if big { 0.9 } else { 0.6 }, 3.0, 0.0);
     cx.fx.burst(c + Vec3::Y * 0.5, 0xffe0a0, if big { 30 } else { 10 }, r * 2.0, 0.5, 0.6, 0.0, 0.0);
     cx.fx.smoke(c, 0x4a4440, if big { 14 } else { 6 }, 3.5, 1.6, 1.6);
@@ -669,6 +679,8 @@ fn charge(cx: &mut Ctx) -> bool {
     let tt = 0.38 * (1.0 + 0.5 * cx.m("charge.mom") as f32);
     cx.p.dash = Some(Dash { dir: d, speed: 30.0, t: tt, kind: 2 });
     cx.p.invuln = 0.3; cx.p.pose(Pose::Lunge, tt + 0.1);
+    { let pp = cx.p.body.pos + Vec3::Y; let mut g = cx.gfx(); g.speed_lines(pp + d * 3.0, d, 20, 6.0, 1.5, 0xffd0c0, 0.35); g.card(pp + d * 0.8, 0xff6a4a, g.fx.tex.burst.clone(), Vec3::splat(0.5), Vec3::splat(3.0), 0.2, 0.0, 0.0, 6.0); }
+    cx.punch(0.3);
     // a spectral ram's wedge of red force rides in front of the warrior
     let wedge = empty(cx, Transform::from_translation(cx.p.body.pos + Vec3::Y));
     let m = cx.pal.mat(cx.mats, 0xff6a4a, Mk::Ghost); let cone = cx.fx.cone.clone(); let tor = cx.pal.torus.clone();
@@ -683,6 +695,7 @@ fn whirl(cx: &mut Ctx) -> bool {
     let r = 4.2 * cx.g.st.area * (1.0 + 0.25 * cx.m("whirl.wide") as f32);
     let (vortex, storm) = (cx.m("whirl.vortex") > 0, cx.m("whirl.blades") > 0);
     let pp = cx.p.body.pos;
+    { let mut g = cx.gfx(); for k in 0..6 { let an = k as f32 / 6.0 * TAU; let p = pp + Vec3::new(an.cos() * r * 0.6, 1.0 + (k % 2) as f32 * 0.5, an.sin() * r * 0.6); g.slash(p, 0xfff0d8, r * 0.55, 0.2, an); } }
     // a funnel of wind (three stacked, counter-spinning rings of air) and four ghostly greatswords orbiting in it
     let root = empty(cx, Transform::from_translation(pp));
     let mut layers = vec![];
@@ -782,7 +795,9 @@ pub fn earth_pillars(cx: &mut Ctx, pts: &[(Vec3, f32)], life: f32) {
 }
 fn slam_land(cx: &mut Ctx, s: SlamSt) {
     let (to, r) = (s.to, s.r);
-    cx.play("boom"); cx.shake(1.0); cx.g.hitstop = 0.08;
+
+    cx.gfx().impact(to + Vec3::Y * 0.8, 0xffd0a0, 3.5); cx.punch(0.8);
+    { let war = cx.fx.tex.circles["war"].clone(); let mut g = cx.gfx(); g.card(to + Vec3::Y * 1.0, 0xffe0b0, war, Vec3::splat(1.5), Vec3::splat(r * 1.8), 0.28, 0.0, 0.0, 6.0); }    cx.play("boom"); cx.shake(1.0); cx.g.hitstop = 0.08;
     {
         let mut g = cx.gfx();
         g.decal(to, true, r * 0.85, 9.0, Some(0xff9a4a)); g.flare(to + Vec3::Y * 0.8, 0xffd0a0, 8.0, 0.35, true);
@@ -831,6 +846,8 @@ fn cry(cx: &mut Ctx) -> bool {
     cx.g.flags.insert("cry_leech", 0.1 + 0.1 * rage);
     cx.heal(if rally { 24.0 } else { 20.0 }, false);
     cx.play("shout"); cx.shake(0.4); cx.p.pose(Pose::Shout, 0.8);
+    { let pp = cx.p.body.pos + Vec3::Y * 1.6; let war = cx.fx.tex.circles["war"].clone(); let lines = cx.fx.tex.burst.clone(); let mut g = cx.gfx(); g.card(pp, 0xff5b4c, war, Vec3::splat(1.0), Vec3::splat(5.0), 0.4, 0.0, 0.0, 6.0); g.card(pp, 0xffd0a0, lines, Vec3::splat(2.0), Vec3::splat(9.0), 0.35, 0.3, 0.0, 5.0); }
+    cx.punch(0.5);
     let pp = cx.p.body.pos;
     // the roar: rings of sound you can see, rolling out at head height
     for k in 0..4 {
@@ -888,6 +905,7 @@ fn mend(cx: &mut Ctx) -> bool {
     cx.play("heal"); cx.p.pose(Pose::Pray, 0.9);
     let pp = cx.p.body.pos;
     cx.gfx().pillar(pp, 0x8dff9e, 1.1, 6.0, 0.9);
+    { let mut g = cx.gfx(); for k in 0..10 { let an = k as f32 * 2.4; let rr = g.fx.rr(0.6, 1.6); let gp = pp + Vec3::new(an.cos() * rr, 0.4 + k as f32 * 0.25, an.sin() * rr); g.glint(gp, if k % 3 == 0 { 0xffffff } else { 0x8dff9e }, g.fx.rr(0.5, 1.0), 0.6 + k as f32 * 0.04); } }
     for i in 0..30 { let an = i as f32 / 30.0 * TAU * 3.0; let v = Vec3::new(-an.sin() * 1.5, 2.5, an.cos() * 1.5); let c = hexc(cx.pick(&[0x8dff9e, 0xffffff, 0xffe48a])) * 2.5; cx.fx.emit(true, pp + Vec3::new(an.cos() * 1.1, i as f32 * 0.06, an.sin() * 1.1), v, 0.9, 0.4, 0.05, c, 0.0, 0.5, 1.0); }
     let bloom = cx.m("mend.bloom") > 0;
     lotus(cx, pp, if bloom { 2.2 } else { 1.4 }, if bloom { 6.0 } else { 1.8 }, bloom);
@@ -993,6 +1011,8 @@ fn holy_sword(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, s: f32) {
 }
 fn smite_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32) {
     cx.play("boom"); cx.shake(0.35);
+    cx.gfx().impact(c + Vec3::Y * 1.0, 0xfff3b8, 2.6); cx.punch(0.45);
+    { let holy = cx.fx.tex.circles["holy"].clone(); let mut g = cx.gfx(); g.card(c + Vec3::Y * 1.2, 0xffe48a, holy, Vec3::splat(1.0), Vec3::splat(r * 2.0), 0.35, 0.0, 0.0, 6.0); }
     { let mut g = cx.gfx(); g.flare(c + Vec3::Y * 1.5, 0xfff3b8, 7.0, 0.4, true); g.decal(c, true, r * 0.9, 4.0, Some(0xffe48a)); g.ring(c, 0xffe48a, 0.4, r * 1.6, 0.45); g.shock(c, 0xffe48a, 0.4, r * 1.4, 0.35, 1.4); }
     cx.fx.burst(c + Vec3::Y * 0.5, 0xffe48a, 40, 7.0, 0.6, 0.4, 3.0, 0.0); cx.fx.sparks(c + Vec3::Y * 0.5, 0xffffff, 12, 11.0);
     kick_dirt(cx, c, 10, 6.0);
@@ -1005,6 +1025,8 @@ fn shield(cx: &mut Ctx) -> bool {
     cx.play("holy"); cx.p.pose(Pose::Raise, 0.6);
     let pp = cx.p.body.pos;
     { let mut g = cx.gfx(); g.ring(pp, 0xfff3b8, 0.5, 5.0, 0.5); g.shock(pp, 0xfff3b8, 0.5, 5.0, 0.4, 2.0); }
+    { let mut g = cx.gfx(); for k in 0..8 { let an = k as f32 / 8.0 * TAU; g.glint(pp + Vec3::new(an.cos() * 1.6, 1.0 + (k % 3) as f32 * 0.6, an.sin() * 1.6), 0xfff3b8, 0.9, 0.5); } g.impact(pp + Vec3::Y * 1.2, 0xfff3b8, 1.6); }
+    cx.punch(0.25);
     cx.aoe(pp, 4.5, &mut |cx, i, _| { let e = &cx.g.enemies[i]; let p = Vec3::new((e.body.pos.x - pp.x) * 3.0, 5.0, (e.body.pos.z - pp.z) * 3.0); cx.status(i, Status { push: Some(p), ..default() }); });
     // a golden dome, and six kite shields of light circling the priest
     let root = empty(cx, Transform::from_translation(pp));
@@ -1056,6 +1078,7 @@ fn consecrate(cx: &mut Ctx) -> bool {
     let sanct = cx.m("consecrate.sanct") > 0;
     let life = 6.0 + if march { 3.0 } else { 0.0 };
     cx.play("holy"); cx.p.pose(Pose::Kneel, 0.8);
+    { let holy = cx.fx.tex.circles["holy"].clone(); let mut g = cx.gfx(); g.card(c + Vec3::Y * 1.5, 0xffd35a, holy, Vec3::splat(1.0), Vec3::splat(r * 1.4), 0.4, 0.0, 0.6, 5.0); g.impact(c + Vec3::Y * 1.0, 0xffd35a, 1.8); }
     { let mut g = cx.gfx(); g.ring(c, 0xffd35a, 0.5, r, 0.5); g.shock(c, 0xffd35a, 0.5, r, 0.4, 1.4); }
     let follow = if march { cx.p.rig.root } else { None };
     cx.gfx().circle(c, 0xffd35a, r, life, "holy", 0.4, None, follow);

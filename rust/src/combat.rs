@@ -362,6 +362,8 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
             hit_n += 1;
             let h = cx.g.enemies.get(i).map(|e| e.body.h).unwrap_or(1.0);
             cx.fx.sparks(ep + Vec3::Y * h * 0.6, col, if heavy { 8 } else { 4 }, if heavy { 10.0 } else { 7.0 });
+            // a crescent cut across the target, angled with the swing; heavy blows burst too
+            if hit_n <= 3 { let roll = side * 0.7 + if overhead { 1.4 } else { 0.0 } + cx.rr(-0.25, 0.25); let hp = ep + Vec3::Y * h * 0.6; let mut g = cx.gfx(); g.slash(hp, col, if heavy { 2.8 } else { 1.9 }, 0.16, roll); if heavy && hit_n == 1 { g.impact(hp, col, 1.4); } }
             if id == "daggers" && cx.m("w.daggers.venom") > 0 { cx.status(i, Status { poison: 3.0, ..default() }); }
             if id == "swordshield" && cx.m("w.swordshield.bash") > 0 && n % 3 == 0 { cx.status(i, Status { stun: 1.0, ..default() }); }
             if id == "mace" && cx.m("w.mace.thunder") > 0 && n % 3 == 0 && hit_n == 1 { lightning_strike(cx, ep, 26.0, 1.6, 0xa8dcff); }

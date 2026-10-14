@@ -316,8 +316,8 @@ fn apply_pose(t: &mut Tg, pose: Pose, k: f32, w: f32) {
 }
 
 #[derive(Resource)]
-pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3, pub base_fov: f32, pub shake_mul: f32, pub orbit: f32, pub max_d: f32 }
-impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO, base_fov: 72.0, shake_mul: 1.0, orbit: 0.0, max_d: 6.6 } } }
+pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3, pub base_fov: f32, pub shake_mul: f32, pub orbit: f32, pub max_d: f32, pub punch: f32 }
+impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO, base_fov: 72.0, shake_mul: 1.0, orbit: 0.0, max_d: 6.6, punch: 0.0 } } }
 
 /// over-the-shoulder camera: pulls in fast when blocked, eases back out gently so turning past trees never pops
 pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transform, proj: &mut Projection, dt: f32, rng: &mut impl FnMut() -> f32) {
@@ -340,6 +340,8 @@ pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transfor
     let b = cr.base_fov;
     let target_fov = if p.charging { b - 8.0 - p.charge * 10.0 } else if p.dash.is_some() { b + 8.0 } else { b };
     cr.fov = lerp(cr.fov, target_fov, (dt * 8.0).min(1.0));
+    // an anime impact punch: snap the lens in, then let it ease back
+    if cr.punch > 0.0 { cr.fov -= cr.punch * 14.0 * cr.shake_mul.min(1.0); cr.punch = (cr.punch - dt * 5.0).max(0.0); }
     if let Projection::Perspective(pp) = proj { pp.fov = cr.fov.to_radians(); }
 }
 
