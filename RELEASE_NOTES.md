@@ -1,42 +1,45 @@
-## Emberwild 0.6.0: runs with an ending, co-op and a reason to come back
+## Emberwild 0.7.0: the visual overhaul
 
-**Download:** `Emberwild-0.6.0.exe` is the whole game in one file; no installer. Windows may show a SmartScreen warning because the exe isn't code-signed: click *More info*, then *Run anyway*. Your progress saves to `%APPDATA%/Emberwild/save.json`.
+**Download:** `Emberwild-0.7.0.exe` is the whole game in one file; no installer. Windows may show a SmartScreen warning because the exe isn't code-signed: click *More info*, then *Run anyway*.
 
-### Balance
-Healing and scaling were too generous, so runs turned into god mode:
-- Lifesteal, regeneration and heal-over-time share a budget of 4% of max health per second, halved for 2 seconds after you're hit. Lifesteal has diminishing returns, and level-ups no longer heal.
-- Mend, hearts, Bloodlust and Second Wind are toned down.
-- Enemy health compounds over the run, their damage grows faster, and they gain flat armour. Bosses resist stuns.
-- The XP curve is steeper. You can take at most two chaos augments and five boon picks, and Chain Reaction can't chain off itself.
+### A new look
+- **Lighting:**
+  - Screen-space ambient occlusion.
+  - SMAA anti-aliasing.
+  - Softer cascaded sun shadows.
+  - A thin haze around you that the sun turns into god rays through the trees.
+  - Warm sun glow in the distance fog.
+  - Filmic tone mapping with gentle colour grading.
+- **Sky:** painted, drifting cumulus clouds that catch the sun and glow at their edges, replacing the box clouds.
+- **Textured world:**
+  - Every block has a pixel-art texture with surface relief and roughness, from grass with blades and leaf litter to cracked stone, bark, log rings, bricks, planks, magma and runes.
+  - Grass and snow hang over the edges of cliffs.
+- **Plants:**
+  - Grass, flowers, ferns, reeds and lily pads are textured and sway in the wind.
+  - **Bushes are bushes:** round clumps of leaves, with red berries on berry bushes.
+  - Tree crowns have ragged, leafy edges instead of cube outlines.
+  - Leaves cast leaf-shaped, dappled shadows.
+- **Ambient life:** fireflies over the meadows at night, pollen glinting in sunbeams, and leaves drifting down in forests.
 
-### A run with an ending
-- Runs last 20 minutes. The **Ancient Golem**, **Bone Colossus** and **Broodmother** arrive at 5, 10 and 15 minutes, and the HUD warns you before each.
-- The three-phase **Ember King** comes at 20:00; killing him wins the run. After that you can keep going in endless mode, where the bosses keep getting stronger.
-- **Relic evolutions:** max out a relic and take its boon to evolve it into Storm of Swords, Storm Throne, Heart of the Sun, Choir of Spirits, Reaper's Cyclone, Inferno Cask or Absolute Winter.
+### Animation
+- **Bodies:** characters have bevelled edges and real elbows and knees, and walk with bent knees, monsters included.
+- **Every weapon, every attack:**
+  - Each attack winds up, strikes at the moment the hit lands, follows through and recovers.
+  - Melee weapons chain three different blows with a heavy finisher:
+    - Greatsword: diagonal cut, rising backswing, overhead slam.
+    - Sword and shield: forehand, backhand, lunging thrust.
+    - Daggers: right slash, left slash, scissor cut.
+    - Mace: overhead smash, side swing, uppercut.
+  - Staffs thrust or cast overhead, the wand flicks and the scepter points.
+  - The bow is raised to aim as you start drawing, the string hand pulls back as the charge builds, and the bow kicks on release.
+- **Smooth:** every joint blends into its next pose, so nothing snaps, and blades leave ribbon trails. Attacks speed up with your attack-speed upgrades.
 
-### Monsters with jobs
-- **Gorehorn** chargers, **Shieldbearers** that block hits from the front, **Bone Shamans** that heal and haste the horde, **Ember Imps** that bomb from above, and **Necromancers** that raise the dead.
-- Biome monsters: desert **Sand Wurms** that tunnel and erupt under you, and snowbound **Frost Giants** whose slams chill.
-- Rosters change with the biome, at night and under the Blood Moon. From minute 6, telegraphed eruptions land where you're heading.
+### New tools
+- **Balance bot:** run `Emberwild.exe --bot` from a command prompt.
+  - The game plays full runs by itself, faster than real time, and writes every run to `balance-<time>.csv` plus a per-class summary: win rate, survival time, kills, damage taken and healed per minute.
+  - Options, for example: `--bot "runs=5;classes=warrior,mage;minutes=20;turbo=8;ember=3"`.
+  - Your save is never touched.
+- **Crash log:** if the game ever crashes, it writes `crash-<time>.log` to `%APPDATA%/Emberwild/`. Send that file with a bug report.
 
-### Dodge, block and parry
-- **Ctrl** (or Alt) rolls with invulnerability. Slipping a hit at the last moment is a perfect dodge: it refunds stamina and guarantees crits for a moment.
-- **Right mouse** blocks.
-- Raising your guard just before a hit parries: it negates the damage, stuns the attacker and empowers your next blows.
-
-### Events and the merchant
-- Every 70 to 100 seconds something happens: a timed challenge, a cursed shrine that trades a minute of a nastier horde for a relic, a war totem to defend, or a treasure goblin that drips gold as it runs.
-- A wandering merchant with a covered cart sells relic caches, healing, rerolls, levels and whetstones for run gold.
-
-### The Camp and the Ember ladder
-- Runs pay out gold. At the Camp you spend it on ten permanent upgrades, from Vitality to Second Chance, and on unlocking the Mage, the Priest and three relics.
-- Winning unlocks the next of ten **Ember** difficulty levels, each adding a twist. The title screen shows your lifetime stats, and the Camp shows your recent runs.
-
-### Co-op is back
-- Up to four players over LAN or the internet (TCP port 7777).
-- To host, click **Host co-op** on the title screen. To join, click **Join co-op**, type the host's address and press Enter.
-- The host runs the horde and everyone sees each other's spells. Hold E next to a downed teammate to revive them; the run ends when everyone is down.
-
-### Settings and gamepads
-- New settings screen: sensitivity, invert look, sound and music volume, field of view, view distance, shadows, screen shake, damage numbers and fullscreen. Settings are saved.
-- Gamepads are supported in play and in the menus.
+### Settings
+- **New Graphics quality option** (Low, Medium, High, Ultra), which scales ambient occlusion, god rays and shadow resolution. If the new look runs slowly on your machine, drop it to Medium or Low.
