@@ -6,7 +6,7 @@ A voxel horde-survival roguelike in the spirit of Vampire Survivors. Pick one of
 
 Emberwild is a native Windows game written in Rust on the [Bevy](https://bevyengine.org) engine. It opens fullscreen; set `EMBERWILD_WINDOWED=1` to run it in a window. The pause menu has **Quit to desktop**.
 
-**Download:** grab `Emberwild-<version>.exe` from the latest GitHub release. It is a single file with no installer. Every push also builds it: open the **Actions** tab, pick the latest **Build Windows exe** run, and download *Emberwild-windows* under *Artifacts*.
+**Download:** grab `Emberwild-<version>.exe` from the latest GitHub release. It is a single file with no installer. `Emberwild-<version>-dev.exe` is the same game plus the developer tools (the balance bot and the scripted test hooks). Every push also builds it: open the **Actions** tab, pick the latest **Build Windows exe** run, and download *Emberwild-windows* under *Artifacts*.
 
 **From source:** install Rust, then `cd rust && cargo run --release`. On Linux you need the usual Bevy packages (`libasound2-dev libudev-dev libxkbcommon-x11-0`).
 
@@ -30,9 +30,10 @@ The original browser version is still in `index.html` and `src/`, with its Elect
 | F | Eat |
 | Esc | Pause |
 | M | Mute |
+| Tab | Character panel: stats, abilities and every upgrade as icons (hover for details) |
 | C, S, H, J | On the title screen: Camp, Settings, Host co-op, Join co-op |
 
-Gamepads work too: left stick moves, right stick looks, RT attacks, LT blocks, A jumps, B dodges, X, Y, LB and RB cast. Sensitivity, volume, field of view, view distance, shadows, screen shake and more are under **Settings**.
+Gamepads work too: left stick moves, right stick looks, RT attacks, LT blocks, A jumps, B dodges, X, Y, LB and RB cast, and D-pad right opens the character panel. Hover an ability slot whenever the cursor is free (pause, level-up, character panel) for a tooltip with its cooldown and upgrades. Sensitivity, volume, field of view, view distance, shadows, screen shake and more are under **Settings**.
 
 ## Runs, bosses and the Camp
 
@@ -103,6 +104,8 @@ Everything is generated in code; there are no art files.
   - Every weapon has keyframed attacks: a wind-up, a strike timed to the hit, a follow-through and a recovery. Melee weapons chain three different attacks, with a heavy third blow.
   - The bow draws back as it charges and kicks on release. Staffs thrust, wands flick and the scepter points.
   - Joints blend smoothly into each pose, and blades leave ribbon trails.
+  - Running: hips turn towards where you're going while the chest keeps facing your aim, knees lift and absorb, the body leans into speed and banks into turns, free arms pump, and landings squash.
+- **Effects:** anime-style rather than spell-circle magic. That means impact flashes with starbursts of speed lines, crescent slash marks, speed lines on dashes, sparkle glints, cel-shaded energy, sparks that streak, and a lens punch on big hits.
 
 **Settings → Graphics quality:**
 
@@ -116,7 +119,7 @@ Everything is generated in code; there are no art files.
 ## Tools
 
 - **Crash log:** if the game crashes, it writes `crash-<time>.log` (the error and a backtrace) to `%APPDATA%/Emberwild/`. Send that file along with a bug report.
-- **Balance bot:** run `Emberwild.exe --bot` from a command prompt.
+- **Balance bot** (dev build only): run `Emberwild-<version>-dev.exe --bot` from a command prompt.
   - The game plays complete runs on its own in a small window, simulating several steps per frame so runs go much faster than real time. It aims, kites, draws the bow, casts abilities, dodges, eats, opens chests and picks level-up cards.
   - Each run is appended to `balance-<time>.csv` in the current folder, and a per-class summary goes to `balance-<time>-summary.txt`. The summary covers win rate, survival time, level, kills per minute, damage taken and healed per minute, and the heal-to-damage ratio.
   - Your save is never touched.

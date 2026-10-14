@@ -1,45 +1,30 @@
-## Emberwild 0.7.0: the visual overhaul
+## Emberwild 0.8.0: anime effects, better running, and a character panel
 
-**Download:** `Emberwild-0.7.0.exe` is the whole game in one file; no installer. Windows may show a SmartScreen warning because the exe isn't code-signed: click *More info*, then *Run anyway*.
+**Downloads:**
+- `Emberwild-0.8.0.exe` is the game.
+- `Emberwild-0.8.0-dev.exe` is the same game plus the developer tools: the balance bot (`--bot`) and the scripted test hooks.
 
-### A new look
-- **Lighting:**
-  - Screen-space ambient occlusion.
-  - SMAA anti-aliasing.
-  - Softer cascaded sun shadows.
-  - A thin haze around you that the sun turns into god rays through the trees.
-  - Warm sun glow in the distance fog.
-  - Filmic tone mapping with gentle colour grading.
-- **Sky:** painted, drifting cumulus clouds that catch the sun and glow at their edges, replacing the box clouds.
-- **Textured world:**
-  - Every block has a pixel-art texture with surface relief and roughness, from grass with blades and leaf litter to cracked stone, bark, log rings, bricks, planks, magma and runes.
-  - Grass and snow hang over the edges of cliffs.
-- **Plants:**
-  - Grass, flowers, ferns, reeds and lily pads are textured and sway in the wind.
-  - **Bushes are bushes:** round clumps of leaves, with red berries on berry bushes.
-  - Tree crowns have ragged, leafy edges instead of cube outlines.
-  - Leaves cast leaf-shaped, dappled shadows.
-- **Ambient life:** fireflies over the meadows at night, pollen glinting in sunbeams, and leaves drifting down in forests.
+Both are single files with no installer. Windows may show a SmartScreen warning because they aren't code-signed: click *More info*, then *Run anyway*.
 
-### Animation
-- **Bodies:** characters have bevelled edges and real elbows and knees, and walk with bent knees, monsters included.
-- **Every weapon, every attack:**
-  - Each attack winds up, strikes at the moment the hit lands, follows through and recovers.
-  - Melee weapons chain three different blows with a heavy finisher:
-    - Greatsword: diagonal cut, rising backswing, overhead slam.
-    - Sword and shield: forehand, backhand, lunging thrust.
-    - Daggers: right slash, left slash, scissor cut.
-    - Mace: overhead smash, side swing, uppercut.
-  - Staffs thrust or cast overhead, the wand flicks and the scepter points.
-  - The bow is raised to aim as you start drawing, the string hand pulls back as the charge builds, and the bow kicks on release.
-- **Smooth:** every joint blends into its next pose, so nothing snaps, and blades leave ribbon trails. Attacks speed up with your attack-speed upgrades.
+### Character panel (Tab)
+- Press **Tab** (D-pad right on a gamepad) to pause and see:
+  - **Stats:** health, damage, crit chance, attack speed, cooldown reduction, move speed, damage reduction, lifesteal, regeneration, area, pickup range, experience and more.
+  - **Gear:** your abilities and weapons.
+  - **Every pick so far as an icon:** relics and evolutions, chaos augments, boons, and ability and weapon upgrades. Each shows its rank, and hovering it shows its name, type and description.
+- **Ability tooltips:** hover any ability slot (in the panel, or on the HUD while paused or levelling up) to see its cooldown, whether it's ready, its description and every upgrade you've taken for it.
 
-### New tools
-- **Balance bot:** run `Emberwild.exe --bot` from a command prompt.
-  - The game plays full runs by itself, faster than real time, and writes every run to `balance-<time>.csv` plus a per-class summary: win rate, survival time, kills, damage taken and healed per minute.
-  - Options, for example: `--bot "runs=5;classes=warrior,mage;minutes=20;turbo=8;ember=3"`.
-  - Your save is never touched.
-- **Crash log:** if the game ever crashes, it writes `crash-<time>.log` to `%APPDATA%/Emberwild/`. Send that file with a bug report.
+### Anime-style effects
+The fantasy spell-circle look is gone.
+- **Hits:** big hits flash white and burst into starbursts of speed lines with sparkle glints. Sparks streak, energy is cel-shaded, and the camera punches in on the big moments.
+- **Every ability has new accents:**
+  - **Ranger:** speed lines on Volley, Evasive Roll and Arrow Storm.
+  - **Mage:** Blink streaks across the screen, and Frost Nova, Arcane Orb and Meteor burst on impact.
+  - **Warrior:** Charge rushes in on speed lines, Whirlwind throws crescent arcs, Ground Slam lands with a comic-book starburst, and Battle Cry roars with a red "BAM".
+  - **Priest:** Smite and Consecration flare into sunbursts, and Mend and Divine Shield sparkle.
+- **Melee hits** leave crescent slash marks angled with your swing.
 
-### Settings
-- **New Graphics quality option** (Low, Medium, High, Ultra), which scales ambient occlusion, god rays and shadow resolution. If the new look runs slowly on your machine, drop it to Medium or Low.
+### Running
+- **Footwork:** your hips turn towards where you're running while your chest keeps facing your aim, so strafing looks like strafing, and running backwards plays the cycle in reverse.
+- **Body:** knees lift and absorb, and the body leans into speed and banks into turns.
+- **Arms:** free arms pump with bent elbows, two-handed weapons bounce in the grip, and dagger users sprint with their arms swept back.
+- **Landing:** jumps and falls land with a squash.
