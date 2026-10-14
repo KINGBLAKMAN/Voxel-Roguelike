@@ -26,6 +26,7 @@ mod relics;
 mod scene;
 mod settings;
 mod testkit;
+mod textures;
 mod world;
 
 use bevy::ecs::system::SystemParam;

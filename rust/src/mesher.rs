@@ -8,26 +8,30 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 
 #[derive(Default)]
-pub struct MeshData { pub p: Vec<[f32; 3]>, pub n: Vec<[f32; 3]>, pub c: Vec<[f32; 4]>, pub i: Vec<u32> }
+pub struct MeshData { pub p: Vec<[f32; 3]>, pub n: Vec<[f32; 3]>, pub c: Vec<[f32; 4]>, pub i: Vec<u32>, pub uv: Vec<[f32; 2]>, pub uv2: Vec<[f32; 2]> }
 impl MeshData {
     pub fn is_empty(&self) -> bool { self.p.is_empty() }
     pub fn into_mesh(self) -> Mesh {
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        let n = self.p.len();
+        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.p)
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.n)
             .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.c)
-            .with_inserted_indices(Indices::U32(self.i))
+            .with_inserted_indices(Indices::U32(self.i));
+        if self.uv.len() == n { m.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv); }
+        if self.uv2.len() == n { m.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.uv2); }
+        m
     }
 }
 
 struct Face { d: [i32; 3], c: [[i32; 3]; 4], s: f32 }
 const FACES: [Face; 6] = [
-    Face { d: [1, 0, 0], c: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], s: 0.86 },
-    Face { d: [-1, 0, 0], c: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], s: 0.86 },
+    Face { d: [1, 0, 0], c: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], s: 0.92 },
+    Face { d: [-1, 0, 0], c: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], s: 0.92 },
     Face { d: [0, 1, 0], c: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], s: 1.0 },
-    Face { d: [0, -1, 0], c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], s: 0.6 },
-    Face { d: [0, 0, 1], c: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], s: 0.78 },
-    Face { d: [0, 0, -1], c: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], s: 0.78 },
+    Face { d: [0, -1, 0], c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], s: 0.72 },
+    Face { d: [0, 0, 1], c: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], s: 0.86 },
+    Face { d: [0, 0, -1], c: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], s: 0.86 },
 ];
 const AOF: [f32; 4] = [0.42, 0.6, 0.8, 1.0];
 
@@ -63,16 +67,15 @@ pub fn mesh_chunk(w: &Voxels, cx: i32, cz: i32) -> ChunkMeshes {
         if bl == 0 { continue; }
         let def = block_def(bl);
         let (wx, wz) = (x0 + x, z0 + z);
-        let jit = 1.0 + (hash3(wx, y, wz, 5) - 0.5) * def.j * 2.0;
+        let jit = 1.0 + (hash3(wx, y, wz, 5) - 0.5) * def.j;
         let tint = if def.tint { 1.0 + w.n_v.get(wx as f32 * 0.05, wz as f32 * 0.05) * 0.14 } else { 1.0 };
         let glows = def.glow > 0.0;
         let capped = def.side.is_some() && !gl(x, y + 1, z);
         let out = if glows { &mut glow } else { &mut solid };
         for (fi, f) in FACES.iter().enumerate() {
             if gl(x + f.d[0], y + f.d[1], z + f.d[2]) { continue; }
-            let mut col = if fi == 2 { def.top.unwrap_or(def.c) } else { def.c };
-            if bl == b::BERRY && hash3(wx * 3 + fi as i32, y, wz, 9) < 0.5 { col = lin(0xd23a4e); }
-            let wrap = capped && fi != 2 && fi != 3;
+            let side = fi != 2 && fi != 3;
+            let layer = crate::textures::face_layer(bl, if fi == 2 { 0 } else if fi == 3 { 2 } else { 1 }, capped && side);
             let mut ao = [3usize; 4];
             if !glows { for k in 0..4 {
                 let o = ao_off[fi][k];
@@ -84,11 +87,14 @@ pub fn mesh_chunk(w: &Voxels, cx: i32, cz: i32) -> ChunkMeshes {
             let base = out.p.len() as u32;
             for k in 0..4 {
                 let c = f.c[k];
-                out.p.push([(wx + c[0]) as f32, (y + c[1]) as f32, (wz + c[2]) as f32]);
+                let (px, py, pz) = ((wx + c[0]) as f32, (y + c[1]) as f32, (wz + c[2]) as f32);
+                out.p.push([px, py, pz]);
                 out.n.push([f.d[0] as f32, f.d[1] as f32, f.d[2] as f32]);
-                let vc = if wrap { if c[1] != 0 { def.top.unwrap_or(col) } else { def.side.unwrap() } } else if def.side.is_some() && fi != 2 && fi != 3 { def.side.unwrap() } else { col };
+                // world-space UVs; see the tangent frame in terrain.wgsl
+                out.uv.push(if f.d[0] != 0 { [pz, -py] } else if f.d[1] != 0 { [px, pz] } else { [px, -py] });
+                out.uv2.push([layer as f32, 0.0]);
                 let m = if glows { def.glow * (0.85 + 0.15 * f.s) * jit } else { f.s * AOF[ao[k]] * jit };
-                out.c.push([vc[0] * m * (2.0 - tint).max(0.8), vc[1] * m * tint, vc[2] * m, 1.0]);
+                out.c.push([m * (2.0 - tint).max(0.8), m * tint, m, 1.0]);
             }
             if ao[0] + ao[2] < ao[1] + ao[3] { out.i.extend_from_slice(&[base + 1, base + 2, base + 3, base + 1, base + 3, base]); }
             else { out.i.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]); }

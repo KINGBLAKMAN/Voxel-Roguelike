@@ -17,6 +17,7 @@ use bevy::render::render_resource::*;
 pub const SKY_SHADER: Handle<Shader> = Handle::weak_from_u128(0x5e3c_11a2_8f00_4d8b_a001_0000_0000_0001);
 pub const WATER_SHADER: Handle<Shader> = Handle::weak_from_u128(0x5e3c_11a2_8f00_4d8b_a001_0000_0000_0002);
 pub const WIND_SHADER: Handle<Shader> = Handle::weak_from_u128(0x5e3c_11a2_8f00_4d8b_a001_0000_0000_0003);
+pub const TERRAIN_SHADER: Handle<Shader> = Handle::weak_from_u128(0x5e3c_11a2_8f00_4d8b_a001_0000_0000_0004);
 
 #[derive(Clone, ShaderType, Default)]
 pub struct SkyU { pub top: Vec4, pub hor: Vec4, pub sun_dir: Vec4, pub sun_col: Vec4, pub moon_col: Vec4, pub params: Vec4 }
@@ -49,9 +50,17 @@ impl Material for WaterMaterial {
 pub struct WindExt { #[uniform(100)] pub wind: Vec4 }
 impl MaterialExtension for WindExt { fn vertex_shader() -> ShaderRef { WIND_SHADER.into() } fn prepass_vertex_shader() -> ShaderRef { WIND_SHADER.into() } }
 pub type FoliageMaterial = ExtendedMaterial<StandardMaterial, WindExt>;
+/// block faces: albedo and normal/roughness texture arrays indexed by the face's layer
+#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
+pub struct TerrainExt {
+    #[texture(100, dimension = "2d_array")] #[sampler(101)] pub albedo: Handle<Image>,
+    #[texture(102, dimension = "2d_array")] #[sampler(103)] pub normal: Handle<Image>,
+}
+impl MaterialExtension for TerrainExt { fn fragment_shader() -> ShaderRef { TERRAIN_SHADER.into() } }
+pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 
 #[derive(Resource)]
-pub struct SceneHandles { pub chunk_mat: Handle<StandardMaterial>, pub glow_mat: Handle<StandardMaterial>, pub fol_mat: Handle<FoliageMaterial>, pub sky: Handle<SkyMaterial>, pub water: Handle<WaterMaterial> }
+pub struct SceneHandles { pub chunk_mat: Handle<TerrainMaterial>, pub glow_mat: Handle<TerrainMaterial>, pub fol_mat: Handle<FoliageMaterial>, pub sky: Handle<SkyMaterial>, pub water: Handle<WaterMaterial> }
 #[derive(Component)] pub struct MainCam;
 #[derive(Component)] pub struct Sun;
 #[derive(Component)] pub struct SkyDome;
@@ -71,7 +80,8 @@ impl Plugin for ScenePlugin {
         load_internal_asset!(app, SKY_SHADER, "shaders/sky.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, WATER_SHADER, "shaders/water.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, WIND_SHADER, "shaders/wind.wgsl", Shader::from_wgsl);
-        app.add_plugins((MaterialPlugin::<SkyMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<WaterMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<FoliageMaterial>::default()))
+        load_internal_asset!(app, TERRAIN_SHADER, "shaders/terrain.wgsl", Shader::from_wgsl);
+        app.add_plugins((MaterialPlugin::<SkyMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<WaterMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<FoliageMaterial>::default(), MaterialPlugin::<TerrainMaterial>::default()))
             .insert_resource(ClearColor(Color::srgb(0.6, 0.8, 0.95)))
             .insert_resource(AmbientLight { color: Color::WHITE, brightness: 300.0 })
             .init_resource::<DayCycle>()
@@ -81,22 +91,23 @@ impl Plugin for ScenePlugin {
 }
 
 fn setup_scene(mut c: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, mut sky_m: ResMut<Assets<SkyMaterial>>,
-    mut water_m: ResMut<Assets<WaterMaterial>>, mut fol_m: ResMut<Assets<FoliageMaterial>>) {
+    mut water_m: ResMut<Assets<WaterMaterial>>, mut fol_m: ResMut<Assets<FoliageMaterial>>, mut ter_m: ResMut<Assets<TerrainMaterial>>, mut images: ResMut<Assets<Image>>) {
     // anti-aliasing is SMAA (MSAA is incompatible with screen-space AO); AO and god rays are added by the graphics setting
     c.spawn((Camera3d::default(), Camera { hdr: true, ..default() }, Tonemapping::TonyMcMapface, Bloom { intensity: 0.14, ..Bloom::NATURAL },
         Projection::Perspective(PerspectiveProjection { fov: 72f32.to_radians(), near: 0.1, far: 1400.0, ..default() }),
         DistanceFog { color: Color::srgb(0.7, 0.82, 0.95), directional_light_color: Color::srgba(1.0, 0.82, 0.55, 0.6), directional_light_exponent: 18.0, falloff: FogFalloff::Linear { start: 60.0, end: 170.0 } },
         Msaa::Off, Smaa::default(), ShadowFilteringMethod::Gaussian,
         ColorGrading { global: ColorGradingGlobal { post_saturation: 1.04, ..default() }, shadows: ColorGradingSection { saturation: 1.05, contrast: 1.0, gamma: 1.0, gain: 1.0, lift: 0.0 },
-            midtones: ColorGradingSection { saturation: 1.08, contrast: 1.06, gamma: 1.0, gain: 1.0, lift: 0.0 }, highlights: ColorGradingSection { saturation: 1.0, contrast: 1.0, gamma: 1.0, gain: 1.0, lift: 0.0 } },
+            midtones: ColorGradingSection { saturation: 1.0, contrast: 1.06, gamma: 1.0, gain: 1.0, lift: 0.0 }, highlights: ColorGradingSection { saturation: 1.0, contrast: 1.0, gamma: 1.0, gain: 1.0, lift: 0.0 } },
         Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::new(10.0, 30.0, 10.0), Vec3::Y), MainCam));
     c.spawn((DirectionalLight { illuminance: 9000.0, shadows_enabled: true, color: Color::srgb(1.0, 0.95, 0.85), ..default() }, VolumetricLight,
         CascadeShadowConfigBuilder { num_cascades: 3, minimum_distance: 0.5, first_cascade_far_bound: 18.0, maximum_distance: 110.0, overlap_proportion: 0.25 }.build(),
         Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::new(10.0, 0.0, 5.0), Vec3::Y), Sun));
     // a thin band of haze around the camera: lit by the sun through the canopy, it turns into god rays
     c.spawn((FogVolume { density_factor: 0.018, absorption: 0.25, scattering: 0.35, scattering_asymmetry: 0.75, ..default() }, Transform::from_scale(Vec3::new(220.0, 70.0, 220.0)), Haze));
-    let chunk_mat = mats.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.92, reflectance: 0.12, ..default() });
-    let glow_mat = mats.add(StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() });
+    let (albedo, normal) = crate::textures::build(&mut images);
+    let chunk_mat = ter_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.92, reflectance: 0.12, ..default() }, extension: TerrainExt { albedo: albedo.clone(), normal: normal.clone() } });
+    let glow_mat = ter_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() }, extension: TerrainExt { albedo, normal } });
     let fol_mat = fol_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, double_sided: false, cull_mode: None, ..default() }, extension: WindExt { wind: Vec4::new(1.0, 0.0, 0.0, 0.0) } });
     let sky = sky_m.add(SkyMaterial { u: SkyU::default() });
     let water = water_m.add(WaterMaterial { u: WaterU::default() });
