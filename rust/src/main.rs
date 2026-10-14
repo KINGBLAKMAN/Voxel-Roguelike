@@ -4,6 +4,7 @@
 
 mod abilities;
 mod audio;
+mod camp;
 mod augments;
 mod combat;
 mod director;
@@ -12,6 +13,7 @@ mod fx;
 mod game;
 mod horde;
 mod hud;
+mod meta;
 mod mesher;
 mod models;
 mod noise;
@@ -60,9 +62,10 @@ fn main() {
     .init_resource::<Game>()
     .init_resource::<audio::Sfx>()
     .init_resource::<hud::UiState>()
+    .insert_resource(meta::Save::load())
     .add_plugins((ScenePlugin, fx::FxPlugin))
-    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, hud::setup_hud))
-    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp).chain()))
+    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }
@@ -73,7 +76,7 @@ fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Asset
     let sp = w.spawn_point();
     p.body.pos = sp; p.vis_y = sp.y;
     // scripted tests skip the title screen
-    if let Some(t) = test.as_ref() { if !t.menu { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
+    if let Some(t) = test.as_ref() { if t.camp { ui.screen = hud::Screen::Camp; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
     c.insert_resource(w);
 }
 fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0) } }
@@ -89,10 +92,11 @@ fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardM
 
 /// starting a run from the menu, and tearing one down to start again
 #[allow(clippy::too_many_arguments)]
-fn run_control(mut c: Commands, mut ui: ResMut<hud::UiState>, mut g: ResMut<Game>, mut p: ResMut<Player>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>,
+fn run_control(save: Res<meta::Save>, mut c: Commands, mut ui: ResMut<hud::UiState>, mut g: ResMut<Game>, mut p: ResMut<Player>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>,
     mut fx: ResMut<fx::Fx>, w: Option<ResMut<world::Voxels>>, mut dc: ResMut<DayCycle>, mut ctl: ResMut<Controls>, mut sfx: ResMut<audio::Sfx>) {
     if let Some(cls) = ui.start.take() {
         begin_player(&mut c, &mut pal, &mut mats, &mut p, cls);
+        meta::apply_start(&save, &mut g, &mut p);
         ui.screen = hud::Screen::Playing; ui.dead_t = 0.0; ui.ghost_hp = 1.0;
         ctl.want_lock = true; ctl.relock = true;
         sfx.play("horn");

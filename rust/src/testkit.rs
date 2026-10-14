@@ -7,12 +7,12 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 #[derive(Resource, Clone)]
-pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool }
+pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool }
 
 impl TestCfg {
     pub fn from_env() -> Option<Self> {
         let s = std::env::var("EW_TEST").ok()?;
-        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false };
+        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false };
         for kv in s.split(';') {
             let Some((k, v)) = kv.split_once('=') else { continue };
             match k {
@@ -26,6 +26,7 @@ impl TestCfg {
                 "exit" => t.exit = v.parse().unwrap_or(200),
                 "menu" => t.menu = true,
                 "autopick" => t.autopick = true,
+                "camp" => t.camp = true,
                 _ => {}
             }
         }

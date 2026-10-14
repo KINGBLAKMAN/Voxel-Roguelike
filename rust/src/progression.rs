@@ -68,7 +68,7 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
     let owned = relic_count(g);
     for rl in RELICS.iter() {
         let r = rk(g, rl.id);
-        if r >= RMAX || (r == 0 && owned >= RSLOTS) { continue; }
+        if r >= RMAX || (r == 0 && owned >= RSLOTS) || g.locked.contains(&rl.id) { continue; }
         let evo_hint = if r + 1 == RMAX { crate::relics::EVOS.iter().find(|e| e.0 == rl.id).map(|e| format!(" Max rank: evolves with {}.", e.2)).unwrap_or_default() } else { String::new() };
         out.push(Card { kind: CardKind::Relic, key: format!("r.{}", rl.id), name: rl.name.into(), desc: format!("{}{}", rl.ranks[r as usize], evo_hint), tag: if r > 0 { format!("Relic - rank {}/{}", r + 1, RMAX) } else { "New relic".into() }, color: rl.color, w: if r > 0 { 1.7 } else if owned < 2 { 2.4 } else { 1.3 } });
     }

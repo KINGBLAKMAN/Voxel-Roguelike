@@ -15,21 +15,21 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory }
+pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp }
 
 #[derive(Resource)]
 pub struct UiState {
     pub screen: Screen, pub cards: Vec<Card>, pub relic_only: bool, pub dead_t: f32, pub toast: Option<(String, String, f32, f32)>,
     pub ghost_hp: f32, pub map_t: f32, pub menu_t: f32, pub start: Option<Class>, pub restart: bool, pub quit: bool, pub cards_dirty: bool,
-    pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32,
+    pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32, pub paid: u32, pub recorded: bool, pub last_gain: u32,
 }
 impl Default for UiState {
-    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567 } }
+    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0 } }
 }
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -37,7 +37,7 @@ pub struct HudRefs {
     slots: Vec<(Entity, Entity, Entity, Entity)>, weapon: Entity, food: Entity, timer: Entity, threat: Entity, kills: Entity,
     boss: Entity, boss_fill: Entity, boss_name: Entity, toast: Entity, toast_a: Entity, toast_b: Entity, buffs: Entity, relics: Entity,
     interact: Entity, cross: Vec<Entity>, map: Handle<Image>, day: Entity, pops: Vec<Entity>, flash: Entity, hurt: Entity,
-    menu: Entity, level: Entity, lv_title: Entity, lv_sub: Entity, cards: Vec<(Entity, Entity, Entity, Entity)>, reroll: Entity,
+    pub menu: Entity, level: Entity, lv_title: Entity, lv_sub: Entity, cards: Vec<(Entity, Entity, Entity, Entity)>, reroll: Entity,
     pause: Entity, dead: Entity, dead_stats: Entity, victory: Entity, vic_stats: Entity,
 }
 
@@ -135,7 +135,7 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
 
     // ---------------- menu ----------------
     let full = || Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, row_gap: px(10.0), ..default() };
-    let menu = c.spawn((full(), BackgroundColor(col(0x08060c, 0.35)))).id();
+    let menu = c.spawn((full(), BackgroundColor(col(0x08060c, 0.5)))).id();
     let title = c.spawn(txt("EMBERWILD", 92.0, EMBER)).id();
     let sub = c.spawn(txt("The horde never stops coming. Grow strong enough to outlast it.", 18.0, 0xe8dccc)).id();
     let row = c.spawn(Node { column_gap: px(16.0), margin: UiRect::top(px(28.0)), ..default() }).id();
@@ -224,14 +224,19 @@ pub fn cd_base(g: &Game, id: &str) -> f32 { ab_info(id).cd * g.st.cd * (1.0 - 0.
 fn fmt_t(t: f32) -> String { let s = t.max(0.0) as u32; format!("{}:{:02}", s / 60, s % 60) }
 
 /// screen flow: menus, level-ups, pause and death
-pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Query<(&Interaction, &UiBtn), Changed<Interaction>>, mut g: ResMut<Game>, mut p: ResMut<Player>,
+pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Query<(&Interaction, &UiBtn), Changed<Interaction>>, mut g: ResMut<Game>, mut p: ResMut<Player>,
     mut paused: ResMut<crate::Paused>, mut ctl: ResMut<Controls>, time: Res<Time>, mut sfx: ResMut<crate::audio::Sfx>, mut exit: EventWriter<AppExit>, test: Option<Res<crate::testkit::TestCfg>>) {
     let mut clicked = None;
     for (i, b) in btns.iter() { if *i == Interaction::Pressed { clicked = Some(*b); } }
     match ui.screen {
         Screen::Menu => {
-            for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { ui.start = Some([Class::Ranger, Class::Mage, Class::Warrior, Class::Priest][i]); } }
-            if let Some(UiBtn::Class(c)) = clicked { ui.start = Some(c); }
+            let mut want = None;
+            for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { want = Some([Class::Ranger, Class::Mage, Class::Warrior, Class::Priest][i]); } }
+            if let Some(UiBtn::Class(c)) = clicked { want = Some(c); }
+            if let Some(c) = want { if save.class_open(c) { ui.start = Some(c); ui.paid = 0; ui.recorded = false; } else { sfx.play("hurt"); } }
+            if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Camp) { ui.screen = Screen::Camp; sfx.play("pick"); }
+            if clicked == Some(UiBtn::EmberUp) && save.ember < save.max_ember { save.ember += 1; save.write(); sfx.play("pick"); }
+            if clicked == Some(UiBtn::EmberDown) && save.ember > 0 { save.ember -= 1; save.write(); sfx.play("pick"); }
         }
         Screen::Playing => {
             if keys.just_pressed(KeyCode::Escape) && !g.over { ui.screen = Screen::Paused; sfx.play("pick"); }
@@ -264,9 +269,21 @@ pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Q
             if clicked == Some(UiBtn::Quit) { exit.send(AppExit::Success); }
         }
         Screen::Dead => { if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; } }
+        Screen::Camp => {
+            if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Menu; }
+            if let Some(UiBtn::Buy(i)) = clicked { sfx.play(if save.buy(i) { "relic" } else { "hurt" }); }
+            if let Some(UiBtn::Unlock(i)) = clicked { sfx.play(if save.unlock(i) { "chest" } else { "hurt" }); }
+        }
         Screen::Victory => {
             if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; }
             if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Endless) { g.flags.insert("endless", 1.0); ui.screen = Screen::Playing; ctl.relock = true; g.toasts.push(("Endless".into(), "Bosses return every four minutes, stronger each time".into(), 3.0)); }
+        }
+    }
+    if matches!(ui.screen, Screen::Dead | Screen::Victory) {
+        let total = crate::meta::payout(&g);
+        if total > ui.paid {
+            let gain = total - ui.paid; ui.paid = total; ui.last_gain = gain;
+            if !ui.recorded { ui.recorded = true; crate::meta::record_run(&mut save, &g, p.cls, gain); } else { save.gold += gain; save.write(); }
         }
     }
     paused.0 = ui.screen != Screen::Playing;
@@ -288,12 +305,12 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     let dt = time.delta_secs();
     let scr = ui.screen;
     set_vis(&mut q, r.menu, scr == Screen::Menu);
-    set_vis(&mut q, r.hud, scr != Screen::Menu);
+    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp));
     set_vis(&mut q, r.level, scr == Screen::LevelUp);
     set_vis(&mut q, r.pause, scr == Screen::Paused);
     set_vis(&mut q, r.dead, scr == Screen::Dead);
     set_vis(&mut q, r.victory, scr == Screen::Victory);
-    if scr == Screen::Menu { return; }
+    if matches!(scr, Screen::Menu | Screen::Camp) { return; }
     // health, experience, stamina
     let hp = (p.hp / p.max_hp).clamp(0.0, 1.0);
     if ui.ghost_hp < hp { ui.ghost_hp = hp; } else { ui.ghost_hp = (ui.ghost_hp - dt * 0.35).max(hp); }
@@ -322,7 +339,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_text(&mut q, r.timer, &fmt_t(g.run_t));
     set_text(&mut q, r.threat, tn); set_tcol(&mut q, r.threat, srgb(tc));
     let nb = crate::director::next_boss(&g).map(|(t, n)| if t > 0.0 { format!("  |  {} in {}", n, fmt_t(t)) } else { String::new() }).unwrap_or_default();
-    set_text(&mut q, r.kills, &format!("{} slain{}", g.kills, nb));
+    set_text(&mut q, r.kills, &format!("{} slain  |  {} gold{}", g.kills, g.gold, nb));
     let tod = if dc.blood { "Blood moon" } else if dc.night { "Night" } else { "Day" };
     set_text(&mut q, r.day, &format!("Day {}  |  {}", dc.day, tod));
     // boss
@@ -380,8 +397,8 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     ui.map_t -= dt;
     if ui.map_t <= 0.0 { if let Some(w) = w.as_ref() { ui.map_t = 0.2; draw_map(w, &g, &p, &mut images, &r.map); } }
     // death summary
-    if scr == Screen::Victory { set_text(&mut q, r.vic_stats, &format!("{}  |  {}  |  level {}  |  {} slain", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills)); }
-    if scr == Screen::Dead { set_text(&mut q, r.dead_stats, &format!("{}  |  survived {}  |  level {}  |  {} slain", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills)); }
+    if scr == Screen::Victory { set_text(&mut q, r.vic_stats, &format!("{}  |  {}  |  level {}  |  {} slain\n+{} gold", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills, ui.last_gain)); }
+    if scr == Screen::Dead { set_text(&mut q, r.dead_stats, &format!("{}  |  survived {}  |  level {}  |  {} slain\n+{} gold", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills, ui.last_gain)); }
     // level-up cards
     if scr == Screen::LevelUp {
         let chest = g.level_pending == 0;

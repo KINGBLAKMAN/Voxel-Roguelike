@@ -191,10 +191,10 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let mut sc = if k == Kind::Brute { 1.55 } else { crate::horde::scale(k) };
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
-    let boss_hp = (1.0 + mi * 0.05) * cx.g.mods_hp() * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
+    let boss_hp = (1.0 + mi * 0.05) * cx.g.mods_hp() * if cx.g.ember() >= 5 { 1.4 } else { 1.0 } * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
     let mut hp = t.hp * if quiet { 1.0 } else if o.boss { boss_hp } else { diff } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
     let mut dmg = t.dmg * (0.75 + mi * 0.07) * 1.02f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.05) * cx.g.mods_dmg();
-    let mut speed_mul = if quiet { 1.0 } else { 1.0 + (mi * 0.02).min(0.3) };
+    let mut speed_mul = if quiet { 1.0 } else { (1.0 + (mi * 0.02).min(0.3)) * if cx.g.ember() >= 9 { 1.15 } else { 1.0 } };
     if let Some(a) = o.affix { hp *= 2.6; dmg *= 1.3; if a == Affix::Swift { speed_mul *= 1.5; } if a == Affix::Brute { hp *= 1.5; } let s = if a == Affix::Brute { 1.4 } else { 1.2 }; sc *= s; w *= s; h *= s; }
     if let Some(r) = rig.root { cx.c.entity(r).insert(Transform::from_translation(pos).with_scale(Vec3::splat(sc))); }
     let id = cx.g.next_id; cx.g.next_id += 1;
@@ -240,7 +240,7 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
     if kind == Kind::Bloater { bloater_pop(cx, i, self_det); }
     crate::horde::on_death(cx, kind, pos);
     if elite { let (nm, _) = affix.map(affix_info).unwrap_or((t.name, 0)); let label = if affix.is_some() { format!("{} {} slain", nm, t.name) } else { format!("{} slain", t.name) }; cx.toast(&label, &format!("+{} experience", xp), 2.5); crate::director::drop_chest(cx, pos, false); }
-    if boss { cx.g.boss = None; }
+    if boss { cx.g.boss = None; *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; for _ in 0..8 { let g = (5.0 + cx.g.minutes()).round(); cx.drop_pick(c, PickKind::Gold, g); } }
     let e = std::mem::replace(&mut cx.g.enemies[i].rig, Rig::default());
     if let Some(ice) = cx.g.enemies[i].ice.take() { cx.c.entity(ice).despawn_recursive(); cx.gfx().debris(c, &[0xbff4ff, 0x8fe6ff, 0xffffff], 12, 6.0, 0.2, 6.0); }
     if t.prop || kind == Kind::Bloater { if let Some(r) = e.root { cx.c.entity(r).despawn_recursive(); } }

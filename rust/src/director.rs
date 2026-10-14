@@ -35,7 +35,8 @@ fn horde_target(cx: &Ctx) -> f32 {
     if cx.dc.night { n *= 1.3; }
     if cx.dc.blood { n *= 1.4; }
     if cx.g.dir.trial.is_some() { n += 10.0; }
-    n.min(140.0)
+    if cx.g.ember() >= 6 { n *= 1.25; }
+    n.min(150.0)
 }
 
 /// a spawn point on a ring around `a`; spots in front of the player are pushed further out so the horde rises at the edge of sight
@@ -128,7 +129,7 @@ pub fn update_director(cx: &mut Ctx) {
             if etype(k).ranged && ranged > want * 0.22 { k = cx.pick(&[Kind::Zombie, Kind::Spider, Kind::Slime]); }
             let (lo, hi) = pack_size(k);
             let n = ((want - hostile).ceil() as u32).min(lo + (cx.r() * (hi - lo + 1) as f32) as u32 + (m / 4.0) as u32);
-            let elite = cx.r() < (0.02 + m * 0.012 + if cx.dc.blood { 0.08 } else { 0.0 }).clamp(0.0, 0.3);
+            let elite = cx.r() < ((0.02 + m * 0.012 + if cx.dc.blood { 0.08 } else { 0.0 }) * if cx.g.ember() >= 3 { 2.0 } else { 1.0 }).clamp(0.0, 0.45);
             spawn_pack(cx, pp, yaw, k, n, PackOpts { elite, ..default() });
         }
     }
@@ -136,10 +137,11 @@ pub fn update_director(cx: &mut Ctx) {
     if cx.g.dir.event <= 0.0 { cx.g.dir.event = cx.rr(75.0, 100.0) * (1.0 - m * 0.02).max(0.6); let i = cx.g.dir.ev_i; cx.g.dir.ev_i += 1; horde_event(cx, i); }
     boss_schedule(cx);
     // from the Dangerous tier on, the ground itself turns on you: telegraphed eruptions land where you're heading
-    if m >= 6.0 {
+    let hz0 = if cx.g.ember() >= 7 { 3.0 } else { 6.0 };
+    if m >= hz0 {
         cx.g.dir.hazard -= dt;
         if cx.g.dir.hazard <= 0.0 {
-            cx.g.dir.hazard = (14.0 - (m - 6.0) * 0.55).max(5.0) * cx.rr(0.8, 1.2);
+            cx.g.dir.hazard = (14.0 - (m - hz0) * 0.55).max(5.0) * cx.rr(0.8, 1.2) * if cx.g.ember() >= 7 { 0.75 } else { 1.0 };
             let n = 1 + (m / 8.0) as usize;
             let lead = cx.p.body.vel * 1.3;
             for k in 0..n {

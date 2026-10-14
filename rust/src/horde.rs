@@ -352,10 +352,10 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
         Kind::EmberKing => {
             // phases by remaining health: each one adds attacks and speed
             let (hp, mhp) = (cx.g.enemies[i].hp, cx.g.enemies[i].max_hp);
-            let phase = if hp < mhp * 0.33 { 2 } else if hp < mhp * 0.66 { 1 } else { 0 };
+            let phase = if hp < mhp * 0.15 && cx.g.ember() >= 10 { 3 } else if hp < mhp * 0.33 { 2 } else if hp < mhp * 0.66 { 1 } else { 0 };
             if phase > ai.phase {
                 cx.g.enemies[i].ai.phase = phase;
-                cx.toast(if phase == 1 { "The Ember King burns hotter" } else { "The Ember King is enraged" }, if phase == 1 { "Fire rains from the sky" } else { "He will not fall quietly" }, 2.5);
+                cx.toast(if phase == 1 { "The Ember King burns hotter" } else if phase == 3 { "THE EMBER KING UNLEASHED" } else { "The Ember King is enraged" }, if phase == 1 { "Fire rains from the sky" } else { "He will not fall quietly" }, 2.5);
                 cx.play("bomb"); cx.shake(0.8);
                 { let mut g = cx.gfx(); g.shock(epos, 0xff6a1a, 0.5, 12.0, 0.6, 3.0); g.ring(epos, 0xffb03a, 0.5, 12.0, 0.6); }
                 if dist < 12.0 { cx.p.body.vel += dir * 14.0 + Vec3::Y * 6.0; }

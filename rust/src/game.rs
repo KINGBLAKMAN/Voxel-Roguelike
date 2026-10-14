@@ -18,7 +18,7 @@ pub struct Stats { pub dmg: f32, pub cd: f32, pub speed: f32, pub leech: f32, pu
 impl Stats { pub fn base() -> Self { Stats { dmg: 1.0, cd: 1.0, speed: 1.0, crit: 0.06, food: 1.0, magnet: 1.0, area: 1.0, charge_mul: 1.0, fire_rad: 1.0, atk_spd: 1.0, stam_max: 100.0, stam_regen: 1.0, xp_mul: 1.0, ..default() } } }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PickKind { Xp, Meat, Berries, Heart, Magnet, Bomb }
+pub enum PickKind { Xp, Meat, Berries, Heart, Magnet, Bomb, Gold }
 pub struct Pickup { pub kind: PickKind, pub v: f32, pub pos: Vec3, pub vel: Vec3, pub t: f32, pub e: Entity, pub vac: bool, pub ph: f32 }
 
 #[derive(Clone)]
@@ -36,14 +36,14 @@ pub struct Game {
     pub next_id: u32, pub run_t: f32, pub kills: u32, pub hitstop: f32, pub st: Stats, pub mods: HashMap<String, u32>, pub perks: Vec<String>,
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
-    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32,
+    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0 }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![] }
     }
 }
 impl Game {
@@ -53,6 +53,7 @@ impl Game {
     /// difficulty multipliers from the Ember level (set when a run starts)
     pub fn mods_hp(&self) -> f32 { *self.flags.get("ember_hp").unwrap_or(&1.0) }
     pub fn mods_dmg(&self) -> f32 { *self.flags.get("ember_dmg").unwrap_or(&1.0) }
+    pub fn ember(&self) -> u32 { *self.flags.get("ember").unwrap_or(&0.0) as u32 }
     pub fn xp_need(&self) -> f32 { let l = (self.lvl - 1) as f32; (20.0 + l * 14.0 + l * l * 1.1).round() }
 }
 
@@ -164,6 +165,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     // ---------------- the player ----------------
     pub fn heal(&mut self, a: f32, quiet: bool) {
         if self.p.dead { return; }
+        let a = a * if self.g.ember() >= 4 { 0.75 } else { 1.0 };
         let before = self.p.hp; self.p.hp = (self.p.hp + a).min(self.p.max_hp);
         let d = (self.p.hp - before).round();
         if d >= 2.0 && !quiet { let pp = self.p.body.pos + Vec3::Y * 2.1; self.pop(pp, format!("+{}", d as i32), 2); }
@@ -193,6 +195,15 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         if self.p.hp <= 0.0 { self.kill_player(); }
     }
     pub fn kill_player(&mut self) {
+        // Second Chance from the Camp: rise once at half health
+        if self.g.flags.get("lives").copied().unwrap_or(0.0) >= 1.0 {
+            *self.g.flags.get_mut("lives").unwrap() -= 1.0;
+            self.p.hp = (self.p.max_hp * 0.5).round(); self.p.invuln = 3.0;
+            let c = self.p.body.pos; self.play("relic"); self.g.flash = 0.3; self.toast("Second Chance", "You rise again", 2.5);
+            { let mut gx = self.gfx(); gx.pillar(c, 0xffd35a, 2.2, 24.0, 1.4); gx.shock(c, 0xffd35a, 0.5, 9.0, 0.6, 3.0); }
+            self.aoe(c, 9.0, &mut |cx, i, _| { cx.damage(i, 80.0, Hit { kb: 14.0, up: 6.0, src: Some(c), col: 0xffd35a, ..default() }); cx.status(i, Status { stun: 1.5, ..default() }); });
+            return;
+        }
         if crate::augments::phoenix(self) { return; }
         self.p.hp = 0.0; self.p.dead = true; self.p.death_t = 0.0; self.p.charging = false;
         self.play("die"); self.g.hitstop = 0.25;
@@ -215,7 +226,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let vel = Vec3::new(self.rr(-3.0, 3.0), self.rr(3.0, 6.0), self.rr(-3.0, 3.0));
         let ph = self.rr(0.0, 6.0);
         let e = pickup_model(self, kind, v, pos);
-        if kind != PickKind::Xp { let c = match kind { PickKind::Heart => 0xff4a5a, PickKind::Magnet => 0x7fd4ff, PickKind::Bomb => 0xfff0a0, _ => 0xffffff }; if matches!(kind, PickKind::Heart | PickKind::Magnet | PickKind::Bomb) { self.gfx().pillar(pos - Vec3::Y * 0.4, c, 0.4, 4.0, 1.0); } }
+        if kind != PickKind::Xp { let c = match kind { PickKind::Heart => 0xff4a5a, PickKind::Magnet => 0x7fd4ff, PickKind::Bomb => 0xfff0a0, _ => 0xffffff }; if matches!(kind, PickKind::Heart | PickKind::Magnet | PickKind::Bomb) && kind != PickKind::Gold { self.gfx().pillar(pos - Vec3::Y * 0.4, c, 0.4, 4.0, 1.0); } }
         self.g.pickups.push(Pickup { kind, v, pos, vel, t: 0.0, e, vac: false, ph });
     }
 }
@@ -231,6 +242,7 @@ fn pickup_model(cx: &mut Ctx, kind: PickKind, v: f32, pos: Vec3) -> Entity {
         PickKind::Heart => { b.bx(root, Vec3::new(0.22, 0.22, 0.16), 0xe8344e, Vec3::new(-0.1, 0.06, 0.0)); b.bx(root, Vec3::new(0.22, 0.22, 0.16), 0xe8344e, Vec3::new(0.1, 0.06, 0.0));
             let t = b.bx(root, Vec3::new(0.26, 0.26, 0.16), 0xe8344e, Vec3::new(0.0, -0.07, 0.0)); b.rot(t, 0.0, 0.0, std::f32::consts::FRAC_PI_4); b.glow(root, Vec3::new(0.06, 0.06, 0.18), 0xff8a9a, Vec3::new(-0.12, 0.12, 0.0)); }
         PickKind::Magnet => { for x in [-0.16, 0.16] { b.bx(root, Vec3::new(0.12, 0.36, 0.12), 0xd8343a, Vec3::new(x, 0.0, 0.0)); b.bx(root, Vec3::new(0.12, 0.1, 0.13), 0xd8dde4, Vec3::new(x, -0.21, 0.0)); } b.bx(root, Vec3::new(0.44, 0.12, 0.12), 0xd8343a, Vec3::new(0.0, 0.18, 0.0)); }
+        PickKind::Gold => { for k in 0..(v.min(5.0) as usize).max(1) { b.bx(root, Vec3::new(0.26, 0.06, 0.26), 0xffc83a, Vec3::new(0.0, k as f32 * 0.07, 0.0)); } b.glow(root, Vec3::new(0.14, 0.02, 0.14), 0xfff0a0, Vec3::new(0.0, (v.min(5.0) as usize).max(1) as f32 * 0.07, 0.0)); }
         PickKind::Bomb => { b.bx(root, Vec3::new(0.1, 0.5, 0.1), 0xe0b84a, Vec3::ZERO); b.bx(root, Vec3::new(0.36, 0.1, 0.1), 0xe0b84a, Vec3::new(0.0, 0.1, 0.0)); let g = b.glow(root, Vec3::splat(0.16), 0xfff8d8, Vec3::new(0.0, 0.1, 0.0)); b.rot(g, 0.6, 0.6, 0.0); }
     }
     root
@@ -303,6 +315,7 @@ fn collect(cx: &mut Ctx, kind: PickKind, v: f32) {
     let pp = cx.p.body.pos;
     match kind {
         PickKind::Xp => { cx.play("gem"); cx.gain_xp(v); }
+        PickKind::Gold => { let n = (v * cx.g.flags.get("greed").copied().unwrap_or(1.0)).round() as u32; cx.g.gold += n; cx.play("gem"); cx.pop(pp + Vec3::Y * 2.0, format!("+{} gold", n), 3); }
         PickKind::Meat => { cx.g.food_meat += 1; cx.play("pick"); cx.pop(pp + Vec3::Y * 2.0, "+ Meat".into(), 2); }
         PickKind::Berries => { cx.g.food_berries += 1; cx.play("pick"); cx.pop(pp + Vec3::Y * 2.0, "+ Berries".into(), 2); }
         PickKind::Heart => { let a = cx.p.max_hp * 0.25; cx.heal(a, false); cx.play("heal"); cx.toast("Heart", "Restored health", 1.6); cx.gfx().pillar(pp, 0x8dff9e, 1.1, 6.0, 0.9); }
@@ -322,12 +335,14 @@ fn collect(cx: &mut Ctx, kind: PickKind, v: f32) {
 }
 pub fn rare_drop(cx: &mut Ctx, c: Vec3, elite: bool) {
     let r = cx.r();
-    if elite { if r < 0.5 { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.7 { cx.drop_pick(c, PickKind::Magnet, 0.0) } return; }
-    if r < 0.004 { cx.drop_pick(c, PickKind::Magnet, 0.0) } else if r < 0.011 { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.014 { cx.drop_pick(c, PickKind::Bomb, 0.0) }
+    let hearts = cx.g.ember() < 8;
+    if elite { let g = (4.0 + cx.g.minutes() * 0.5).round(); cx.drop_pick(c, PickKind::Gold, g); if r < 0.5 && hearts { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.7 { cx.drop_pick(c, PickKind::Magnet, 0.0) } return; }
+    if r < 0.004 { cx.drop_pick(c, PickKind::Magnet, 0.0) } else if r < 0.011 && hearts { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.014 { cx.drop_pick(c, PickKind::Bomb, 0.0) } else if r < 0.04 { cx.drop_pick(c, PickKind::Gold, 1.0) }
 }
 pub fn urn_loot(cx: &mut Ctx, c: Vec3) {
     let r = cx.r(); let m = cx.g.minutes();
-    if r < 0.3 { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.45 { cx.drop_pick(c, PickKind::Magnet, 0.0) } else if r < 0.6 { cx.drop_pick(c, PickKind::Bomb, 0.0) } else if r < 0.75 { cx.drop_pick(c, PickKind::Meat, 0.0) } else { cx.drop_gems(c, (5.0 + m * 2.5).round()) }
+    cx.drop_pick(c, PickKind::Gold, 3.0);
+    if r < 0.3 && cx.g.ember() < 8 { cx.drop_pick(c, PickKind::Heart, 0.0) } else if r < 0.45 { cx.drop_pick(c, PickKind::Magnet, 0.0) } else if r < 0.6 { cx.drop_pick(c, PickKind::Bomb, 0.0) } else if r < 0.75 { cx.drop_pick(c, PickKind::Meat, 0.0) } else { cx.drop_gems(c, (5.0 + m * 2.5).round()) }
     if cx.r() < 0.5 { cx.drop_gems(c, (2.0 + m).round()); }
 }
 pub fn ang(a: f32) -> Vec3 { Vec3::new(a.cos(), 0.0, a.sin()) }
