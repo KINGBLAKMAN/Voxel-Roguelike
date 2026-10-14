@@ -1,0 +1,24 @@
+[package]
+name = "emberwild"
+version = "0.5.0"
+edition = "2021"
+description = "Voxel horde-survival roguelike"
+
+[dependencies]
+bevy = { version = "=0.15.3", default-features = false, features = [
+  "bevy_asset", "bevy_audio", "bevy_color", "bevy_core_pipeline", "bevy_pbr", "bevy_render",
+  "bevy_state", "bevy_text", "bevy_ui", "bevy_window", "bevy_winit", "default_font", "multi_threaded",
+  "tonemapping_luts", "ktx2", "zstd", "x11", "wav", "png", "bevy_picking", "bevy_ui_picking_backend", "bevy_mesh_picking_backend", "bevy_sprite", "sysinfo_plugin"
+] }
+rand = { version = "0.8", features = ["small_rng"] }
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
