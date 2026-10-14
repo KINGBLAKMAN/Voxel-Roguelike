@@ -90,11 +90,13 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn find(&self, id: u32) -> Option<usize> { self.g.enemies.iter().position(|e| e.id == id && !e.dead) }
     /// player damage to an enemy, with crits, lifesteal, knockback, popups and hit sparks
     pub fn damage(&mut self, i: usize, amount: f32, o: Hit) {
-        if i >= self.g.enemies.len() || self.g.enemies[i].dead { return; }
+        if i >= self.g.enemies.len() || self.g.enemies[i].dead || self.g.enemies[i].ai.hidden { return; }
         let crit = self.r() < self.g.st.crit;
         let (elite, frozen, brute, pos, h, prop) = { let e = &self.g.enemies[i]; (e.elite, e.frozen > 0.0, e.affix == Some(Affix::Brute), e.body.pos, e.body.h, e.t.prop) };
         let mut a = amount * self.dmg_mul() * if elite { 1.0 + self.g.st.elite } else { 1.0 } * if frozen { 1.25 + self.g.st.shatter } else { 1.0 } * if crit { 2.0 } else { 1.0 };
         if brute { a *= 0.8; }
+        // shieldbearers turn blows that land on the front of the shield
+        if self.g.enemies[i].kind == Kind::Shieldbearer { if let Some(s) = o.src { let e = &self.g.enemies[i]; let f = Vec3::new(e.yaw.sin(), 0.0, e.yaw.cos()); if (s - e.body.pos).with_y(0.0).normalize_or_zero().dot(f) > 0.35 { a *= 0.2; let p = e.body.pos + Vec3::Y * 1.4; self.fx.sparks(p + f * 0.6, 0xbfe8ff, 5, 6.0); } } }
         // enemies grow armour over the run: a flat cut per hit that punishes many tiny hits, never below 30%
         if !prop { let armor = (self.g.minutes() / 4.0).floor().min(5.0); a = (a - armor).max(a * 0.3); }
         a = (a * self.rr(0.92, 1.08)).round().max(1.0);
@@ -118,7 +120,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     }
     pub fn apply_damage(&mut self, i: usize, a: f32, o: Hit) {
         let e = &mut self.g.enemies[i];
-        if e.dead { return; }
+        if e.dead || e.ai.hidden { return; }
         e.hp -= a; e.flash = 0.1; e.hit_p = 0.14; e.alert = true;
         if e.t.passive { e.flee = 4.0; }
         if let Some(src) = o.src { if o.kb > 0.0 && !e.elite && !e.t.prop {
@@ -149,13 +151,13 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     /// every live enemy near a point (by index); visit with f(ctx, index, dist)
     pub fn near(&self, c: Vec3, r: f32) -> Vec<(usize, f32)> {
         let mut out = vec![];
-        for (i, e) in self.g.enemies.iter().enumerate() { if e.dead { continue; } let d = Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(); if d < r + e.body.w && (e.body.pos.y - c.y).abs() < r + 2.0 { out.push((i, d)); } }
+        for (i, e) in self.g.enemies.iter().enumerate() { if e.dead || e.ai.hidden { continue; } let d = Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(); if d < r + e.body.w && (e.body.pos.y - c.y).abs() < r + 2.0 { out.push((i, d)); } }
         out
     }
     pub fn aoe(&mut self, c: Vec3, r: f32, f: &mut dyn FnMut(&mut Ctx, usize, f32)) -> usize { let v = self.near(c, r); let n = v.len(); for (i, d) in v { if !self.g.enemies[i].dead { f(self, i, d); } } n }
     /// hostile targets sorted by distance
     pub fn foes(&self, pos: Vec3, r: f32) -> Vec<usize> {
-        let mut v: Vec<(f32, usize)> = self.g.enemies.iter().enumerate().filter(|(_, e)| !e.dead && !e.t.passive && !e.t.prop).map(|(i, e)| (Vec2::new(e.body.pos.x - pos.x, e.body.pos.z - pos.z).length(), i)).filter(|(d, _)| *d < r).collect();
+        let mut v: Vec<(f32, usize)> = self.g.enemies.iter().enumerate().filter(|(_, e)| !e.dead && !e.ai.hidden && !e.t.passive && !e.t.prop).map(|(i, e)| (Vec2::new(e.body.pos.x - pos.x, e.body.pos.z - pos.z).length(), i)).filter(|(d, _)| *d < r).collect();
         v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap()); v.into_iter().map(|x| x.1).collect()
     }
 

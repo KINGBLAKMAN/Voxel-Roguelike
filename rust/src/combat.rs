@@ -101,7 +101,7 @@ pub fn update_projs(cx: &mut Ctx) {
                 Owner::Player => {
                     let mut hit_i = None;
                     for (i, e) in cx.g.enemies.iter().enumerate() {
-                        if e.dead || p.hit.contains(&e.id) { continue; }
+                        if e.dead || e.ai.hidden || p.hit.contains(&e.id) { continue; }
                         let hx = Vec2::new(e.body.pos.x - p.pos.x, e.body.pos.z - p.pos.z).length();
                         if hx < e.body.w + p.r + 0.1 && p.pos.y > e.body.pos.y - p.r && p.pos.y < e.body.pos.y + e.body.h + p.r { hit_i = Some(i); break; }
                     }

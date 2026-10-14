@@ -16,12 +16,12 @@ pub struct Trial { pub poi: (i32, i32), pub c: Vec3, pub t: f32, pub spawn: f32 
 pub struct Director {
     pub pack: f32, pub event: f32, pub boss: f32, pub urn: f32, pub animal: f32, pub ev_i: u32,
     pub guarded: HashSet<(i32, i32)>, pub cleared: HashSet<(i32, i32)>, pub used: HashSet<(i32, i32)>, pub chest_out: HashSet<(i32, i32)>,
-    pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32, pub hazard: f32,
+    pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32, pub hazard: f32, pub next_boss: usize, pub warned: bool, pub endless_t: f32,
 }
 impl Default for Director {
     fn default() -> Self {
         Director { pack: 1.5, event: 70.0, boss: 300.0, urn: 2.0, animal: 3.0, ev_i: 0, guarded: HashSet::new(), cleared: HashSet::new(), used: HashSet::new(), chest_out: HashSet::new(),
-            chests: vec![], trial: None, heat: 0.0, hazard: 10.0 }
+            chests: vec![], trial: None, heat: 0.0, hazard: 10.0, next_boss: 0, warned: false, endless_t: 120.0 }
     }
 }
 
@@ -53,19 +53,25 @@ pub fn ring_spot(cx: &mut Ctx, a: Vec3, yaw: f32, r0: f32, r1: f32) -> Option<Ve
 }
 
 /// [kind, minute it joins the horde, weight]
-const ROSTER: [(Kind, f32, f32); 8] = [(Kind::Zombie, 0.0, 6.0), (Kind::Slime, 0.0, 4.0), (Kind::Bat, 1.5, 3.5), (Kind::Skeleton, 2.5, 2.4), (Kind::Spider, 3.5, 3.0), (Kind::Bloater, 4.5, 2.2), (Kind::Cultist, 6.0, 2.0), (Kind::Brute, 8.0, 1.4)];
-fn pack_size(k: Kind) -> (u32, u32) { match k { Kind::Zombie => (2, 5), Kind::Slime => (2, 4), Kind::Bat => (4, 8), Kind::Skeleton => (1, 3), Kind::Spider => (2, 3), Kind::Bloater | Kind::Cultist => (1, 2), _ => (1, 1) } }
+const ROSTER: &[(Kind, f32, f32)] = &[(Kind::Zombie, 0.0, 6.0), (Kind::Slime, 0.0, 4.0), (Kind::Bat, 1.5, 3.5), (Kind::Skeleton, 2.5, 2.4), (Kind::Spider, 3.5, 3.0), (Kind::Wurm, 3.0, 2.2),
+    (Kind::Gorehorn, 4.0, 1.5), (Kind::Bloater, 4.5, 2.2), (Kind::Shieldbearer, 5.0, 1.6), (Kind::Cultist, 6.0, 2.0), (Kind::Imp, 6.5, 1.4), (Kind::Shaman, 7.0, 1.0),
+    (Kind::FrostGiant, 7.0, 0.8), (Kind::Brute, 8.0, 1.4), (Kind::Necromancer, 9.0, 0.9)];
+fn pack_size(k: Kind) -> (u32, u32) { match k { Kind::Zombie => (2, 5), Kind::Slime => (2, 4), Kind::Bat => (4, 8), Kind::Skeleton => (1, 3), Kind::Spider => (2, 3), Kind::Bloater | Kind::Cultist | Kind::Gorehorn => (1, 2), Kind::Shieldbearer | Kind::Imp => (2, 3), _ => (1, 1) } }
 fn pick_kind(cx: &mut Ctx, b: Bio) -> Kind {
     let m = cx.g.minutes();
     let mut opts = vec![]; let mut tot = 0.0;
-    for (k, at, w) in ROSTER {
+    for &(k, at, w) in ROSTER {
         if m < at { continue; }
+        // biome natives: sand wurms only hunt the desert, frost giants only the snow
+        if k == Kind::Wurm && b != Bio::Desert { continue; }
+        if k == Kind::FrostGiant && !matches!(b, Bio::Snow | Bio::Peak) { continue; }
         let mut q = w * (0.35 + (m - at) * 0.4).min(1.0);
         if k == Kind::Skeleton && b == Bio::Desert { q *= 2.0; }
         if k == Kind::Spider && b == Bio::Forest { q *= 2.0; }
         if k == Kind::Cultist && matches!(b, Bio::Snow | Bio::Peak) { q *= 1.8; }
         if k == Kind::Slime && matches!(b, Bio::Plains | Bio::Forest) { q *= 1.4; }
-        if cx.dc.night && matches!(k, Kind::Zombie | Kind::Skeleton | Kind::Bat) { q *= 1.5; }
+        if cx.dc.night && matches!(k, Kind::Zombie | Kind::Skeleton | Kind::Bat | Kind::Necromancer) { q *= 1.5; }
+        if cx.dc.blood && matches!(k, Kind::Shaman | Kind::Imp | Kind::Gorehorn) { q *= 1.8; }
         opts.push((k, q)); tot += q;
     }
     let mut r = cx.r() * tot;
@@ -115,7 +121,7 @@ pub fn update_director(cx: &mut Ctx) {
     cx.g.dir.pack -= dt;
     if cx.g.dir.pack <= 0.0 {
         cx.g.dir.pack = (1.0 - m * 0.05).max(0.3);
-        let want = horde_target(cx);
+        let want = horde_target(cx) * if final_boss_up(cx) { 0.5 } else { 1.0 };
         if hostile < want {
             let b = cx.w.column(pp.x.floor() as i32, pp.z.floor() as i32).b;
             let mut k = pick_kind(cx, b);
@@ -126,10 +132,9 @@ pub fn update_director(cx: &mut Ctx) {
             spawn_pack(cx, pp, yaw, k, n, PackOpts { elite, ..default() });
         }
     }
-    cx.g.dir.event -= dt;
+    if !final_boss_up(cx) { cx.g.dir.event -= dt; }
     if cx.g.dir.event <= 0.0 { cx.g.dir.event = cx.rr(75.0, 100.0) * (1.0 - m * 0.02).max(0.6); let i = cx.g.dir.ev_i; cx.g.dir.ev_i += 1; horde_event(cx, i); }
-    cx.g.dir.boss -= dt;
-    if cx.g.dir.boss <= 0.0 { cx.g.dir.boss = 300.0; spawn_boss(cx); }
+    boss_schedule(cx);
     // from the Dangerous tier on, the ground itself turns on you: telegraphed eruptions land where you're heading
     if m >= 6.0 {
         cx.g.dir.hazard -= dt;
@@ -215,13 +220,43 @@ fn horde_event(cx: &mut Ctx, i: u32) {
         }
     }
 }
-fn spawn_boss(cx: &mut Ctx) {
-    let (pp, yaw) = (cx.p.body.pos, cx.p.yaw);
-    let Some(s) = ring_spot(cx, pp, yaw, 26.0, 32.0) else { return };
-    if let Some(i) = spawn_enemy(cx, Kind::Golem, s, SpawnOpts { boss: true, force: true, ..default() }) {
-        let id = cx.g.enemies[i].id; cx.g.boss = Some(id);
-        cx.toast("An Ancient Golem awakens", "Bring it down for a relic", 3.0); cx.play("boom"); cx.shake(0.6);
+/// the run's shape: a boss every five minutes, and the Ember King at twenty
+pub const BOSSES: [(f32, Kind, &str, &str); 4] = [
+    (300.0, Kind::Golem, "An Ancient Golem awakens", "Bring it down for a relic"),
+    (600.0, Kind::Colossus, "The Bone Colossus rises", "Its arrows blot out the sun"),
+    (900.0, Kind::Broodmother, "The Broodmother descends", "Her children are hungry"),
+    (1200.0, Kind::EmberKing, "THE EMBER KING", "Defeat him to win the run"),
+];
+pub const RUN_LEN: f32 = 1200.0;
+pub fn final_boss_up(cx: &Ctx) -> bool { cx.g.boss.and_then(|id| cx.g.enemies.iter().find(|e| e.id == id && !e.dead)).map(|e| e.kind == Kind::EmberKing).unwrap_or(false) }
+/// (seconds until, name) of the next scheduled boss
+pub fn next_boss(g: &Game) -> Option<(f32, &'static str)> {
+    if g.flags.contains_key("endless") { return Some((g.dir.endless_t, "Boss")); }
+    BOSSES.get(g.dir.next_boss).map(|b| (b.0 - g.run_t, crate::enemies::etype(b.1).name))
+}
+fn boss_schedule(cx: &mut Ctx) {
+    let t = cx.g.run_t;
+    if cx.g.flags.contains_key("endless") {
+        cx.g.dir.endless_t -= cx.dt;
+        if cx.g.dir.endless_t <= 0.0 && cx.g.boss.is_none() {
+            let k = cx.pick(&[Kind::Golem, Kind::Colossus, Kind::Broodmother, Kind::EmberKing]);
+            if spawn_boss(cx, k, "A champion of the wild appears", "Endless: every boss grows stronger") { cx.g.dir.endless_t = 240.0; *cx.g.flags.entry("endless_n").or_insert(0.0) += 1.0; }
+        }
+        return;
     }
+    let Some(&(at, k, title, sub)) = BOSSES.get(cx.g.dir.next_boss) else { return };
+    if t >= at - 8.0 && !cx.g.dir.warned { cx.g.dir.warned = true; cx.play("rumble"); cx.toast("The ground trembles...", "Something huge is coming", 3.0); cx.shake(0.3); }
+    if t >= at && spawn_boss(cx, k, title, sub) { cx.g.dir.next_boss += 1; cx.g.dir.warned = false; }
+}
+fn spawn_boss(cx: &mut Ctx, k: Kind, title: &str, sub: &str) -> bool {
+    let (pp, yaw) = (cx.p.body.pos, cx.p.yaw);
+    let Some(s) = ring_spot(cx, pp, yaw, 22.0, 28.0) else { return false };
+    if let Some(i) = spawn_enemy(cx, k, s, SpawnOpts { boss: true, force: true, ..default() }) {
+        let id = cx.g.enemies[i].id; cx.g.boss = Some(id);
+        cx.toast(title, sub, 3.5); cx.play("horn"); cx.play("boom"); cx.shake(0.7);
+        let mut g = cx.gfx(); g.pillar(s, 0xff3a1a, 2.5, 30.0, 1.5); g.shock(s, 0xff6a3a, 0.5, 14.0, 0.8, 3.0);
+        true
+    } else { false }
 }
 
 // ---------------- chests, shrines and altars ----------------

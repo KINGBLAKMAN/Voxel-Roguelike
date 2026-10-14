@@ -9,10 +9,11 @@ use bevy::prelude::*;
 use std::f32::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Kind { Zombie, Skeleton, Slime, Spider, Cultist, Golem, Bat, Bloater, Brute, Urn, Pig, Sheep, Chicken }
+pub enum Kind { Zombie, Skeleton, Slime, Spider, Cultist, Golem, Bat, Bloater, Brute, Urn, Pig, Sheep, Chicken,
+    Spiderling, Gorehorn, Shieldbearer, Shaman, Imp, Necromancer, Wurm, FrostGiant, Colossus, Broodmother, EmberKing }
 pub struct EType { pub name: &'static str, pub hp: f32, pub dmg: f32, pub speed: f32, pub reach: f32, pub cd: f32, pub wind: f32, pub xp: f32, pub w: f32, pub h: f32,
     pub ranged: bool, pub range: f32, pub passive: bool, pub prop: bool, pub fly: bool, pub kb_res: f32, pub elite: bool, pub blood: &'static [u32] }
-const fn et(name: &'static str, hp: f32, dmg: f32, speed: f32, xp: f32, w: f32, h: f32, blood: &'static [u32]) -> EType {
+pub const fn et(name: &'static str, hp: f32, dmg: f32, speed: f32, xp: f32, w: f32, h: f32, blood: &'static [u32]) -> EType {
     EType { name, hp, dmg, speed, reach: 1.7, cd: 1.2, wind: 0.38, xp, w, h, ranged: false, range: 0.0, passive: false, prop: false, fly: false, kb_res: 0.0, elite: false, blood }
 }
 pub static ZOMBIE: EType = et("Zombie", 40.0, 9.0, 3.3, 3.0, 0.32, 1.85, &[0x5f9a4a, 0x3a6ea5, 0x2a4a2a]);
@@ -30,7 +31,8 @@ pub static SHEEP: EType = EType { passive: true, ..et("Sheep", 22.0, 0.0, 2.4, 2
 pub static CHICKEN: EType = EType { passive: true, ..et("Chicken", 8.0, 0.0, 3.0, 1.0, 0.22, 0.6, &[0xffffff, 0xf0e0c0]) };
 pub fn etype(k: Kind) -> &'static EType {
     match k { Kind::Zombie => &ZOMBIE, Kind::Skeleton => &SKELETON, Kind::Slime => &SLIME, Kind::Spider => &SPIDER, Kind::Cultist => &CULTIST, Kind::Golem => &GOLEM, Kind::Bat => &BAT,
-        Kind::Bloater => &BLOATER, Kind::Brute => &BRUTE, Kind::Urn => &URN, Kind::Pig => &PIG, Kind::Sheep => &SHEEP, Kind::Chicken => &CHICKEN }
+        Kind::Bloater => &BLOATER, Kind::Brute => &BRUTE, Kind::Urn => &URN, Kind::Pig => &PIG, Kind::Sheep => &SHEEP, Kind::Chicken => &CHICKEN,
+        k => crate::horde::etype(k).unwrap() }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -45,13 +47,13 @@ pub struct Enemy {
     pub atk_t: f32, pub wind: f32, pub slow: f32, pub frozen: f32, pub stun: f32, pub burn: f32, pub poison: f32, pub fear: f32, pub flee: f32, pub flash: f32, pub flashing: bool, pub hit_p: f32,
     pub ph: f32, pub rise: f32, pub elite: bool, pub affix: Option<Affix>, pub boss: bool, pub size: f32, pub color: u32, pub speed_mul: f32, pub sc: f32, pub poi: Option<(i32, i32)>,
     pub leap_t: f32, pub hop_t: f32, pub throw_t: f32, pub leaping: f32, pub swell: f32, pub squash: f32, pub smash_at: Vec3, pub chill: u32, pub dead: bool, pub alert: bool,
-    pub wander_t: f32, pub wdir: Vec3, pub burn_acc: f32, pub ice: Option<Entity>, pub aiming: bool, pub was_air: bool, pub force: bool,
+    pub wander_t: f32, pub wdir: Vec3, pub burn_acc: f32, pub ice: Option<Entity>, pub aiming: bool, pub was_air: bool, pub force: bool, pub ai: crate::horde::Ai,
 }
 
 pub struct Corpse { pub root: Entity, pub t: f32, pub sc: f32, pub side: f32, pub fly: bool, pub pos: Vec3, pub yaw: f32 }
 
 /// build the model for a kind; returns the rig
-fn enemy_model(b: &mut Builder, k: Kind, pos: Vec3, color: u32, size: f32, rng: &mut impl FnMut() -> f32) -> Rig {
+pub fn enemy_model(b: &mut Builder, k: Kind, pos: Vec3, color: u32, size: f32, rng: &mut impl FnMut() -> f32) -> Rig {
     let v = Vec3::new;
     let mut pick = |a: &[u32]| a[((rng()) * a.len() as f32) as usize % a.len()];
     match k {
@@ -166,6 +168,7 @@ fn enemy_model(b: &mut Builder, k: Kind, pos: Vec3, color: u32, size: f32, rng: 
                 let lp = b.pivot(root, v(x * o.bw * 0.3, o.leg_h, z * o.bl * 0.32 * if o.two { 0.0 } else { 1.0 })); b.bx(lp, v(o.lw, o.leg_h, o.lw), o.leg, v(0.0, -o.leg_h / 2.0, 0.0)); extra.push(lp); }
             Rig { root: Some(root), body: Some(body), head: Some(head), extra, ..default() }
         }
+        _ => crate::horde::model(b, k, pos, rng),
     }
 }
 
@@ -185,23 +188,25 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let shadow = o.affix.is_some() || matches!(k, Kind::Brute | Kind::Golem) || live < 45;
     let rig = { let mut b = cx.builder(); b.shadow = shadow; let mut r = enemy_model(&mut b, k, pos, o.color, o.size, &mut rng); r.parts = std::mem::take(&mut b.parts); r };
     let _ = cx.fx.r();
-    let mut sc = if k == Kind::Brute { 1.55 } else { 1.0 };
+    let mut sc = if k == Kind::Brute { 1.55 } else { crate::horde::scale(k) };
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
-    let mut hp = t.hp * if quiet { 1.0 } else { diff } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
+    let boss_hp = (1.0 + mi * 0.05) * cx.g.mods_hp() * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
+    let mut hp = t.hp * if quiet { 1.0 } else if o.boss { boss_hp } else { diff } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
     let mut dmg = t.dmg * (0.75 + mi * 0.07) * 1.02f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.05) * cx.g.mods_dmg();
     let mut speed_mul = if quiet { 1.0 } else { 1.0 + (mi * 0.02).min(0.3) };
     if let Some(a) = o.affix { hp *= 2.6; dmg *= 1.3; if a == Affix::Swift { speed_mul *= 1.5; } if a == Affix::Brute { hp *= 1.5; } let s = if a == Affix::Brute { 1.4 } else { 1.2 }; sc *= s; w *= s; h *= s; }
     if let Some(r) = rig.root { cx.c.entity(r).insert(Transform::from_translation(pos).with_scale(Vec3::splat(sc))); }
     let id = cx.g.next_id; cx.g.next_id += 1;
-    let rise = if o.no_rise || quiet || t.fly { 0.0 } else { 0.7 };
+    let rise = if o.no_rise || quiet || t.fly || crate::horde::flies(k) || k == Kind::Wurm { 0.0 } else { 0.7 };
     if rise > 0.0 { cx.gfx().debris(pos + Vec3::Y * 0.1, &[0x6a4a2c, 0x8a5b34, 0x4a3a2a], if o.affix.is_some() { 10 } else { 4 }, 3.0, 0.18, 5.0); }
     let yaw = cx.rr(0.0, TAU); let ph = cx.rr(0.0, 6.0); let atk = cx.rr(0.5, 1.5);
-    let mut body = Body::new(pos, w, h); body.fly = t.fly;
+    let mut body = Body::new(pos, w, h); body.fly = t.fly || crate::horde::flies(k);
+    let mut ai = crate::horde::Ai::default(); if k == Kind::Wurm { ai.hidden = true; ai.sink = 1.0; ai.cd = 1.5; }
     cx.g.enemies.push(Enemy { id, kind: k, t, body, rig, yaw, hp, max_hp: hp, dmg, atk_t: atk, wind: 0.0, slow: 0.0, frozen: 0.0, stun: 0.0, burn: 0.0, poison: 0.0, fear: 0.0, flee: 0.0,
         flash: 0.0, flashing: false, hit_p: 0.0, ph, rise, elite: t.elite || o.affix.is_some(), affix: o.affix, boss: o.boss, size: o.size, color: o.color, speed_mul, sc, poi: o.poi,
         leap_t: 2.0, hop_t: 0.0, throw_t: 4.0, leaping: 0.0, swell: 0.0, squash: 0.0, smash_at: pos, chill: 0, dead: false, alert: false, wander_t: 0.0, wdir: Vec3::ZERO, burn_acc: 0.0,
-        ice: None, aiming: false, was_air: false, force: o.force });
+        ice: None, aiming: false, was_air: false, force: o.force, ai });
     Some(cx.g.enemies.len() - 1)
 }
 
@@ -233,6 +238,7 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
             if Vec2::new(cx.p.body.pos.x - pos.x, cx.p.body.pos.z - pos.z).length() < 4.0 { cx.hurt_player(22.0, Some(pos), 8.0); } });
     }
     if kind == Kind::Bloater { bloater_pop(cx, i, self_det); }
+    crate::horde::on_death(cx, kind, pos);
     if elite { let (nm, _) = affix.map(affix_info).unwrap_or((t.name, 0)); let label = if affix.is_some() { format!("{} {} slain", nm, t.name) } else { format!("{} slain", t.name) }; cx.toast(&label, &format!("+{} experience", xp), 2.5); crate::director::drop_chest(cx, pos, false); }
     if boss { cx.g.boss = None; }
     let e = std::mem::replace(&mut cx.g.enemies[i].rig, Rig::default());
@@ -312,6 +318,7 @@ fn animate(cx: &mut Ctx, i: usize, moving: bool) {
             for (k, l) in r.extra.iter().enumerate() { set_rot(q, Some(*l), (e.ph + if k % 2 == 1 { PI } else { 0.0 } + if k > 1 { PI } else { 0.0 }).sin() * 0.6 * if moving { 1.0 } else { 0.0 }, 0.0, 0.0); }
             if !moving { set_rot(q, r.head, (e.ph * 0.4).sin().max(0.0) * 0.5, 0.0, 0.0); }
         }
+        _ => crate::horde::animate(e, q, moving),
     }
 }
 
@@ -323,6 +330,7 @@ fn visual(cx: &mut Ctx, i: usize, moving: bool) {
     let e = &mut cx.g.enemies[i];
     let mut pos = e.body.pos;
     if e.rise > 0.0 { pos.y -= crate::noise::smooth(0.0, 0.7, e.rise) * (e.body.h + 0.1); }
+    pos.y -= e.ai.sink * (e.body.h + 0.6);
     let hp = if e.hit_p > 0.0 { e.hit_p / 0.14 } else { 0.0 };
     let (root, yaw, sc, ice, frozen) = (e.rig.root, e.yaw, e.sc, e.ice, e.frozen > 0.0);
     if let Some(r) = root { if let Ok(mut t) = cx.q.get_mut(r) {
@@ -394,7 +402,7 @@ pub fn update_enemies(cx: &mut Ctx) {
         let mi = cx.g.minutes();
         {
             let e = &mut cx.g.enemies[i];
-            e.slow -= dt; e.stun -= dt; e.fear -= dt; e.atk_t -= dt; e.leap_t -= dt; e.hop_t -= dt; e.throw_t -= dt;
+            e.slow -= dt; e.stun -= dt; e.fear -= dt; e.atk_t -= dt; e.leap_t -= dt; e.hop_t -= dt; e.throw_t -= dt; e.ai.haste -= dt;
             if e.frozen > 0.0 { e.frozen -= dt; }
         }
         let (burn, poison) = (cx.g.enemies[i].burn, cx.g.enemies[i].poison);
@@ -405,7 +413,7 @@ pub fn update_enemies(cx: &mut Ctx) {
         }
         { let e = &mut cx.g.enemies[i]; if e.affix == Some(Affix::Vampiric) && e.hp < e.max_hp { e.hp = (e.hp + dt * e.max_hp * 0.01).min(e.max_hp); } }
         let (frozen, stun, fear, slow, kind, alert) = { let e = &cx.g.enemies[i]; (e.frozen, e.stun, e.fear, e.slow, e.kind, e.alert) };
-        let mut speed = t.speed * cx.g.enemies[i].speed_mul * if slow > 0.0 { 0.55 } else { 1.0 };
+        let mut speed = t.speed * cx.g.enemies[i].speed_mul * if slow > 0.0 { 0.55 } else { 1.0 } * if cx.g.enemies[i].ai.haste > 0.0 { 1.35 } else { 1.0 };
         let can_move = frozen <= 0.0 && stun <= 0.0 && has_tgt;
         let aggro = !t.passive && has_tgt && (poi.is_none() || dist < 26.0 || alert);
         let (mut mvx, mut mvz) = (0.0f32, 0.0f32);
@@ -434,6 +442,11 @@ pub fn update_enemies(cx: &mut Ctx) {
                 if dist < 0.9 + e.body.w && (tp.y + 1.0 - e.body.pos.y).abs() < 1.5 && e.atk_t <= 0.0 { e.atk_t = t.cd; hurt = Some((e.dmg, 3.0)); e.body.vel.x -= tdx * 9.0; e.body.vel.z -= tdz * 9.0; e.body.vel.y = 4.0; }
             } else {
                 match kind {
+                    k if crate::horde::etype(k).is_some() => {
+                        let (a, b, h2, sm) = crate::horde::ai(cx, i, tp, dist, tdx, tdz, dy);
+                        mvx = a; mvz = b; if h2.is_some() { hurt = h2; } speed *= sm;
+                        if cx.g.enemies[i].dead { continue; }
+                    }
                     Kind::Slime => { mvx = tdx; mvz = tdz; let e = &mut cx.g.enemies[i]; if dist < e.body.w + 0.7 && dy.abs() < 1.5 && e.atk_t <= 0.0 { e.atk_t = 0.9; hurt = Some((e.dmg * e.size, 5.0)); } }
                     Kind::Bloater => {
                         mvx = tdx; mvz = tdz; if dist < 9.0 { speed *= 1.7; }

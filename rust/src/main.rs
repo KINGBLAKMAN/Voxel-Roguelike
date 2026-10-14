@@ -10,6 +10,7 @@ mod director;
 mod enemies;
 mod fx;
 mod game;
+mod horde;
 mod hud;
 mod mesher;
 mod models;
@@ -162,7 +163,8 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     // the player
     let st = cx.g.st;
     let cspeed = class_stats(cx.p.cls).1;
-    move_player(cx.w, cx.p, &keys, dt, st.speed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
+    let slowed = if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
+    move_player(cx.w, cx.p, &keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
     // hunger: food keeps you going; starving bleeds health
     if !cx.p.dead {
         cx.p.hunger = (cx.p.hunger - dt * 100.0 / 330.0).max(0.0);
@@ -248,6 +250,13 @@ fn test_act(cx: &mut Ctx, a: &str) {
                     let k = cx.pick(&[enemies::Kind::Zombie, enemies::Kind::Zombie, enemies::Kind::Skeleton, enemies::Kind::Spider, enemies::Kind::Slime, enemies::Kind::Brute]);
                     enemies::spawn_enemy(cx, k, sp, enemies::SpawnOpts { force: true, ..default() });
                 }
+            }
+        }
+        "spawn" => {
+            let (name, dist) = v.split_once(',').map(|(a, b)| (a, b.parse().unwrap_or(9.0))).unwrap_or((v, 9.0));
+            if let Some(k) = horde::kind_by_name(name) {
+                let p = cx.p.body.pos + cx.p.fwd() * dist;
+                if let Some(s) = cx.w.surface_spot(p.x, p.z) { let boss = horde::is_boss_kind(k); if let Some(i) = enemies::spawn_enemy(cx, k, s, enemies::SpawnOpts { force: true, boss, no_rise: true, ..default() }) { if boss { cx.g.boss = Some(cx.g.enemies[i].id); } } }
             }
         }
         "pitch" => { cx.p.pitch = v.parse().unwrap_or(0.0); }

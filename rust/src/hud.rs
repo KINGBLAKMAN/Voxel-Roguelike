@@ -15,7 +15,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Screen { Menu, Playing, LevelUp, Paused, Dead }
+pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory }
 
 #[derive(Resource)]
 pub struct UiState {
@@ -29,7 +29,7 @@ impl Default for UiState {
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -38,7 +38,7 @@ pub struct HudRefs {
     boss: Entity, boss_fill: Entity, boss_name: Entity, toast: Entity, toast_a: Entity, toast_b: Entity, buffs: Entity, relics: Entity,
     interact: Entity, cross: Vec<Entity>, map: Handle<Image>, day: Entity, pops: Vec<Entity>, flash: Entity, hurt: Entity,
     menu: Entity, level: Entity, lv_title: Entity, lv_sub: Entity, cards: Vec<(Entity, Entity, Entity, Entity)>, reroll: Entity,
-    pause: Entity, dead: Entity, dead_stats: Entity,
+    pause: Entity, dead: Entity, dead_stats: Entity, victory: Entity, vic_stats: Entity,
 }
 
 const EMBER: u32 = 0xff9a3d;
@@ -189,13 +189,22 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
     let db = c.spawn((Button, UiBtn::Restart, Node { width: px(300.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), margin: UiRect::top(px(18.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.5)), BorderRadius::all(px(8.0)))).id();
     let dbt = c.spawn(txt("Rise again  (R)", 20.0, 0xfff3d8)).id(); c.entity(db).add_child(dbt);
     c.entity(dead).add_children(&[dt, dead_stats, db]);
+    let victory = c.spawn((full(), BackgroundColor(col(0x1a1006, 0.72)), Visibility::Hidden)).id();
+    let vt = c.spawn(txt("VICTORY", 80.0, 0xffd35a)).id();
+    let vs = c.spawn(txt("The Ember King has fallen. The wild is yours.", 20.0, 0xfff3d8)).id();
+    let vic_stats = c.spawn((txt("", 18.0, 0xe8dccc), TextLayout::new_with_justify(JustifyText::Center))).id();
+    c.entity(victory).add_children(&[vt, vs, vic_stats]);
+    for (label, b) in [("Keep fighting: endless  (C)", UiBtn::Endless), ("Return to camp  (R)", UiBtn::Restart)] {
+        let e = c.spawn((Button, b, Node { width: px(340.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), margin: UiRect::top(px(10.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.5)), BorderRadius::all(px(8.0)))).id();
+        let t = c.spawn(txt(label, 20.0, 0xfff3d8)).id(); c.entity(e).add_child(t); c.entity(victory).add_child(e);
+    }
 
     // put the side slots and ability slots into the bar in order
     let mut kids = vec![wroot]; kids.extend(slot_roots.iter().map(|s| s.0)); kids.push(froot);
     c.entity(bar).add_children(&kids);
     c.insert_resource(HudRefs { hud, hp_fill, hp_ghost, hp_text, xp_fill, lvl, stam_fill, slots: slots.iter().zip(slot_roots.iter()).map(|(s, r)| (s.1, s.2, s.3, r.1)).collect(),
         weapon, food, timer, threat: threat_t, kills, boss, boss_fill, boss_name, toast, toast_a, toast_b, buffs, relics, interact, cross, map, day, pops, flash, hurt,
-        menu, level, lv_title, lv_sub, cards, reroll, pause, dead, dead_stats });
+        menu, level, lv_title, lv_sub, cards, reroll, pause, dead, dead_stats, victory, vic_stats });
     c.insert_resource(SlotRoots(slot_roots.iter().map(|s| s.0).collect()));
 }
 #[derive(Resource)]
@@ -231,6 +240,7 @@ pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Q
                 ui.screen = Screen::LevelUp; ui.cards_dirty = true; p.charging = false; sfx.play("level");
             }
             if g.over { ui.dead_t += time.delta_secs(); if ui.dead_t > 2.2 { ui.screen = Screen::Dead; } }
+            if let Some(&t) = g.flags.get("victory") { if !g.flags.contains_key("endless") && g.run_t - t > 3.0 && !g.over { ui.screen = Screen::Victory; sfx.play("relic"); } }
         }
         Screen::LevelUp => {
             if ui.cards_dirty { ui.cards_dirty = false; let cls = p.cls; let ro = ui.relic_only; let mut rng = ui.rng; let cards = roll(&g, cls, ro, &mut || { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; (rng % 1_000_000) as f32 / 1_000_000.0 }); ui.rng = rng; ui.cards = cards; }
@@ -253,6 +263,10 @@ pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Q
             if clicked == Some(UiBtn::Quit) { exit.send(AppExit::Success); }
         }
         Screen::Dead => { if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; } }
+        Screen::Victory => {
+            if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; }
+            if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Endless) { g.flags.insert("endless", 1.0); ui.screen = Screen::Playing; ctl.relock = true; g.toasts.push(("Endless".into(), "Bosses return every four minutes, stronger each time".into(), 3.0)); }
+        }
     }
     paused.0 = ui.screen != Screen::Playing;
     ctl.want_lock = ui.screen == Screen::Playing;
@@ -277,6 +291,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_vis(&mut q, r.level, scr == Screen::LevelUp);
     set_vis(&mut q, r.pause, scr == Screen::Paused);
     set_vis(&mut q, r.dead, scr == Screen::Dead);
+    set_vis(&mut q, r.victory, scr == Screen::Victory);
     if scr == Screen::Menu { return; }
     // health, experience, stamina
     let hp = (p.hp / p.max_hp).clamp(0.0, 1.0);
@@ -305,7 +320,8 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     let m = g.minutes(); let (tn, tc) = threat(m);
     set_text(&mut q, r.timer, &fmt_t(g.run_t));
     set_text(&mut q, r.threat, tn); set_tcol(&mut q, r.threat, srgb(tc));
-    set_text(&mut q, r.kills, &format!("{} slain", g.kills));
+    let nb = crate::director::next_boss(&g).map(|(t, n)| if t > 0.0 { format!("  |  {} in {}", n, fmt_t(t)) } else { String::new() }).unwrap_or_default();
+    set_text(&mut q, r.kills, &format!("{} slain{}", g.kills, nb));
     let tod = if dc.blood { "Blood moon" } else if dc.night { "Night" } else { "Day" };
     set_text(&mut q, r.day, &format!("Day {}  |  {}", dc.day, tod));
     // boss
@@ -363,6 +379,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     ui.map_t -= dt;
     if ui.map_t <= 0.0 { if let Some(w) = w.as_ref() { ui.map_t = 0.2; draw_map(w, &g, &p, &mut images, &r.map); } }
     // death summary
+    if scr == Screen::Victory { set_text(&mut q, r.vic_stats, &format!("{}  |  {}  |  level {}  |  {} slain", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills)); }
     if scr == Screen::Dead { set_text(&mut q, r.dead_stats, &format!("{}  |  survived {}  |  level {}  |  {} slain", class_name(p.cls), fmt_t(g.run_t), g.lvl, g.kills)); }
     // level-up cards
     if scr == Screen::LevelUp {
