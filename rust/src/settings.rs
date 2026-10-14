@@ -47,7 +47,7 @@ pub fn setup_settings(mut c: Commands) {
         let up = btn(&mut c, UiBtn::Set(i as u8, true), 40.0, ">");
         c.entity(row).add_children(&[l, dn, v, up]); c.entity(root).add_child(row); vals.push(v);
     }
-    let pad = c.spawn((txt("Gamepad: left stick move, right stick look, RT attack, LT block, A jump, B dodge, X Y LB RB abilities,\nD-pad up interact, left swap, down eat, Start pause. On level-ups X Y B pick cards 1 2 3.", 13.0, 0x9a8a78), Node { margin: UiRect::top(px(10.0)), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
+    let pad = c.spawn((txt("Gamepad: left stick move, right stick look, RT attack, LT block, A jump, B dodge, X Y LB RB abilities,\nD-pad up interact, left swap, down eat, right character panel, Start pause. On level-ups X Y B pick cards 1 2 3.", 13.0, 0x9a8a78), Node { margin: UiRect::top(px(10.0)), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
     let back = btn(&mut c, UiBtn::Back, 220.0, "Back  (Esc)");
     c.entity(root).add_children(&[pad, back]);
     c.insert_resource(SettingsRefs { root, vals });
@@ -119,11 +119,11 @@ pub fn gamepad_bridge(pads: Query<&Gamepad>, mut keys: ResMut<ButtonInput<KeyCod
         if pad.pressed(GamepadButton::LeftTrigger2) { mouse.press(MouseButton::Right); st.mouse.push(MouseButton::Right); }
         if pad.pressed(GamepadButton::South) { press(KeyCode::Space, &mut st, &mut keys); }
     }
-    let map: [(GamepadButton, KeyCode); 10] = if playing {
-        [(GamepadButton::East, KeyCode::ControlLeft), (GamepadButton::West, KeyCode::Digit1), (GamepadButton::North, KeyCode::Digit2), (GamepadButton::LeftTrigger, KeyCode::Digit3), (GamepadButton::RightTrigger, KeyCode::Digit4),
+    let map: [(GamepadButton, KeyCode); 11] = if playing {
+        [(GamepadButton::DPadRight, KeyCode::Tab), (GamepadButton::East, KeyCode::ControlLeft), (GamepadButton::West, KeyCode::Digit1), (GamepadButton::North, KeyCode::Digit2), (GamepadButton::LeftTrigger, KeyCode::Digit3), (GamepadButton::RightTrigger, KeyCode::Digit4),
          (GamepadButton::DPadUp, KeyCode::KeyE), (GamepadButton::DPadLeft, KeyCode::KeyQ), (GamepadButton::DPadDown, KeyCode::KeyF), (GamepadButton::Start, KeyCode::Escape), (GamepadButton::Select, KeyCode::KeyM)]
     } else {
-        [(GamepadButton::West, KeyCode::Digit1), (GamepadButton::North, KeyCode::Digit2), (GamepadButton::East, KeyCode::Digit3), (GamepadButton::South, KeyCode::Digit4), (GamepadButton::Start, KeyCode::Escape),
+        [(GamepadButton::DPadRight, KeyCode::Tab), (GamepadButton::West, KeyCode::Digit1), (GamepadButton::North, KeyCode::Digit2), (GamepadButton::East, KeyCode::Digit3), (GamepadButton::South, KeyCode::Digit4), (GamepadButton::Start, KeyCode::Escape),
          (GamepadButton::LeftTrigger, KeyCode::KeyR), (GamepadButton::RightTrigger, KeyCode::KeyC), (GamepadButton::DPadUp, KeyCode::KeyE), (GamepadButton::Select, KeyCode::Escape), (GamepadButton::DPadDown, KeyCode::KeyM)]
     };
     for (b, k) in map { if pad.just_pressed(b) { press(k, &mut st, &mut keys); } }

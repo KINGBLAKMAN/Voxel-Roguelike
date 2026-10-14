@@ -15,7 +15,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp, Shop, Settings, Join }
+pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp, Shop, Settings, Join, Character }
 
 #[derive(Resource)]
 pub struct UiState {
@@ -92,7 +92,8 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
     let mut slots = vec![];
     let mut slot_roots = vec![];
     for i in 0..4 {
-        let s = c.spawn((Node { width: px(78.0), height: px(78.0), border: UiRect::all(px(2.0)), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::Center, overflow: Overflow::clip(), ..default() }, panel(0.8), BorderColor(col(0x4a3e34, 1.0)), BorderRadius::all(px(8.0)))).id();
+        let s = c.spawn((Node { width: px(78.0), height: px(78.0), border: UiRect::all(px(2.0)), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::Center, overflow: Overflow::clip(), ..default() }, panel(0.8), BorderColor(col(0x4a3e34, 1.0)), BorderRadius::all(px(8.0)),
+            Interaction::default(), crate::charsheet::AbilityTip(i))).id();
         let glow = c.spawn((Node { position_type: PositionType::Absolute, top: px(0.0), left: px(0.0), right: px(0.0), height: px(4.0), ..default() }, BackgroundColor(col(0xffffff, 1.0)))).id();
         let cd = c.spawn((Node { position_type: PositionType::Absolute, bottom: px(0.0), left: px(0.0), right: px(0.0), height: Val::Percent(0.0), ..default() }, BackgroundColor(col(0x000000, 0.66)))).id();
         let key = c.spawn((txt(&format!("{}", i + 1), 15.0, 0xfff3d8), Node { position_type: PositionType::Absolute, top: px(6.0), left: px(7.0), ..default() })).id();
@@ -153,7 +154,7 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
         c.entity(b).add_children(&[band, n, r, h, a, k]);
         c.entity(row).add_child(b);
     }
-    let help = c.spawn((txt("WASD move  |  Left click attack  |  Right click block/parry  |  Ctrl dodge  |  1-4 abilities  |  Q swap  |  E interact  |  F eat  |  Esc pause", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(26.0)), ..default() })).id();
+    let help = c.spawn((txt("WASD move  |  Left click attack  |  Right click block/parry  |  Ctrl dodge  |  1-4 abilities  |  Q swap  |  E interact  |  F eat  |  Tab character  |  Esc pause", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(26.0)), ..default() })).id();
     c.entity(menu).add_children(&[title, sub, row, help]);
 
     // ---------------- level up ----------------
@@ -244,6 +245,7 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
         Screen::Playing => {
             if g.flags.remove("open_shop").is_some() { ui.screen = Screen::Shop; sfx.play("chest"); }
             else if keys.just_pressed(KeyCode::Escape) && !g.over { ui.screen = Screen::Paused; sfx.play("pick"); }
+            else if keys.just_pressed(KeyCode::Tab) && !g.over && !p.dead { ui.screen = Screen::Character; sfx.play("pick"); }
             else if (g.level_pending > 0 || g.chest_pending > 0) && !g.over && !p.dead {
                 ui.relic_only = g.level_pending == 0 && g.flags.remove("relic_chest").is_some();
                 ui.screen = Screen::LevelUp; ui.cards_dirty = true; p.charging = false; sfx.play("level");
@@ -275,6 +277,7 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
         }
         Screen::Dead => { if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; } }
         Screen::Join => { if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Menu; } }
+        Screen::Character => { if keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::Escape) || g.over { ui.screen = Screen::Playing; ctl.relock = true; } }
         Screen::Settings => {
             if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = ui.settings_from.take().unwrap_or(Screen::Menu); save.write(); }
             if let Some(UiBtn::Set(i, up)) = clicked { crate::settings::change(&mut save.settings, i as usize, up); sfx.play("pick"); }
@@ -325,7 +328,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_vis(&mut q, r.menu, scr == Screen::Menu);
     set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp));
     set_vis(&mut q, r.level, scr == Screen::LevelUp);
-    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp | Screen::Shop | Screen::Settings | Screen::Join));
+    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp | Screen::Shop | Screen::Settings | Screen::Join | Screen::Character));
     set_vis(&mut q, r.pause, scr == Screen::Paused);
     set_vis(&mut q, r.dead, scr == Screen::Dead);
     set_vis(&mut q, r.victory, scr == Screen::Victory);

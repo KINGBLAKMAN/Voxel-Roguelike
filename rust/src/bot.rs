@@ -22,6 +22,7 @@ pub struct BotCfg { pub runs: u32, pub classes: Vec<Class>, pub minutes: f32, pu
 
 /// look for `--bot [settings]` on the command line or EW_BOT in the environment
 pub fn from_env() -> Option<BotCfg> {
+    if !cfg!(feature = "dev") { return None; }
     let args: Vec<String> = std::env::args().collect();
     let spec = if let Some(i) = args.iter().position(|a| a == "--bot") { Some(args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()) } else { std::env::var("EW_BOT").ok() }?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -81,7 +82,7 @@ pub fn bot_drive(cfg: Res<BotCfg>, mut st: ResMut<BotState>, mut ui: ResMut<UiSt
             }
         }
         Screen::LevelUp => { let k = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3][(st.r() * 3.0) as usize % 3]; press(k, st, &mut keys); }
-        Screen::Shop | Screen::Paused | Screen::Settings | Screen::Camp | Screen::Join => { press(KeyCode::Escape, st, &mut keys); }
+        Screen::Shop | Screen::Paused | Screen::Settings | Screen::Camp | Screen::Join | Screen::Character => { press(KeyCode::Escape, st, &mut keys); }
         Screen::Dead | Screen::Victory => { if st.in_run { record(&cfg, st, &g, &p); } ui.restart = true; }
         Screen::Playing => {
             if st.in_run && g.run_t >= cfg.minutes * 60.0 { record(&cfg, st, &g, &p); ui.restart = true; return; }

@@ -9,8 +9,11 @@ use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 #[derive(Resource, Clone)]
 pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32 }
 
+/// scripted tests only exist in dev builds
+pub fn active() -> bool { cfg!(feature = "dev") && std::env::var("EW_TEST").is_ok() }
 impl TestCfg {
     pub fn from_env() -> Option<Self> {
+        if !cfg!(feature = "dev") { return None; }
         let s = std::env::var("EW_TEST").ok()?;
         let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6 };
         for kv in s.split(';') {
@@ -37,7 +40,7 @@ impl TestCfg {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::hud::UiState>, mut keys: ResMut<ButtonInput<KeyCode>>, mut cr: ResMut<crate::player::CamRig>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
+pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::hud::UiState>, mut keys: ResMut<ButtonInput<KeyCode>>, mut cr: ResMut<crate::player::CamRig>, mut win: Query<&mut Window>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
     t.frame += 1;
     let f = t.frame;
     if f <= 2 {
@@ -53,6 +56,8 @@ pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::h
             "host" => ui.req_host = true, "join" => ui.req_join = Some("127.0.0.1".into()), "start" => ui.start = Some(t.class),
             // animation stills: freeze attack progress, pick the combo step, swap weapons
             "swap" => keys.press(KeyCode::KeyQ),
+            "tab" => ui.screen = crate::hud::Screen::Character,
+            a if a.starts_with("cursor") => { if let Some((x, y)) = a[6..].split_once(',') { if let (Ok(x), Ok(y), Ok(mut w)) = (x.parse::<f32>(), y.parse::<f32>(), win.get_single_mut()) { w.set_cursor_position(Some(Vec2::new(x, y))); } } }
             "noft" => crate::player::FREEZE.store(f32::NAN.to_bits(), std::sync::atomic::Ordering::Relaxed),
             a if a.starts_with("ft") => { if let Ok(v) = a[2..].parse::<f32>() { crate::player::FREEZE.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed); } }
             a if a.starts_with("cb") => { p.swing_kind = a[2..].parse().unwrap_or(0); }

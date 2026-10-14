@@ -6,6 +6,8 @@ mod abilities;
 mod anim;
 mod audio;
 mod camp;
+mod charsheet;
+mod icons;
 mod augments;
 mod bot;
 mod combat;
@@ -70,7 +72,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: if bot.is_some() { "Emberwild balance bot".into() } else { "Emberwild".into() },
+            title: if bot.is_some() { "Emberwild balance bot".into() } else if cfg!(feature = "dev") { "Emberwild (dev build)".into() } else { "Emberwild".into() },
             resolution: if bot.is_some() { (640.0f32, 360.0f32).into() } else { (1280.0f32, 720.0f32).into() },
             present_mode: if bot.is_some() { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
             mode: if fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Primary) } else { WindowMode::Windowed }, ..default()
@@ -92,6 +94,9 @@ fn main() {
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
     .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     app.add_systems(Update, player::weapon_trails.after(game_tick));
+    app.init_resource::<icons::Icons>().init_resource::<charsheet::Panel>()
+        .add_systems(Startup, (icons::build_icons, charsheet::setup_tips))
+        .add_systems(Update, (charsheet::update_panel, charsheet::update_tips).chain().after(hud::update_hud));
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     if let Some(b) = bot { app.insert_resource(b).init_resource::<bot::BotState>().add_systems(Update, bot::bot_drive.after(settings::gamepad_bridge).before(hud::ui_flow)); }
     app.run();

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: Publish a GitHub release (tag v<rust/Cargo.toml version>) with the exe
+        description: Publish a GitHub release (tag v<rust/Cargo.toml version>) with the player and dev exes
         type: boolean
         default: false
 
@@ -39,16 +39,19 @@ jobs:
             C:\emberwild\rust\target
           key: rust-win-${{ github.sha }}
           restore-keys: rust-win-
-      - name: Build exe
-        working-directory: C:\emberwild\rust
-        run: cargo build --release
-      - name: Package
+      - name: Build and package
         id: pkg
         working-directory: C:\emberwild\rust
+        # the player build, then the dev build (balance bot and test hooks); the dependencies are shared
         run: |
           $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           New-Item -ItemType Directory -Force dist | Out-Null
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           Copy-Item target\release\emberwild.exe "dist\Emberwild-$v.exe"
+          cargo build --release --features dev
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item target\release\emberwild.exe "dist\Emberwild-$v-dev.exe"
           echo "v=v$v" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
         with:

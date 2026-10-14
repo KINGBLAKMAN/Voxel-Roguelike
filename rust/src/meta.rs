@@ -66,11 +66,11 @@ fn dir() -> PathBuf {
 }
 impl Save {
     pub fn load() -> Self {
-        if std::env::var("EW_TEST").is_ok() || crate::bot::active() { return Save::default(); }
+        if crate::testkit::active() || crate::bot::active() { return Save::default(); }
         std::fs::read_to_string(dir().join("save.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
     pub fn write(&self) {
-        if std::env::var("EW_TEST").is_ok() || crate::bot::active() { return; }
+        if crate::testkit::active() || crate::bot::active() { return; }
         let d = dir(); let _ = std::fs::create_dir_all(&d);
         if let Ok(s) = serde_json::to_string_pretty(self) { let tmp = d.join("save.json.tmp"); if std::fs::write(&tmp, s).is_ok() { let _ = std::fs::rename(tmp, d.join("save.json")); } }
     }
