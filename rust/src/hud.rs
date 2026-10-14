@@ -15,21 +15,21 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp, Shop }
+pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp, Shop, Settings }
 
 #[derive(Resource)]
 pub struct UiState {
     pub screen: Screen, pub cards: Vec<Card>, pub relic_only: bool, pub dead_t: f32, pub toast: Option<(String, String, f32, f32)>,
     pub ghost_hp: f32, pub map_t: f32, pub menu_t: f32, pub start: Option<Class>, pub restart: bool, pub quit: bool, pub cards_dirty: bool,
-    pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32, pub paid: u32, pub recorded: bool, pub last_gain: u32,
+    pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32, pub paid: u32, pub recorded: bool, pub last_gain: u32, pub settings_from: Option<Screen>,
 }
 impl Default for UiState {
-    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0 } }
+    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0, settings_from: None } }
 }
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize) }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize), Settings, Set(u8, bool) }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -179,7 +179,7 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
     let pause = c.spawn((full(), BackgroundColor(col(0x06040a, 0.6)), Visibility::Hidden)).id();
     let pt = c.spawn(txt("PAUSED", 64.0, 0xfff3d8)).id();
     c.entity(pause).add_child(pt);
-    for (label, b) in [("Resume", UiBtn::Resume), ("Abandon run", UiBtn::Restart), ("Quit to desktop", UiBtn::Quit)] {
+    for (label, b) in [("Resume", UiBtn::Resume), ("Settings", UiBtn::Settings), ("Abandon run", UiBtn::Restart), ("Quit to desktop", UiBtn::Quit)] {
         let e = c.spawn((Button, b, Node { width: px(280.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.4)), BorderRadius::all(px(8.0)))).id();
         let t = c.spawn(txt(label, 20.0, 0xfff3d8)).id(); c.entity(e).add_child(t); c.entity(pause).add_child(e);
     }
@@ -235,6 +235,7 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
             if let Some(UiBtn::Class(c)) = clicked { want = Some(c); }
             if let Some(c) = want { if save.class_open(c) { ui.start = Some(c); ui.paid = 0; ui.recorded = false; } else { sfx.play("hurt"); } }
             if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Camp) { ui.screen = Screen::Camp; sfx.play("pick"); }
+            if keys.just_pressed(KeyCode::KeyS) || clicked == Some(UiBtn::Settings) { ui.settings_from = Some(Screen::Menu); ui.screen = Screen::Settings; sfx.play("pick"); }
             if clicked == Some(UiBtn::EmberUp) && save.ember < save.max_ember { save.ember += 1; save.write(); sfx.play("pick"); }
             if clicked == Some(UiBtn::EmberDown) && save.ember > 0 { save.ember -= 1; save.write(); sfx.play("pick"); }
         }
@@ -265,11 +266,16 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
             } }
         }
         Screen::Paused => {
-            if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Resume) { ui.screen = Screen::Playing; ctl.relock = true; }
+            if clicked == Some(UiBtn::Settings) { ui.settings_from = Some(Screen::Paused); ui.screen = Screen::Settings; }
+            else if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Resume) { ui.screen = Screen::Playing; ctl.relock = true; }
             if clicked == Some(UiBtn::Restart) { ui.restart = true; }
             if clicked == Some(UiBtn::Quit) { exit.send(AppExit::Success); }
         }
         Screen::Dead => { if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; } }
+        Screen::Settings => {
+            if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = ui.settings_from.take().unwrap_or(Screen::Menu); save.write(); }
+            if let Some(UiBtn::Set(i, up)) = clicked { crate::settings::change(&mut save.settings, i as usize, up); sfx.play("pick"); }
+        }
         Screen::Shop => {
             if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyE) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Playing; ctl.relock = true; }
             let mut pick = None;
@@ -310,17 +316,17 @@ pub fn button_hover(mut q: Query<(&Interaction, &UiBtn, &mut BorderColor, &mut B
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: ResMut<Game>, p: Res<Player>, dc: Res<DayCycle>, time: Res<Time>,
-    cam: Query<(&Camera, &GlobalTransform), With<MainCam>>, w: Option<Res<Voxels>>, mut images: ResMut<Assets<Image>>, ctl: Res<Controls>) {
+    cam: Query<(&Camera, &GlobalTransform), With<MainCam>>, w: Option<Res<Voxels>>, mut images: ResMut<Assets<Image>>, ctl: Res<Controls>, cfg: Res<crate::GameCfg>) {
     let dt = time.delta_secs();
     let scr = ui.screen;
     set_vis(&mut q, r.menu, scr == Screen::Menu);
     set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp));
     set_vis(&mut q, r.level, scr == Screen::LevelUp);
-    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp | Screen::Shop));
+    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp | Screen::Shop | Screen::Settings));
     set_vis(&mut q, r.pause, scr == Screen::Paused);
     set_vis(&mut q, r.dead, scr == Screen::Dead);
     set_vis(&mut q, r.victory, scr == Screen::Victory);
-    if matches!(scr, Screen::Menu | Screen::Camp) { return; }
+    if matches!(scr, Screen::Menu | Screen::Camp | Screen::Settings) { return; }
     // health, experience, stamina
     let hp = (p.hp / p.max_hp).clamp(0.0, 1.0);
     if ui.ghost_hp < hp { ui.ghost_hp = hp; } else { ui.ghost_hp = (ui.ghost_hp - dt * 0.35).max(hp); }
@@ -384,6 +390,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     let prompt = g.prompt.clone(); set_text(&mut q, r.interact, &prompt);
     // damage numbers rise and fade over the world
     if let Ok((camera, ct)) = cam.get_single() {
+        if !cfg.damage_numbers { g.popups.retain(|p| p.kind == 1 || p.kind >= 3); }
         for pu in g.popups.drain(..) {
             let free = ui.pops.iter().position(|x| !x.2).or_else(|| if ui.pops.len() < r.pops.len() { ui.pops.push((Vec3::ZERO, 0.0, false)); Some(ui.pops.len() - 1) } else { None });
             let Some(k) = free.or(Some(0)) else { continue };

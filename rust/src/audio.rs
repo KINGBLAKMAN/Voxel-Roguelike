@@ -105,11 +105,11 @@ pub const NAMES: &[&str] = &["swing", "heavy", "hit", "crit", "bow", "fire", "bo
     "zap", "horn", "glass", "swell", "squelch", "whoosh", "rise", "relic", "bomb", "thud", "snap", "eat", "spawn", "rumble", "swap"];
 
 #[derive(Resource, Default)]
-pub struct Sfx { pub queue: Vec<&'static str>, handles: HashMap<&'static str, (Handle<AudioSource>, f32)>, gate: HashMap<&'static str, f64>, pub muted: bool, pub master: f32 }
+pub struct Sfx { pub queue: Vec<&'static str>, handles: HashMap<&'static str, (Handle<AudioSource>, f32)>, gate: HashMap<&'static str, f64>, pub muted: bool, pub master: f32, pub music: f32 }
 impl Sfx { pub fn play(&mut self, n: &'static str) { if self.queue.len() < 24 { self.queue.push(n); } } }
 
 pub fn setup_audio(mut sfx: ResMut<Sfx>, mut sources: ResMut<Assets<AudioSource>>) {
-    sfx.master = 0.7;
+    sfx.master = 0.7; sfx.music = 0.6;
     for &n in NAMES { let (bytes, vol) = make(n); let h = sources.add(AudioSource { bytes: bytes.into() }); sfx.handles.insert(n, (h, vol)); }
 }
 pub fn play_sfx(mut c: Commands, mut sfx: ResMut<Sfx>, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>) {
@@ -168,7 +168,7 @@ pub fn setup_music(mut c: Commands, mut sources: ResMut<Assets<AudioSource>>) {
 pub fn update_music(q: Query<(&MusicLayer, &AudioSink)>, sfx: Res<Sfx>, g: Res<crate::game::Game>, ui: Res<crate::hud::UiState>) {
     let playing = ui.screen != crate::hud::Screen::Menu;
     for (l, sink) in q.iter() {
-        let v = if sfx.muted { 0.0 } else if l.0 == 0 { 0.32 } else if playing { 0.4 * ((g.dir.heat - 0.15) / 0.6).clamp(0.0, 1.0) } else { 0.0 };
+        let v = sfx.music * if sfx.muted { 0.0 } else if l.0 == 0 { 0.55 } else if playing { 0.65 * ((g.dir.heat - 0.15) / 0.6).clamp(0.0, 1.0) } else { 0.0 };
         let cur = sink.volume();
         sink.set_volume(cur + (v - cur) * 0.05);
     }

@@ -66,7 +66,7 @@ pub fn attach_weapon(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<Stan
 }
 
 #[derive(Resource, Default)]
-pub struct Controls { pub locked: bool, pub lock_t: f32, pub want_lock: bool, pub look_scale: f32, pub relock: bool }
+pub struct Controls { pub locked: bool, pub lock_t: f32, pub want_lock: bool, pub look_scale: f32, pub relock: bool, pub invert_y: bool, pub pad: bool }
 
 pub fn cursor_lock(mut win: Query<&mut Window, With<PrimaryWindow>>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<ButtonInput<KeyCode>>, mut ctl: ResMut<Controls>, time: Res<Time>) {
     let Ok(mut w) = win.get_single_mut() else { return };
@@ -88,7 +88,7 @@ pub fn mouse_look(mm: Res<AccumulatedMouseMotion>, ctl: Res<Controls>, time: Res
     if d.x.abs() > 400.0 || d.y.abs() > 300.0 { return; }
     let k = if ctl.look_scale > 0.0 { ctl.look_scale } else { 1.0 };
     p.yaw -= d.x * 0.0024 * k;
-    p.pitch = (p.pitch - d.y * 0.0022 * k).clamp(-1.25, 1.05);
+    p.pitch = (p.pitch - d.y * 0.0022 * k * if ctl.invert_y { -1.0 } else { 1.0 }).clamp(-1.25, 1.05);
 }
 
 /// movement, stamina, jumping, dashes and leaps. `speed_mul` comes from upgrades.
@@ -256,8 +256,8 @@ fn apply_pose(q: &mut Query<&mut Transform>, r: &Rig, pose: Pose, k: f32, w: f32
 }
 
 #[derive(Resource)]
-pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3 }
-impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO } } }
+pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3, pub base_fov: f32, pub shake_mul: f32 }
+impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO, base_fov: 72.0, shake_mul: 1.0 } } }
 
 /// over-the-shoulder camera: pulls in fast when blocked, eases back out gently so turning past trees never pops
 pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transform, proj: &mut Projection, dt: f32, rng: &mut impl FnMut() -> f32) {
@@ -277,7 +277,8 @@ pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transfor
     let mut pos = tgt + back * cr.d;
     if cr.shake > 0.0 { let s = cr.shake * cr.shake * 0.35; pos += Vec3::new(rng() - 0.5, rng() - 0.5, rng() - 0.5) * 2.0 * s; cr.shake = (cr.shake - dt * 2.2).max(0.0); }
     *cam = Transform::from_translation(pos).looking_to(f, Vec3::Y);
-    let target_fov = if p.charging { 64.0 - p.charge * 10.0 } else if p.dash.is_some() { 80.0 } else { 72.0 };
+    let b = cr.base_fov;
+    let target_fov = if p.charging { b - 8.0 - p.charge * 10.0 } else if p.dash.is_some() { b + 8.0 } else { b };
     cr.fov = lerp(cr.fov, target_fov, (dt * 8.0).min(1.0));
     if let Projection::Perspective(pp) = proj { pp.fov = cr.fov.to_radians(); }
 }

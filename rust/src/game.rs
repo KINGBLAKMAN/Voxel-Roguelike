@@ -71,7 +71,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn rr(&self, a: f32, b: f32) -> f32 { self.fx.rr(a, b) }
     pub fn pick<T: Copy>(&self, v: &[T]) -> T { v[(self.r() * v.len() as f32) as usize % v.len()] }
     pub fn m(&self, k: &str) -> u32 { self.g.m(k) }
-    pub fn shake(&mut self, s: f32) { self.cam.shake = (self.cam.shake + s).min(1.0); }
+    pub fn shake(&mut self, s: f32) { self.cam.shake = (self.cam.shake + s * self.cam.shake_mul).min(1.0); }
     pub fn play(&mut self, name: &'static str) { self.sfx.play(name); }
     pub fn toast(&mut self, a: &str, b: &str, d: f32) { self.g.toasts.push((a.to_string(), b.to_string(), d)); }
     pub fn pop(&mut self, pos: Vec3, text: String, kind: u8) { if self.g.popups.len() < 60 { self.g.popups.push(Popup { pos, text, kind }); } }

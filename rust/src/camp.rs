@@ -23,7 +23,8 @@ pub fn setup_camp(mut c: Commands, r: Res<HudRefs>) {
     let dn = button(&mut c, UiBtn::EmberDown, 44.0); let t = c.spawn(txt("<", 20.0, 0xfff3d8)).id(); c.entity(dn).add_child(t);
     let ember = c.spawn((txt("Ember 0", 22.0, 0xff7a3a), Node { width: px(110.0), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
     let up = button(&mut c, UiBtn::EmberUp, 44.0); let t = c.spawn(txt(">", 20.0, 0xfff3d8)).id(); c.entity(up).add_child(t);
-    c.entity(row).add_children(&[camp_b, dn, ember, up]);
+    let set_b = button(&mut c, UiBtn::Settings, 170.0); let t = c.spawn(txt("Settings  (S)", 20.0, 0xfff3d8)).id(); c.entity(set_b).add_child(t);
+    c.entity(row).add_children(&[camp_b, dn, ember, up, set_b]);
     let ember_desc = c.spawn(txt("", 15.0, 0xd8ccbc)).id();
     let info = c.spawn((txt("", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(6.0)), ..default() })).id();
     c.entity(r.menu).add_children(&[row, ember_desc, info]);

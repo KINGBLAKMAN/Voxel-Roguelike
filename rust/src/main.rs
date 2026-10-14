@@ -23,6 +23,7 @@ mod player;
 mod progression;
 mod relics;
 mod scene;
+mod settings;
 mod testkit;
 mod world;
 
@@ -36,8 +37,8 @@ use scene::*;
 
 /// tunables the renderer and streaming read; `focus` overrides the streaming centre (menus, tests)
 #[derive(Resource)]
-pub struct GameCfg { pub view: i32, pub chunk_budget: usize, pub time_runs: bool, pub focus: Option<Vec3> }
-impl Default for GameCfg { fn default() -> Self { GameCfg { view: 8, chunk_budget: 3, time_runs: true, focus: None } } }
+pub struct GameCfg { pub view: i32, pub chunk_budget: usize, pub time_runs: bool, pub focus: Option<Vec3>, pub damage_numbers: bool }
+impl Default for GameCfg { fn default() -> Self { GameCfg { view: 8, chunk_budget: 3, time_runs: true, focus: None, damage_numbers: true } } }
 
 /// the simulation is frozen (menus, level-up cards)
 #[derive(Resource, Default)]
@@ -64,9 +65,10 @@ fn main() {
     .init_resource::<audio::Sfx>()
     .init_resource::<hud::UiState>()
     .insert_resource(meta::Save::load())
+    .init_resource::<settings::PadState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
-    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp).chain()))
-    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, camp::update_shop, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
+    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, camp::update_shop, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }
@@ -77,7 +79,7 @@ fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Asset
     let sp = w.spawn_point();
     p.body.pos = sp; p.vis_y = sp.y;
     // scripted tests skip the title screen
-    if let Some(t) = test.as_ref() { if t.camp { ui.screen = hud::Screen::Camp; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
+    if let Some(t) = test.as_ref() { if t.camp { ui.screen = if t.class == Class::Mage { hud::Screen::Settings } else { hud::Screen::Camp }; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
     c.insert_resource(w);
 }
 fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0) } }
@@ -164,11 +166,11 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     }
     cx.g.run_t += dt;
     // guard and dodge, for every class
-    let rmb = mouse.pressed(MouseButton::Right) && ctl.locked;
+    let rmb = mouse.pressed(MouseButton::Right) && (ctl.locked || ctl.pad);
     if rmb && !cx.p.dead && cx.p.stam > 0.0 && cx.p.dash.is_none() && cx.p.leap.is_none() { if cx.p.blocking <= 0.0 { cx.play("swing"); } cx.p.blocking += dt; } else { cx.p.blocking = 0.0; }
     cx.p.dodge_cd -= dt;
     if keys.just_pressed(KeyCode::ControlLeft) || keys.just_pressed(KeyCode::AltLeft) { dodge(&mut cx); }
-    let lmb = ((mouse.pressed(MouseButton::Left) && ctl.locked) || hold) && cx.p.blocking <= 0.0;
+    let lmb = ((mouse.pressed(MouseButton::Left) && (ctl.locked || ctl.pad)) || hold) && cx.p.blocking <= 0.0;
     cx.p.firing = lmb;
     // the player
     let st = cx.g.st;
