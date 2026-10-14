@@ -27,14 +27,14 @@ pub struct Player {
     pub hp: f32, pub max_hp: f32, pub ghost_hp: f32, pub stam: f32, pub hunger: f32, pub dead: bool, pub death_t: f32, pub invuln: f32, pub hit_t: f32,
     pub walk_ph: f32, pub idle_ph: f32, pub swing_t: f32, pub swing_dur: f32, pub swing_side: f32, pub swing_kind: u8, pub cast_kick: f32,
     pub charge: f32, pub charging: bool, pub firing: bool, pub anim: Option<(Pose, f32, f32)>, pub roll_t: f32, pub dash: Option<Dash>, pub leap: Option<Leap>,
-    pub whirl: f32, pub coyote: f32, pub move_dir: Vec3, pub aim_pt: Vec3, pub aim_dist: f32, pub sprinting: bool, pub spawned: bool,
+    pub whirl: f32, pub coyote: f32, pub move_dir: Vec3, pub aim_pt: Vec3, pub aim_dist: f32, pub sprinting: bool, pub spawned: bool, pub blocking: f32, pub dodge_cd: f32,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0 }
     }
 }
 impl Player {
@@ -103,7 +103,7 @@ pub fn move_player(w: &mut Voxels, p: &mut Player, keys: &ButtonInput<KeyCode>, 
     p.move_dir = mv;
     let sprint = keys.pressed(KeyCode::ShiftLeft) && moving && p.stam > 1.0 && !p.charging;
     p.sprinting = sprint;
-    if sprint { p.stam = (p.stam - dt * 22.0).max(0.0); } else { p.stam = (p.stam + dt * 20.0).min(stam_max); }
+    if sprint { p.stam = (p.stam - dt * 22.0).max(0.0); } else if p.blocking <= 0.0 { p.stam = (p.stam + dt * 20.0).min(stam_max); }
     let spd = 6.4 * class_speed * speed_mul * if sprint { 1.55 } else { 1.0 } * if p.charging { 0.55 } else { 1.0 } * if p.body.in_water { 0.6 } else { 1.0 };
     if let Some(d) = p.dash.as_mut() {
         d.t -= dt;
@@ -191,6 +191,8 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
             if id == "swordshield" { al = Vec3::new(-0.9, 0.5, 0.0); }
         }
     }
+    // guard: forearms crossed in front of the face
+    if p.blocking > 0.0 { al = Vec3::new(-1.65, 0.55, 0.35); ar = Vec3::new(-1.55, -0.55, -0.35); torso.x = 0.12; }
     set_rot(q, r.arm_l, al.x, al.y, al.z); set_rot(q, r.arm_r, ar.x, ar.y, ar.z);
     // the bow string draws back with the charge, an arrow nocked
     if let Some(w) = p.weapons.first() { if let Some([s1, s2, arrow]) = w.string {

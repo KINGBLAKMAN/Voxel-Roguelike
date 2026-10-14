@@ -162,12 +162,18 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
         if t.acts.iter().any(|(f, a)| a == "god" && *f <= t.frame) { cx.p.hp = cx.p.max_hp; }
     }
     cx.g.run_t += dt;
-    let lmb = (mouse.pressed(MouseButton::Left) && ctl.locked) || hold;
+    // guard and dodge, for every class
+    let rmb = mouse.pressed(MouseButton::Right) && ctl.locked;
+    if rmb && !cx.p.dead && cx.p.stam > 0.0 && cx.p.dash.is_none() && cx.p.leap.is_none() { if cx.p.blocking <= 0.0 { cx.play("swing"); } cx.p.blocking += dt; } else { cx.p.blocking = 0.0; }
+    cx.p.dodge_cd -= dt;
+    if keys.just_pressed(KeyCode::ControlLeft) || keys.just_pressed(KeyCode::AltLeft) { dodge(&mut cx); }
+    let lmb = ((mouse.pressed(MouseButton::Left) && ctl.locked) || hold) && cx.p.blocking <= 0.0;
     cx.p.firing = lmb;
     // the player
     let st = cx.g.st;
     let cspeed = class_stats(cx.p.cls).1;
-    let slowed = if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
+    let guard = if cx.p.blocking > 0.0 { 0.5 } else { 1.0 };
+    let slowed = guard * if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
     move_player(cx.w, cx.p, &keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
     // hunger: food keeps you going; starving bleeds health
     if !cx.p.dead {
@@ -228,6 +234,19 @@ fn update_aim(cx: &mut Ctx, ce: Entity) {
     let t0 = (pp - o).dot(d) + 1.5;
     cx.p.aim_dist = best.max(t0);
     cx.p.aim_pt = o + d * cx.p.aim_dist;
+}
+
+/// a quick roll with a moment of invulnerability; costs stamina
+fn dodge(cx: &mut Ctx) {
+    if cx.p.dead || cx.p.dodge_cd > 0.0 || cx.p.stam < 25.0 || cx.p.dash.is_some() || cx.p.leap.is_some() { return; }
+    let mut d = cx.p.move_dir; if d.length_squared() < 0.01 { d = cx.p.fwd(); }
+    d.y = 0.0; let d = d.normalize();
+    cx.p.dash = Some(player::Dash { dir: d, speed: 20.0, t: 0.24, kind: 3 });
+    cx.p.roll_t = 0.3; cx.p.invuln = cx.p.invuln.max(0.35); cx.p.stam -= 25.0; cx.p.dodge_cd = 0.55; cx.p.blocking = 0.0;
+    cx.g.flags.insert("dodge_at", cx.g.run_t); cx.g.flags.insert("perfect_used", 0.0);
+    cx.play("dash");
+    let pp = cx.p.body.pos; cx.fx.smoke(pp, 0xd8d0c0, 6, 1.5, 0.6, 0.8);
+    abilities::afterimage(cx, 0xbfe8ff, 0.3);
 }
 
 fn eat(cx: &mut Ctx) {

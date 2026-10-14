@@ -153,7 +153,7 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
         c.entity(b).add_children(&[band, n, r, h, a, k]);
         c.entity(row).add_child(b);
     }
-    let help = c.spawn((txt("WASD move  |  Mouse aim  |  Left click attack  |  1-4 abilities  |  Q swap weapon  |  E interact  |  F eat  |  Shift sprint  |  Esc pause", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(26.0)), ..default() })).id();
+    let help = c.spawn((txt("WASD move  |  Left click attack  |  Right click block/parry  |  Ctrl dodge  |  1-4 abilities  |  Q swap  |  E interact  |  F eat  |  Esc pause", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(26.0)), ..default() })).id();
     c.entity(menu).add_children(&[title, sub, row, help]);
 
     // ---------------- level up ----------------

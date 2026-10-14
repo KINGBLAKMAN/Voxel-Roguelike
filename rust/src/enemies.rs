@@ -486,7 +486,9 @@ pub fn update_enemies(cx: &mut Ctx) {
         }
         if let Some((d, kb)) = hurt {
             if target_decoy { if let Some(dd) = cx.g.rel.decoys.iter_mut().min_by(|a, b| a.pos.distance(epos).partial_cmp(&b.pos.distance(epos)).unwrap()) { dd.hp -= d; } }
-            else { cx.hurt_player(d, Some(epos), kb); if cx.g.enemies[i].affix == Some(Affix::Vampiric) { let e = &mut cx.g.enemies[i]; e.hp = (e.hp + d * 1.5).min(e.max_hp); } }
+            else { cx.hurt_player(d, Some(epos), kb);
+                if cx.g.flags.remove("parried").is_some() { let e = &mut cx.g.enemies[i]; e.stun = e.stun.max(if e.boss { 0.5 } else { 1.5 }); if !e.boss { e.body.vel += Vec3::new(-tdx, 0.4, -tdz) * 9.0; } }
+                if cx.g.enemies[i].affix == Some(Affix::Vampiric) { let e = &mut cx.g.enemies[i]; e.hp = (e.hp + d * 1.5).min(e.max_hp); } }
         }
         let e = &mut cx.g.enemies[i];
         if e.frozen > 0.0 || e.stun > 0.0 { mvx = 0.0; mvz = 0.0; if fly { e.body.vel.y = (e.body.vel.y - dt * 12.0).max(-6.0); } }

@@ -84,7 +84,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         self.p.body.pos + Vec3::Y * 1.45 + f * 0.55 + r * if self.p.weapon_id() == "longbow" { -0.25 } else { 0.32 }
     }
     pub fn dmg_mul(&self) -> f32 {
-        self.g.st.dmg * if self.g.buff("cry") > 0.0 { 1.4 } else { 1.0 } * if self.g.buff("shrine") > 0.0 { 1.25 } else { 1.0 } * crate::augments::dmg_mul(self)
+        self.g.st.dmg * if self.g.buff("riposte") > 0.0 { 1.5 } else { 1.0 } * if self.g.buff("cry") > 0.0 { 1.4 } else { 1.0 } * if self.g.buff("shrine") > 0.0 { 1.25 } else { 1.0 } * crate::augments::dmg_mul(self)
     }
 
     // ---------------- damage ----------------
@@ -92,7 +92,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     /// player damage to an enemy, with crits, lifesteal, knockback, popups and hit sparks
     pub fn damage(&mut self, i: usize, amount: f32, o: Hit) {
         if i >= self.g.enemies.len() || self.g.enemies[i].dead || self.g.enemies[i].ai.hidden { return; }
-        let crit = self.r() < self.g.st.crit;
+        let crit = self.r() < self.g.st.crit || self.g.buff("focus") > 0.0;
         let (elite, frozen, brute, pos, h, prop) = { let e = &self.g.enemies[i]; (e.elite, e.frozen > 0.0, e.affix == Some(Affix::Brute), e.body.pos, e.body.h, e.t.prop) };
         let mut a = amount * self.dmg_mul() * if elite { 1.0 + self.g.st.elite } else { 1.0 } * if frozen { 1.25 + self.g.st.shatter } else { 1.0 } * if crit { 2.0 } else { 1.0 };
         if brute { a *= 0.8; }
@@ -181,7 +181,34 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn hurt_player(&mut self, amount: f32, src: Option<Vec3>, kb: f32) {
         if self.p.dead || self.g.over { return; }
         let pp = self.p.body.pos;
+        // a dodge that slips a hit at the last moment is perfect: stamina back and a moment of guaranteed crits
+        let since_dodge = self.g.run_t - self.g.flags.get("dodge_at").copied().unwrap_or(-9.0);
+        if self.p.invuln > 0.0 && since_dodge < 0.3 && self.g.flags.get("perfect_used").copied().unwrap_or(0.0) <= 0.0 {
+            self.g.flags.insert("perfect_used", 1.0);
+            self.pop(pp + Vec3::Y * 2.2, "PERFECT".into(), 1); self.play("crit"); self.g.hitstop = 0.12;
+            self.p.stam = (self.p.stam + 30.0).min(self.g.st.stam_max); self.g.buffs.insert("focus", 1.5);
+            self.gfx().ring(pp, 0xbfe8ff, 0.4, 3.0, 0.3); self.fx.burst(pp + Vec3::Y, 0xbfe8ff, 20, 5.0, 0.4, 0.3, 0.0, 0.0);
+            return;
+        }
         if self.p.invuln > 0.0 || self.g.buff("shield") > 0.0 { self.pop(pp + Vec3::Y * 2.0, "Blocked".into(), 3); return; }
+        // blocking turns frontal hits; a block raised just in time is a parry
+        let mut amount = amount;
+        if self.p.blocking > 0.0 {
+            let front = src.map(|s| (s - pp).with_y(0.0).normalize_or_zero().dot(self.p.fwd()) > 0.1).unwrap_or(true);
+            if front {
+                let f = self.p.fwd();
+                if self.p.blocking < 0.22 {
+                    self.g.flags.insert("parried", 1.0); self.g.buffs.insert("riposte", 2.5);
+                    self.p.stam = (self.p.stam + 15.0).min(self.g.st.stam_max);
+                    self.pop(pp + Vec3::Y * 2.2, "PARRY".into(), 1); self.play("snap"); self.play("crit"); self.shake(0.25); self.g.hitstop = 0.1;
+                    self.fx.sparks(pp + Vec3::Y * 1.3 + f * 0.6, 0xfff0c0, 18, 10.0); self.gfx().flare(pp + Vec3::Y * 1.3 + f * 0.6, 0xfff0c0, 3.0, 0.25, true);
+                    return;
+                }
+                amount *= 0.35; self.p.stam -= amount * 1.5;
+                self.fx.sparks(pp + Vec3::Y * 1.3 + f * 0.6, 0xd8e8ff, 6, 6.0); self.play("hit");
+                if self.p.stam <= 0.0 { self.p.stam = 0.0; self.p.blocking = 0.0; self.pop(pp + Vec3::Y * 2.2, "Guard broken".into(), 4); }
+            }
+        }
         let mut a = amount * (1.0 - self.g.st.armor);
         if self.p.weapon_id() == "swordshield" { a *= 0.7 - 0.1 * self.m("w.swordshield.bulwark") as f32; }
         a = a.round().max(1.0);
