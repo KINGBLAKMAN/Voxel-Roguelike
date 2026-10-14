@@ -169,6 +169,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
         if cx.p.hunger <= 0.0 { let a = cx.g.flags.entry("starve").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; cx.p.hp -= 1.0; if cx.p.hp <= 0.0 { cx.kill_player(); } } }
     }
     if keys.just_pressed(KeyCode::KeyF) { eat(&mut cx); }
+    let cap = cx.p.max_hp * 0.04; cx.g.heal_budget = (cx.g.heal_budget + dt * cap).min(cap);
     cx.p.invuln = (cx.p.invuln - dt).max(0.0);
     cx.p.hit_t = (cx.p.hit_t - dt).max(0.0);
     cx.p.cast_kick = (cx.p.cast_kick - dt * 4.0).max(0.0);
@@ -176,7 +177,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     cx.g.buffs.retain(|_, v| *v > 0.0);
     for c in cx.g.cds.iter_mut() { *c = (*c - dt).max(0.0); }
     cx.g.flash = (cx.g.flash - dt).max(0.0);
-    if !cx.p.dead && st.regen > 0.0 { cx.g.regen_acc += dt; if cx.g.regen_acc >= 1.0 { cx.g.regen_acc -= 1.0; cx.heal(st.regen, true); } }
+    if !cx.p.dead && st.regen > 0.0 { cx.g.regen_acc += dt; if cx.g.regen_acc >= 1.0 { cx.g.regen_acc -= 1.0; cx.sustain(st.regen); } }
     if keys.just_pressed(KeyCode::KeyQ) { cx.p.widx = 1 - cx.p.widx; cx.p.charging = false; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); cx.play("swap"); }
     for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { abilities::use_ability(&mut cx, i); } }
     update_aim(&mut cx, ce);

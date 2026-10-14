@@ -22,7 +22,7 @@ pub const PERKS: [(&str, &str, &str, Option<Class>, bool); 22] = [
     ("vamp", "Vampirism", "Heal for 4% of damage you deal.", None, false),
     ("crit", "Keen Edge", "+8% critical chance. Crits deal double.", None, false),
     ("skin", "Ironhide", "Take 10% less damage.", None, false),
-    ("regen", "Second Wind", "Regenerate 1 health per second.", None, false),
+    ("regen", "Second Wind", "Regenerate 0.6 health per second.", None, false),
     ("forage", "Forager", "Food restores 50% more. Animals drop extra meat.", None, false),
     ("hunter", "Giant Slayer", "+35% damage to elites and bosses.", None, false),
     ("magnet", "Lodestone", "Collect experience and loot from twice as far.", None, false),
@@ -31,7 +31,7 @@ pub const PERKS: [(&str, &str, &str, Option<Class>, bool); 22] = [
     ("fury", "Fury", "Weapon attacks are 15% faster.", None, false),
     ("m1", "Pyromancer", "Fire burns 35% larger and longer.", Some(Class::Mage), false),
     ("m2", "Shatter", "Frozen enemies take 50% more damage.", Some(Class::Mage), false),
-    ("w1", "Bloodlust", "Whirlwind heals 3 health per enemy hit.", Some(Class::Warrior), false),
+    ("w1", "Bloodlust", "Whirlwind heals 1 health per enemy hit (up to 6 per spin).", Some(Class::Warrior), false),
     ("w2", "Juggernaut", "+40 max health and take 8% less damage.", Some(Class::Warrior), false),
     ("p1", "Radiance", "Mend also blasts nearby enemies for 40.", Some(Class::Priest), true),
     ("r2", "Quickdraw", "Draw your bow 35% faster.", Some(Class::Ranger), false),
@@ -65,12 +65,15 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
         if r >= RMAX || (r == 0 && owned >= RSLOTS) { continue; }
         out.push(Card { kind: CardKind::Relic, key: format!("r.{}", rl.id), name: rl.name.into(), desc: rl.ranks[r as usize].into(), tag: if r > 0 { format!("Relic - rank {}/{}", r + 1, RMAX) } else { "New relic".into() }, color: rl.color, w: if r > 0 { 1.7 } else if owned < 2 { 2.4 } else { 1.3 } });
     }
+    // two chaos augments per run, so they're a choice
+    let chaos_owned = AUGS.iter().filter(|a| g.m(&format!("x.{}", a.id)) > 0).count();
     for a in AUGS.iter() {
         let r = g.m(&format!("x.{}", a.id));
-        if r as usize >= a.ranks.len() { continue; }
+        if r as usize >= a.ranks.len() || (r == 0 && chaos_owned >= 2) { continue; }
         out.push(Card { kind: CardKind::Chaos, key: format!("x.{}", a.id), name: a.name.into(), desc: a.ranks[r as usize].into(), tag: if r > 0 { format!("Chaos augment - rank {}/{}", r + 1, a.ranks.len()) } else { "Chaos augment".into() }, color: AUG_COLOR, w: if g.lvl < 3 { 0.4 } else if r > 0 { 1.1 } else { 1.2 } });
     }
-    let pool: Vec<_> = PERKS.iter().filter(|p| p.3.map(|c| c == cls).unwrap_or(true) && !(p.4 && g.perks.iter().any(|q| q == p.1))).collect();
+    // each boon can be taken at most 5 times
+    let pool: Vec<_> = PERKS.iter().filter(|p| p.3.map(|c| c == cls).unwrap_or(true) && !(p.4 && g.perks.iter().any(|q| q == p.1)) && g.perks.iter().filter(|q| *q == p.1).count() < 5).collect();
     let n = pool.len() as f32;
     for p in pool { out.push(Card { kind: CardKind::Boon, key: p.0.into(), name: p.1.into(), desc: p.2.into(), tag: match p.3 { Some(c) => format!("{} boon", class_name(c)), None => "Boon".into() }, color: p.3.map(class_color).unwrap_or(0xff9a3d), w: 5.0 / n }); }
     out
@@ -95,9 +98,9 @@ pub fn apply(g: &mut Game, p: &mut Player, c: &Card) {
             match c.key.as_str() {
                 "vit" => { p.max_hp += 25.0; p.hp = p.max_hp; }
                 "might" => s.dmg += 0.15, "haste" => s.cd *= 0.88, "swift" => s.speed += 0.1, "vamp" => s.leech += 0.04, "crit" => s.crit += 0.08,
-                "skin" => s.armor = 1.0 - (1.0 - s.armor) * 0.9, "regen" => s.regen += 1.0, "forage" => s.food += 0.5, "hunter" => s.elite += 0.35,
+                "skin" => s.armor = 1.0 - (1.0 - s.armor) * 0.9, "regen" => s.regen += 0.6, "forage" => s.food += 0.5, "hunter" => s.elite += 0.35,
                 "magnet" => s.magnet *= 1.8, "aoe" => s.area += 0.2, "stam" => { s.stam_max += 40.0; s.stam_regen += 0.3; }, "fury" => s.atk_spd += 0.15,
-                "m1" => s.fire_rad += 0.35, "m2" => s.shatter += 0.5, "w1" => s.ww_heal += 3.0,
+                "m1" => s.fire_rad += 0.35, "m2" => s.shatter += 0.5, "w1" => s.ww_heal += 1.0,
                 "w2" => { p.max_hp += 40.0; p.hp += 40.0; s.armor = 1.0 - (1.0 - s.armor) * 0.92; }
                 "p1" => s.radiance = 1.0, "r2" => s.charge_mul += 0.35, "wis" => s.xp_mul += 0.2, "luck" => g.rerolls += 2,
                 _ => {}

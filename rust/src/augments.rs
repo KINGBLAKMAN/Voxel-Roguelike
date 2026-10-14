@@ -31,14 +31,16 @@ pub fn atk_mul(cx: &Ctx) -> f32 { let b = ak(cx.g, "berserk"); if b > 0 && cx.p.
 pub fn on_kill(cx: &mut Ctx, c: Vec3) {
     if cx.p.dead { return; }
     let ch = ak(cx.g, "chain");
-    if ch > 0 && cx.r() < 0.05 + 0.1 * ch as f32 {
+    if ch > 0 && cx.g.flags.get("chaining").copied().unwrap_or(0.0) <= 0.0 && cx.r() < 0.05 + 0.1 * ch as f32 {
         let r = 2.4 + ch as f32 * 0.6;
         cx.later(0.1, move |cx| {
             cx.play("boom");
             { let mut g = cx.gfx(); g.flare(c, 0xff4ad8, 4.0 + ch as f32, 0.3, true); g.sphere(c, 0xff4ad8, 0.3, r, 0.3); }
             cx.fx.burst(c, 0xff7ae8, 24, r * 2.4, 0.45, 0.45, 0.0, 0.0); cx.fx.sparks(c, 0xffffff, 8, 10.0);
             let dm = (24.0 * (1.0 + cx.g.minutes() * 0.1) * (1.0 + 0.3 * (ch - 1) as f32)).round();
+            cx.g.flags.insert("chaining", 1.0);
             cx.aoe(c, r, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 7.0, up: 4.0, src: Some(c), col: 0xff4ad8, quiet: true }); if ch >= 3 { cx.status(i, Status { burn: 2.0, ..default() }); } });
+            cx.g.flags.insert("chaining", 0.0);
         });
     }
     let fr = ak(cx.g, "frenzy");

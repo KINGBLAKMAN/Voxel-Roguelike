@@ -16,12 +16,12 @@ pub struct Trial { pub poi: (i32, i32), pub c: Vec3, pub t: f32, pub spawn: f32 
 pub struct Director {
     pub pack: f32, pub event: f32, pub boss: f32, pub urn: f32, pub animal: f32, pub ev_i: u32,
     pub guarded: HashSet<(i32, i32)>, pub cleared: HashSet<(i32, i32)>, pub used: HashSet<(i32, i32)>, pub chest_out: HashSet<(i32, i32)>,
-    pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32,
+    pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32, pub hazard: f32,
 }
 impl Default for Director {
     fn default() -> Self {
         Director { pack: 1.5, event: 70.0, boss: 300.0, urn: 2.0, animal: 3.0, ev_i: 0, guarded: HashSet::new(), cleared: HashSet::new(), used: HashSet::new(), chest_out: HashSet::new(),
-            chests: vec![], trial: None, heat: 0.0 }
+            chests: vec![], trial: None, heat: 0.0, hazard: 10.0 }
     }
 }
 
@@ -130,6 +130,20 @@ pub fn update_director(cx: &mut Ctx) {
     if cx.g.dir.event <= 0.0 { cx.g.dir.event = cx.rr(75.0, 100.0) * (1.0 - m * 0.02).max(0.6); let i = cx.g.dir.ev_i; cx.g.dir.ev_i += 1; horde_event(cx, i); }
     cx.g.dir.boss -= dt;
     if cx.g.dir.boss <= 0.0 { cx.g.dir.boss = 300.0; spawn_boss(cx); }
+    // from the Dangerous tier on, the ground itself turns on you: telegraphed eruptions land where you're heading
+    if m >= 6.0 {
+        cx.g.dir.hazard -= dt;
+        if cx.g.dir.hazard <= 0.0 {
+            cx.g.dir.hazard = (14.0 - (m - 6.0) * 0.55).max(5.0) * cx.rr(0.8, 1.2);
+            let n = 1 + (m / 8.0) as usize;
+            let lead = cx.p.body.vel * 1.3;
+            for k in 0..n {
+                let off = if k == 0 { lead.with_y(0.0) } else { let a = cx.rr(0.0, TAU); Vec3::new(a.cos(), 0.0, a.sin()) * cx.rr(3.0, 9.0) };
+                let mut c = pp + off; c.y = cx.ground(c.x, c.z, pp.y + 3.0);
+                eruption(cx, c, 2.6, 1.3 + k as f32 * 0.25);
+            }
+        }
+    }
     cx.g.dir.urn -= dt;
     if cx.g.dir.urn <= 0.0 { cx.g.dir.urn = 6.0; if urns < 4 { if let Some(s) = ring_spot(cx, pp, yaw, 14.0, 34.0) { spawn_enemy(cx, Kind::Urn, s, SpawnOpts::default()); } } }
     cx.g.dir.animal -= dt;
@@ -144,6 +158,24 @@ pub fn update_director(cx: &mut Ctx) {
             }
         } }
     }
+}
+
+/// a rune burns into the ground, then the earth bursts upward in fire
+pub fn eruption(cx: &mut Ctx, c: Vec3, r: f32, delay: f32) {
+    cx.gfx().circle(c, 0xff3a1a, r, delay + 0.1, "fire", 2.5, None, None);
+    cx.gfx().decal(c, true, r * 0.9, delay + 3.0, Some(0xff5a1a));
+    cx.later(delay, move |cx| {
+        cx.play("boom"); cx.shake(0.25);
+        let pts: Vec<(Vec3, f32)> = (0..5).map(|i| { let a = i as f32 / 5.0 * TAU + cx.rr(-0.2, 0.2); let rr = r * cx.rr(0.2, 0.7); let mut p = c + Vec3::new(a.cos() * rr, 0.0, a.sin() * rr); p.y = cx.ground(p.x, p.z, c.y + 2.0); (p, cx.rr(1.2, 2.2)) }).collect();
+        crate::abilities::earth_pillars(cx, &pts, 0.9);
+        cx.fx.burst(c + Vec3::Y * 0.5, 0xff6a1a, 40, 7.0, 0.6, 0.5, 5.0, 0.0);
+        cx.fx.smoke(c, 0x3a3430, 8, 2.0, 1.2, 1.3);
+        cx.gfx().ring(c, 0xff8a3a, 0.4, r * 1.3, 0.4);
+        let m = cx.g.minutes();
+        if !cx.p.dead && Vec2::new(cx.p.body.pos.x - c.x, cx.p.body.pos.z - c.z).length() < r && (cx.p.body.pos.y - c.y).abs() < 3.0 { cx.hurt_player(10.0 + 2.0 * m, Some(c), 9.0); }
+        // the horde gets caught in it too
+        cx.aoe(c, r, &mut |cx, i, _| { if !cx.g.enemies[i].t.prop { cx.apply_damage(i, 30.0, Hit { kb: 4.0, up: 6.0, src: Some(c), ..default() }); } });
+    });
 }
 
 /// set pieces that break up the steady stream

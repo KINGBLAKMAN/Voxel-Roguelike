@@ -36,21 +36,24 @@ pub struct Game {
     pub next_id: u32, pub run_t: f32, pub kills: u32, pub hitstop: f32, pub st: Stats, pub mods: HashMap<String, u32>, pub perks: Vec<String>,
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
-    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState,
+    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default() }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0 }
     }
 }
 impl Game {
     pub fn m(&self, k: &str) -> u32 { *self.mods.get(k).unwrap_or(&0) }
     pub fn buff(&self, k: &str) -> f32 { *self.buffs.get(k).unwrap_or(&0.0) }
     pub fn minutes(&self) -> f32 { self.run_t / 60.0 }
-    pub fn xp_need(&self) -> f32 { let l = (self.lvl - 1) as f32; (16.0 + l * 11.0 + l * l * 0.55).round() }
+    /// difficulty multipliers from the Ember level (set when a run starts)
+    pub fn mods_hp(&self) -> f32 { *self.flags.get("ember_hp").unwrap_or(&1.0) }
+    pub fn mods_dmg(&self) -> f32 { *self.flags.get("ember_dmg").unwrap_or(&1.0) }
+    pub fn xp_need(&self) -> f32 { let l = (self.lvl - 1) as f32; (20.0 + l * 14.0 + l * l * 1.1).round() }
 }
 
 /// everything a gameplay function might touch this frame
@@ -92,6 +95,8 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let (elite, frozen, brute, pos, h, prop) = { let e = &self.g.enemies[i]; (e.elite, e.frozen > 0.0, e.affix == Some(Affix::Brute), e.body.pos, e.body.h, e.t.prop) };
         let mut a = amount * self.dmg_mul() * if elite { 1.0 + self.g.st.elite } else { 1.0 } * if frozen { 1.25 + self.g.st.shatter } else { 1.0 } * if crit { 2.0 } else { 1.0 };
         if brute { a *= 0.8; }
+        // enemies grow armour over the run: a flat cut per hit that punishes many tiny hits, never below 30%
+        if !prop { let armor = (self.g.minutes() / 4.0).floor().min(5.0); a = (a - armor).max(a * 0.3); }
         a = (a * self.rr(0.92, 1.08)).round().max(1.0);
         let hp = pos + Vec3::Y * h * 0.6;
         if !o.quiet || self.r() < 0.5 { self.pop(pos + Vec3::Y * (h + 0.2), format!("{}", a as i32), if crit { 1 } else { 0 }); }
@@ -104,8 +109,10 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         self.fx.emit(true, hp, Vec3::ZERO, 0.12, if crit { 2.2 } else { 1.4 }, 0.2, hexc(col) * 2.5, 0.0, 0.0, 1.0);
         let blood = self.g.enemies[i].t.blood;
         for _ in 0..if crit { 8 } else { 4 } { let v = Vec3::new(self.rr(-4.0, 4.0), self.rr(1.0, 5.0), self.rr(-4.0, 4.0)); let l = self.rr(0.3, 0.6); let bc = hexc(self.pick(blood)); self.fx.emit(false, hp, v, l, 0.18, 0.06, bc, 14.0, 1.0, 1.0); }
-        let leech = self.g.st.leech + if self.g.buff("cry") > 0.0 { *self.g.flags.get("cry_leech").unwrap_or(&0.1) } else { 0.0 };
-        if leech > 0.0 && !prop { self.heal(a * leech, true); }
+        let raw = self.g.st.leech + if self.g.buff("cry") > 0.0 { *self.g.flags.get("cry_leech").unwrap_or(&0.1) } else { 0.0 };
+        // lifesteal has diminishing returns and draws from the per-second sustain budget
+        let leech = raw / (1.0 + raw * 3.0);
+        if leech > 0.0 && !prop { self.sustain(a * leech); }
         self.g.flags.insert("cross_hit", 0.11);
         self.apply_damage(i, a, o);
     }
@@ -128,7 +135,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         if i >= self.g.enemies.len() { return; }
         let e = &mut self.g.enemies[i];
         if e.dead || e.t.prop { return; }
-        let el = if e.elite { 0.5 } else { 1.0 };
+        let el = if e.boss { 0.25 } else if e.elite { 0.5 } else { 1.0 };
         if s.stun > 0.0 { e.stun = e.stun.max(s.stun * el); }
         if s.fear > 0.0 { e.fear = e.fear.max(s.fear); }
         if s.slow > 0.0 { e.slow = e.slow.max(s.slow); }
@@ -159,6 +166,14 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let d = (self.p.hp - before).round();
         if d >= 2.0 && !quiet { let pp = self.p.body.pos + Vec3::Y * 2.1; self.pop(pp, format!("+{}", d as i32), 2); }
     }
+    /// healing over time and lifesteal: capped by a budget of 4% max health per second, halved for 2s after a hit
+    pub fn sustain(&mut self, a: f32) {
+        if self.p.dead { return; }
+        let a = (a * if self.g.run_t - self.g.last_hit < 2.0 { 0.5 } else { 1.0 }).min(self.g.heal_budget);
+        if a <= 0.0 { return; }
+        self.g.heal_budget -= a;
+        self.heal(a, true);
+    }
     pub fn hurt_player(&mut self, amount: f32, src: Option<Vec3>, kb: f32) {
         if self.p.dead || self.g.over { return; }
         let pp = self.p.body.pos;
@@ -166,7 +181,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let mut a = amount * (1.0 - self.g.st.armor);
         if self.p.weapon_id() == "swordshield" { a *= 0.7 - 0.1 * self.m("w.swordshield.bulwark") as f32; }
         a = a.round().max(1.0);
-        self.p.hp -= a; self.p.hit_t = 0.35;
+        self.p.hp -= a; self.p.hit_t = 0.35; self.g.last_hit = self.g.run_t;
         self.shake(0.35 + a / 60.0);
         self.play("hurt");
         self.pop(pp + Vec3::Y * 2.0, format!("-{}", a as i32), 4);
@@ -239,8 +254,7 @@ pub fn level_up_blast(cx: &mut Ctx) {
     g.ring(c, 0x79d0ff, 0.5, 8.0, 0.7); g.shock(c, 0x79d0ff, 0.6, 8.0, 0.5, 2.2); g.circle(c, 0x79d0ff, 5.0, 1.2, "arcane", 3.0, None, None);
     g.pillar(c, 0x79d0ff, 1.2, 16.0, 1.2); g.flare(c + Vec3::Y * 1.2, 0xbfe8ff, 6.0, 0.5, true);
     cx.fx.burst(c + Vec3::Y, 0x79d0ff, 60, 8.0, 0.9, 0.4, 2.0, 0.0);
-    cx.p.hp = (cx.p.hp + cx.p.max_hp * 0.25).min(cx.p.max_hp);
-    cx.aoe(c, 7.0, &mut |cx, i, _| { if cx.g.enemies[i].t.passive || cx.g.enemies[i].t.prop { return; } cx.damage(i, 10.0, Hit { kb: 11.0, up: 5.0, src: Some(c), col: 0x79d0ff, quiet: true }); cx.status(i, Status { stun: 0.8, ..default() }); });
+    cx.aoe(c, 6.0, &mut |cx, i, _| { if cx.g.enemies[i].t.passive || cx.g.enemies[i].t.prop { return; } cx.damage(i, 10.0, Hit { kb: 9.0, up: 4.0, src: Some(c), col: 0x79d0ff, quiet: true }); cx.status(i, Status { stun: 0.4, ..default() }); });
 }
 
 /// run delayed actions whose time has come
@@ -289,7 +303,7 @@ fn collect(cx: &mut Ctx, kind: PickKind, v: f32) {
         PickKind::Xp => { cx.play("gem"); cx.gain_xp(v); }
         PickKind::Meat => { cx.g.food_meat += 1; cx.play("pick"); cx.pop(pp + Vec3::Y * 2.0, "+ Meat".into(), 2); }
         PickKind::Berries => { cx.g.food_berries += 1; cx.play("pick"); cx.pop(pp + Vec3::Y * 2.0, "+ Berries".into(), 2); }
-        PickKind::Heart => { let a = cx.p.max_hp * 0.35; cx.heal(a, false); cx.play("heal"); cx.toast("Heart", "Restored health", 1.6); cx.gfx().pillar(pp, 0x8dff9e, 1.1, 6.0, 0.9); }
+        PickKind::Heart => { let a = cx.p.max_hp * 0.25; cx.heal(a, false); cx.play("heal"); cx.toast("Heart", "Restored health", 1.6); cx.gfx().pillar(pp, 0x8dff9e, 1.1, 6.0, 0.9); }
         PickKind::Magnet => { cx.play("relic"); for p in cx.g.pickups.iter_mut() { if p.kind == PickKind::Xp { p.vac = true; } } cx.gfx().ring(pp, 0x7fd4ff, 0.5, 14.0, 0.6); cx.toast("Lodestone", "Every gem flies to you", 1.6); }
         PickKind::Bomb => {
             cx.play("bomb"); cx.g.flash = 0.22; cx.shake(1.0); cx.toast("Holy Relic", "Holy light scours the horde", 1.6);

@@ -26,7 +26,7 @@ pub const ABIL: [AbInfo; 16] = [
     AbInfo { id: "whirl", name: "Whirlwind", cd: 9.0, color: 0xffd0a0, desc: "Become a tornado of steel for 2.5s." },
     AbInfo { id: "slam", name: "Ground Slam", cd: 8.0, color: 0xd9a46a, desc: "Leap and heave pillars of earth out of the ground." },
     AbInfo { id: "cry", name: "Battle Cry", cd: 18.0, color: 0xff5b4c, desc: "Plant war banners: +40% damage and lifesteal for 8s." },
-    AbInfo { id: "mend", name: "Mend", cd: 7.0, color: 0x8dff9e, desc: "A lotus of light blooms: heal 35% plus regen." },
+    AbInfo { id: "mend", name: "Mend", cd: 9.0, color: 0x8dff9e, desc: "A lotus of light blooms: heal 25% plus regen." },
     AbInfo { id: "smite", name: "Smite", cd: 4.5, color: 0xffe48a, desc: "Drive a giant sword of light into your target. Stuns." },
     AbInfo { id: "shield", name: "Divine Shield", cd: 16.0, color: 0xfff3b8, desc: "Six holy shields orbit you: invulnerable for 3s." },
     AbInfo { id: "consecrate", name: "Consecration", cd: 11.0, color: 0xffd35a, desc: "Raise a ring of holy obelisks: burns foes, heals you." },
@@ -702,7 +702,7 @@ fn whirl(cx: &mut Ctx) -> bool {
         cx.play("swing"); tk += 1;
         let c = z.pos;
         let n = cx.aoe(c, r, &mut |cx, i, _| { cx.damage(i, 11.0, Hit { kb: if vortex { 0.0 } else { 3.0 }, src: Some(c), col: 0xffd0a0, quiet: true, ..default() }); if vortex { let e = &cx.g.enemies[i]; let p = Vec3::new((c.x - e.body.pos.x) * 1.6, 0.0, (c.z - e.body.pos.z) * 1.6); cx.status(i, Status { push: Some(p), ..default() }); } });
-        if n > 0 && cx.g.st.ww_heal > 0.0 { let h = n as f32 * cx.g.st.ww_heal; cx.heal(h, true); }
+        if n > 0 && cx.g.st.ww_heal > 0.0 { let h = n.min(6) as f32 * cx.g.st.ww_heal; cx.sustain(h); }
         if storm && tk % 2 == 0 { let off = cx.rr(0.0, TAU); for i in 0..3 { let an = off + i as f32 / 3.0 * TAU; spin_blade(cx, c + Vec3::Y, Vec3::new(an.sin(), 0.0, an.cos()), 14.0, 0xffe0b0); } }
     }));
     z.on_frame = Some(Box::new(move |cx, z| {
@@ -746,7 +746,7 @@ fn slam(cx: &mut Ctx) -> bool {
     true
 }
 /// pillars of the ground itself heave up out of the earth, hold, and sink back
-fn earth_pillars(cx: &mut Ctx, pts: &[(Vec3, f32)], life: f32) {
+pub fn earth_pillars(cx: &mut Ctx, pts: &[(Vec3, f32)], life: f32) {
     if pts.is_empty() { return; }
     let mut ents = vec![];
     for &(p, h) in pts {
@@ -877,7 +877,7 @@ fn banner(cx: &mut Ctx, p: Vec3, yaw: f32, dur: f32) {
 
 // ================= PRIEST =================
 fn mend(cx: &mut Ctx) -> bool {
-    let amt = cx.p.max_hp * 0.35 * (1.0 + 0.15 * cx.m("mend.greater") as f32);
+    let amt = cx.p.max_hp * 0.25 * (1.0 + 0.15 * cx.m("mend.greater") as f32);
     let hot = 4.0 * (1.0 + cx.m("mend.renew") as f32);
     cx.heal(amt, false); cx.g.buffs.insert("hot", hot);
     cx.play("heal"); cx.p.pose(Pose::Pray, 0.9);
@@ -924,7 +924,7 @@ fn lotus(cx: &mut Ctx, pos: Vec3, s: f32, life: f32, bloom: bool) {
         z.on_tick = Some(Box::new(|cx, z| {
             let (p, r) = (z.pos, z.r);
             cx.aoe(p, r, &mut |cx, i, _| cx.damage(i, 9.0, Hit { src: Some(p), col: 0xffe48a, quiet: true, ..default() }));
-            if !cx.p.dead && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < r { cx.heal(3.0, true); }
+            if !cx.p.dead && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < r { cx.sustain(cx.p.max_hp * 0.012); }
         }));
         let r = z.r; cx.gfx().circle(c, 0x8dff9e, r, life, "nature", 0.5, None, None);
     }
@@ -1074,7 +1074,7 @@ fn consecrate(cx: &mut Ctx) -> bool {
     z.on_tick = Some(Box::new(move |cx, z| {
         let (p, rr) = (z.pos, z.r);
         cx.aoe(p, rr, &mut |cx, i, _| cx.damage(i, dmg, Hit { src: Some(p), col: 0xffd35a, quiet: true, ..default() }));
-        if Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < rr { cx.heal(4.0 * if sanct { 2.0 } else { 1.0 }, true); }
+        if Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < rr { let h = cx.p.max_hp * 0.012 * if sanct { 1.6 } else { 1.0 }; cx.sustain(h); }
     }));
     z.on_frame = Some(Box::new(move |cx, z| {
         let t = z.t; let p = z.pos;
@@ -1141,5 +1141,5 @@ pub fn update_abilities(cx: &mut Ctx) {
     if let Some(s) = cx.g.ab.slam { if cx.p.leap.is_none() { cx.g.ab.slam = None; slam_land(cx, s); } }
     // ---- Battle Cry: the warrior burns with a red aura while it lasts
     if cx.g.buff("cry") > 0.0 && cx.r() < 0.6 { let an = cx.rr(0.0, TAU); let p = pp + Vec3::new(an.cos() * 0.5, cx.rr(0.2, 1.8), an.sin() * 0.5); let c = hexc(cx.pick(&[0xff5b4c, 0xffb03a])) * 2.5; cx.fx.emit(true, p, Vec3::Y * cx.rr(1.0, 2.5), 0.4, 0.3, 0.04, c, -1.0, 0.5, 1.0); }
-    if cx.g.buff("hot") > 0.0 { let a = cx.g.flags.entry("hot_acc").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; cx.heal(3.0, true); } }
+    if cx.g.buff("hot") > 0.0 { let a = cx.g.flags.entry("hot_acc").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; let h = cx.p.max_hp * 0.025; cx.sustain(h); } }
 }

@@ -177,7 +177,8 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     if live >= 160 + if o.force { 24 } else { 0 } { return None; }
     let t = etype(k);
     let mi = cx.g.minutes();
-    let diff = 1.0 + mi * 0.11 + (cx.dc.day as f32 - 1.0) * 0.08 + (cx.g.lvl as f32 - 1.0) * 0.02;
+    // health grows both linearly and by a compounding rate, so late-game builds have to keep scaling too
+    let diff = (1.0 + mi * 0.08) * 1.045f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
     let quiet = t.passive || t.prop;
     let mut seed = cx.fx.rng.load(std::sync::atomic::Ordering::Relaxed);
     let mut rng = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };
@@ -188,7 +189,7 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
     let mut hp = t.hp * if quiet { 1.0 } else { diff } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
-    let mut dmg = t.dmg * (0.72 + (mi * 0.1).min(0.28) + mi * 0.045 + (cx.dc.day as f32 - 1.0) * 0.06);
+    let mut dmg = t.dmg * (0.75 + mi * 0.07) * 1.02f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.05) * cx.g.mods_dmg();
     let mut speed_mul = if quiet { 1.0 } else { 1.0 + (mi * 0.02).min(0.3) };
     if let Some(a) = o.affix { hp *= 2.6; dmg *= 1.3; if a == Affix::Swift { speed_mul *= 1.5; } if a == Affix::Brute { hp *= 1.5; } let s = if a == Affix::Brute { 1.4 } else { 1.2 }; sc *= s; w *= s; h *= s; }
     if let Some(r) = rig.root { cx.c.entity(r).insert(Transform::from_translation(pos).with_scale(Vec3::splat(sc))); }

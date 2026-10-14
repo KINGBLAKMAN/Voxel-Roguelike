@@ -340,7 +340,7 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
             if id == "swordshield" && cx.m("w.swordshield.bash") > 0 && n % 3 == 0 { cx.status(i, Status { stun: 1.0, ..default() }); }
             if id == "mace" && cx.m("w.mace.thunder") > 0 && n % 3 == 0 && hit_n == 1 { lightning_strike(cx, ep, 26.0, 1.6, 0xa8dcff); }
         }
-        if hit_n > 0 && id == "mace" { cx.heal(2.0, true); if cx.m("w.mace.nova") > 0 { let k = cx.g.flags.entry("mace_n").or_insert(0.0); *k += 1.0; if (*k as i32) % 4 == 0 { holy_nova(cx); } } }
+        if hit_n > 0 && id == "mace" { cx.sustain(2.0); if cx.m("w.mace.nova") > 0 { let k = cx.g.flags.entry("mace_n").or_insert(0.0); *k += 1.0; if (*k as i32) % 4 == 0 { holy_nova(cx); } } }
         if hit_n > 0 { cx.g.hitstop = cx.g.hitstop.max(if heavy { 0.07 } else { 0.035 }); cx.shake(if heavy { 0.25 } else { 0.1 }); }
     });
 }
@@ -366,7 +366,7 @@ pub fn holy_nova(cx: &mut Ctx) {
     { let mut g = cx.gfx(); g.ring(c, 0xffe48a, 0.5, 4.5, 0.4); g.flare(c + Vec3::Y, 0xfff3b8, 4.0, 0.3, true); }
     cx.fx.burst(c + Vec3::Y, 0xffe48a, 30, 6.0, 0.5, 0.35, 0.0, 0.0);
     cx.aoe(c, 4.5, &mut |cx, i, _| cx.damage(i, 20.0, Hit { kb: 3.0, src: Some(c), col: 0xffe48a, ..default() }));
-    cx.heal(8.0, false);
+    cx.sustain(8.0);
 }
 
 pub fn lightning_strike(cx: &mut Ctx, pos: Vec3, dmg: f32, r: f32, col: u32) -> Vec3 {
