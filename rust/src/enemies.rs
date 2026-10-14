@@ -179,11 +179,11 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let mi = cx.g.minutes();
     let diff = 1.0 + mi * 0.11 + (cx.dc.day as f32 - 1.0) * 0.08 + (cx.g.lvl as f32 - 1.0) * 0.02;
     let quiet = t.passive || t.prop;
-    let mut seed = cx.fx.rng;
+    let mut seed = cx.fx.rng.load(std::sync::atomic::Ordering::Relaxed);
     let mut rng = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };
     let shadow = o.affix.is_some() || matches!(k, Kind::Brute | Kind::Golem) || live < 45;
     let rig = { let mut b = cx.builder(); b.shadow = shadow; let mut r = enemy_model(&mut b, k, pos, o.color, o.size, &mut rng); r.parts = std::mem::take(&mut b.parts); r };
-    cx.fx.rng = cx.fx.rng.wrapping_mul(1664525).wrapping_add(1013904223);
+    let _ = cx.fx.r();
     let mut sc = if k == Kind::Brute { 1.55 } else { 1.0 };
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
@@ -414,7 +414,7 @@ pub fn update_enemies(cx: &mut Ctx) {
             let e = &mut cx.g.enemies[i];
             e.wander_t -= dt;
             if e.flee > 0.0 && !pdead { e.flee -= dt; mvx = -tdx; mvz = -tdz; speed *= 2.1; }
-            else { if e.wander_t <= 0.0 { e.wander_t = 2.0 + rand01(&mut cx.fx.rng) * 4.0; let a = rand01(&mut cx.fx.rng) * TAU; e.wdir = if rand01(&mut cx.fx.rng) < 0.4 { Vec3::ZERO } else { Vec3::new(a.cos(), 0.0, a.sin()) }; } mvx = e.wdir.x; mvz = e.wdir.z; }
+            else { if e.wander_t <= 0.0 { e.wander_t = 2.0 + cx.fx.r() * 4.0; let a = cx.fx.r() * TAU; e.wdir = if cx.fx.r() < 0.4 { Vec3::ZERO } else { Vec3::new(a.cos(), 0.0, a.sin()) }; } mvx = e.wdir.x; mvz = e.wdir.z; }
         } else if aggro && can_move {
             if fear > 0.0 { mvx = -tdx; mvz = -tdz; }
             else if t.ranged {
@@ -422,9 +422,9 @@ pub fn update_enemies(cx: &mut Ctx) {
                 if dist > want + 3.0 { mvx = tdx; mvz = tdz; } else if dist < want - 4.0 { mvx = -tdx; mvz = -tdz; } else { let sg = (cx.g.enemies[i].ph * 0.2).sin().signum(); mvx = -tdz * 0.6 * sg; mvz = tdx * 0.6 * sg; }
                 let e = &mut cx.g.enemies[i]; e.aiming = dist < t.range + 4.0;
                 if e.wind > 0.0 { e.wind -= dt; mvx *= 0.2; mvz *= 0.2;
-                    if kind == Kind::Cultist { let hp = e.body.pos + Vec3::Y * 2.2; let c = hexc(0xd07aff) * 2.5; let j = Vec3::new(rand01(&mut cx.fx.rng) - 0.5, 0.0, rand01(&mut cx.fx.rng) - 0.5) * 0.8; cx.fx.emit(true, hp + j, Vec3::Y, 0.4, 0.35, 0.05, c, 0.0, 0.0, 1.0); }
+                    if kind == Kind::Cultist { let hp = e.body.pos + Vec3::Y * 2.2; let c = hexc(0xd07aff) * 2.5; let j = Vec3::new(cx.fx.r() - 0.5, 0.0, cx.fx.r() - 0.5) * 0.8; cx.fx.emit(true, hp + j, Vec3::Y, 0.4, 0.35, 0.05, c, 0.0, 0.0, 1.0); }
                     if cx.g.enemies[i].wind <= 0.0 { enemy_shoot(cx, i, tp); } }
-                else if e.atk_t <= 0.0 && dist < t.range { e.wind = t.wind; e.atk_t = t.cd * (0.8 + rand01(&mut cx.fx.rng) * 0.4) / e.speed_mul; }
+                else if e.atk_t <= 0.0 && dist < t.range { e.wind = t.wind; e.atk_t = t.cd * (0.8 + cx.fx.r() * 0.4) / e.speed_mul; }
             } else if t.fly {
                 mvx = tdx; mvz = tdz;
                 let e = &mut cx.g.enemies[i];
@@ -451,12 +451,12 @@ pub fn update_enemies(cx: &mut Ctx) {
                         let e = &mut cx.g.enemies[i];
                         if e.wind > 0.0 { e.wind -= dt; mvx = 0.0; mvz = 0.0; if e.wind <= 0.0 { golem_slam(cx, i); } }
                         else if dist < t.reach + 1.5 && e.atk_t <= 0.0 { e.wind = t.wind; e.atk_t = t.cd; let p = e.body.pos; cx.gfx().circle(p, 0xff6a3a, 5.2, t.wind, "war", 3.0, None, None); }
-                        else if dist > 10.0 && e.throw_t <= 0.0 && dist < 34.0 { e.throw_t = 4.0 + rand01(&mut cx.fx.rng) * 2.0; golem_throw(cx, i, tp); }
+                        else if dist > 10.0 && e.throw_t <= 0.0 && dist < 34.0 { e.throw_t = 4.0 + cx.fx.r() * 2.0; golem_throw(cx, i, tp); }
                     }
                     _ => {
                         mvx = tdx; mvz = tdz;
                         let e = &mut cx.g.enemies[i];
-                        if kind == Kind::Spider && dist < 7.0 && dist > 2.2 && e.leap_t <= 0.0 && e.body.on_ground { e.leap_t = 2.5 + rand01(&mut cx.fx.rng) * 1.5; e.body.vel = Vec3::new(tdx * 13.0, 7.5, tdz * 13.0); e.leaping = 0.8; }
+                        if kind == Kind::Spider && dist < 7.0 && dist > 2.2 && e.leap_t <= 0.0 && e.body.on_ground { e.leap_t = 2.5 + cx.fx.r() * 1.5; e.body.vel = Vec3::new(tdx * 13.0, 7.5, tdz * 13.0); e.leaping = 0.8; }
                         if e.leaping > 0.0 { e.leaping -= dt; if dist < 1.4 && dy.abs() < 1.6 { e.leaping = 0.0; hurt = Some((e.dmg, 5.0)); } }
                         if e.wind > 0.0 { e.wind -= dt; mvx *= 0.25; mvz *= 0.25;
                             if e.wind <= 0.0 { if dist < t.reach + 0.7 && dy.abs() < 2.0 { hurt = Some((e.dmg, 5.0)); } let p = e.body.pos + Vec3::Y; let yaw = dx.atan2(dz); cx.gfx().swoosh(p, yaw, t.reach + 0.5, 1.6, 0xff6a5a, 0.18, 0.0, 1.0); } }
@@ -467,7 +467,7 @@ pub fn update_enemies(cx: &mut Ctx) {
             cx.g.enemies[i].yaw = dx.atan2(dz);
         } else if !t.passive && poi.is_some() {
             let e = &mut cx.g.enemies[i]; e.wander_t -= dt;
-            if e.wander_t <= 0.0 { e.wander_t = 2.0 + rand01(&mut cx.fx.rng) * 3.0; let a = rand01(&mut cx.fx.rng) * TAU; e.wdir = if rand01(&mut cx.fx.rng) < 0.5 { Vec3::ZERO } else { Vec3::new(a.cos(), 0.0, a.sin()) }; }
+            if e.wander_t <= 0.0 { e.wander_t = 2.0 + cx.fx.r() * 3.0; let a = cx.fx.r() * TAU; e.wdir = if cx.fx.r() < 0.5 { Vec3::ZERO } else { Vec3::new(a.cos(), 0.0, a.sin()) }; }
             mvx = e.wdir.x * 0.5; mvz = e.wdir.z * 0.5;
         }
         if let Some((d, kb)) = hurt {
@@ -480,7 +480,7 @@ pub fn update_enemies(cx: &mut Ctx) {
         let moving = mvx != 0.0 || mvz != 0.0;
         if kind == Kind::Slime {
             if e.body.on_ground { let k = 1.0 - (dt * 8.0).min(1.0); e.body.vel.x *= k; e.body.vel.z *= k;
-                if e.hop_t <= 0.0 && moving { e.hop_t = 0.7 + rand01(&mut cx.fx.rng) * 0.4; e.body.vel = Vec3::new(mvx * speed * 1.6, 7.5, mvz * speed * 1.6); e.squash = 0.4; } }
+                if e.hop_t <= 0.0 && moving { e.hop_t = 0.7 + cx.fx.r() * 0.4; e.body.vel = Vec3::new(mvx * speed * 1.6, 7.5, mvz * speed * 1.6); e.squash = 0.4; } }
         } else if e.leaping <= 0.0 {
             let acc = if e.body.on_ground || fly { 10.0 } else { 2.0 };
             e.body.vel.x = crate::noise::lerp(e.body.vel.x, mvx * speed, (acc * dt).min(1.0));

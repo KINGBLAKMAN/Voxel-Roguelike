@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 //! Emberwild: a voxel horde-survival roguelike.
 
+mod abilities;
 mod audio;
 mod augments;
 mod combat;
@@ -114,13 +115,15 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     for c in cx.g.cds.iter_mut() { *c = (*c - dt).max(0.0); }
     cx.g.flash = (cx.g.flash - dt).max(0.0);
     if !cx.p.dead && st.regen > 0.0 { cx.g.regen_acc += dt; if cx.g.regen_acc >= 1.0 { cx.g.regen_acc -= 1.0; cx.heal(st.regen, true); } }
-    if keys.just_pressed(KeyCode::Digit1) && cx.p.widx != 0 { cx.p.widx = 0; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
-    if keys.just_pressed(KeyCode::Digit2) && cx.p.widx != 1 { cx.p.widx = 1; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
+    if keys.just_pressed(KeyCode::KeyQ) { cx.p.widx = 1 - cx.p.widx; cx.p.charging = false; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); cx.play("swap"); }
+    for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { abilities::use_ability(&mut cx, i); } }
     update_aim(&mut cx, ce);
     combat::update_primary(&mut cx, lmb);
     enemies::update_enemies(&mut cx);
     combat::update_projs(&mut cx);
+    abilities::update_abilities(&mut cx);
     combat::update_zones(&mut cx);
+    abilities::update_traps(&mut cx);
     update_pickups(&mut cx);
     enemies::update_corpses(&mut cx);
     run_timers(&mut cx);
@@ -162,22 +165,25 @@ fn update_aim(cx: &mut Ctx, ce: Entity) {
 fn test_act(cx: &mut Ctx, a: &str) {
     let (k, v) = a.split_once('=').unwrap_or((a, ""));
     match k {
-        "horde" => {
-            let n: u32 = v.parse().unwrap_or(10);
+        "horde" | "hordefar" => {
+            let n: u32 = v.parse().unwrap_or(10); let (r0, r1) = if k == "horde" { (7.0, 12.0) } else { (15.0, 21.0) };
             let pp = cx.p.body.pos; let f = cx.p.fwd();
             for i in 0..n {
                 let an = (i as f32 / n as f32 - 0.5) * 2.2 + f.x.atan2(f.z);
-                let r = cx.rr(7.0, 12.0);
+                let r = cx.rr(r0, r1);
                 if let Some(sp) = cx.w.surface_spot(pp.x + an.sin() * r, pp.z + an.cos() * r) {
                     let k = cx.pick(&[enemies::Kind::Zombie, enemies::Kind::Zombie, enemies::Kind::Skeleton, enemies::Kind::Spider, enemies::Kind::Slime, enemies::Kind::Brute]);
                     enemies::spawn_enemy(cx, k, sp, enemies::SpawnOpts { force: true, ..default() });
                 }
             }
         }
+        "pitch" => { cx.p.pitch = v.parse().unwrap_or(0.0); }
+        "yaw" => { cx.p.yaw = v.parse().unwrap_or(0.0); }
         "mod" => { *cx.g.mods.entry(v.to_string()).or_insert(0) += 1; }
         "minutes" => { cx.g.run_t = v.parse::<f32>().unwrap_or(5.0) * 60.0; }
         "weapon" => { cx.p.widx = v.parse().unwrap_or(0); attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
         "chest" => { let p = cx.p.body.pos + cx.p.fwd() * 4.0; director::drop_chest(cx, p, false); }
+        "ab" => { let i: usize = v.parse().unwrap_or(0); cx.g.cds[i] = 0.0; abilities::use_ability(cx, i); }
         "bomb" => { let p = cx.p.body.pos + cx.p.fwd() * 2.0; cx.drop_pick(p, PickKind::Bomb, 0.0); }
         _ => {}
     }

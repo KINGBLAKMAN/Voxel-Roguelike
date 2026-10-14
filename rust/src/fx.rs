@@ -46,11 +46,11 @@ pub struct Fx {
     pub add: Vec<Particle>, pub blend: Vec<Particle>, pub add_mesh: Handle<Mesh>, pub blend_mesh: Handle<Mesh>,
     pub tweens: Vec<Tween>, pub debris: Vec<Debris>, pub debris_free: Vec<Entity>, pub tex: Tex, pub quality: f32,
     pub quad: Handle<Mesh>, pub ring: Handle<Mesh>, pub disk: Handle<Mesh>, pub cyl: Handle<Mesh>, pub cone: Handle<Mesh>, pub arcs: HashMap<(i32, i32), Handle<Mesh>>,
-    pub rng: u32,
+    pub rng: std::sync::atomic::AtomicU32,
 }
 impl Fx {
-    pub fn r(&mut self) -> f32 { self.rng ^= self.rng << 13; self.rng ^= self.rng >> 17; self.rng ^= self.rng << 5; (self.rng % 1_000_000) as f32 / 1_000_000.0 }
-    pub fn rr(&mut self, a: f32, b: f32) -> f32 { a + self.r() * (b - a) }
+    pub fn r(&self) -> f32 { use std::sync::atomic::Ordering::Relaxed; let mut x = self.rng.load(Relaxed); x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng.store(x, Relaxed); (x % 1_000_000) as f32 / 1_000_000.0 }
+    pub fn rr(&self, a: f32, b: f32) -> f32 { a + self.r() * (b - a) }
     pub fn emit(&mut self, add: bool, pos: Vec3, vel: Vec3, life: f32, s0: f32, s1: f32, col: Vec3, grav: f32, drag: f32, a0: f32) {
         if self.quality < 1.0 && self.r() > self.quality { return; }
         let v = if add { &mut self.add } else { &mut self.blend };
@@ -201,7 +201,7 @@ fn setup_fx(mut c: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<
     let disk = meshes.add(Circle::new(1.0).mesh().resolution(48).build().rotated_by(Quat::from_rotation_x(-PI / 2.0)));
     let cyl = meshes.add(open_cyl(32));
     let cone = meshes.add(Cone { radius: 0.5, height: 1.0 }.mesh().resolution(6).build());
-    c.insert_resource(Fx { add: vec![], blend: vec![], add_mesh, blend_mesh, tweens: vec![], debris: vec![], debris_free: free, tex, quality: 1.0, quad, ring: ring_m, disk, cyl, cone, arcs: HashMap::new(), rng: 0x9e3779b9 });
+    c.insert_resource(Fx { add: vec![], blend: vec![], add_mesh, blend_mesh, tweens: vec![], debris: vec![], debris_free: free, tex, quality: 1.0, quad, ring: ring_m, disk, cyl, cone, arcs: HashMap::new(), rng: std::sync::atomic::AtomicU32::new(0x9e3779b9) });
 }
 
 fn update_fx(time: Res<Time>, mut fx: ResMut<Fx>, mut q: Query<&mut Transform>, mut mats: ResMut<Assets<StandardMaterial>>, mut c: Commands, w: Option<Res<Voxels>>, paused: Option<Res<crate::Paused>>) {

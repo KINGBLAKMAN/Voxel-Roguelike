@@ -36,14 +36,14 @@ pub struct Game {
     pub next_id: u32, pub run_t: f32, pub kills: u32, pub hitstop: f32, pub st: Stats, pub mods: HashMap<String, u32>, pub perks: Vec<String>,
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
-    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>,
+    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default() }
     }
 }
 impl Game {
@@ -63,9 +63,9 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn gfx(&mut self) -> Gfx<'_, 'w, 's> { Gfx { c: &mut *self.c, meshes: &mut *self.meshes, mats: &mut *self.mats, pal: &mut *self.pal, fx: &mut *self.fx } }
     pub fn builder(&mut self) -> Builder<'_, 'w, 's> { Builder::new(&mut *self.c, &mut *self.pal, &mut *self.mats) }
     pub fn later(&mut self, t: f32, f: impl FnOnce(&mut Ctx) + Send + Sync + 'static) { self.g.timers.push(Timer { t, f: Box::new(f) }); }
-    pub fn r(&mut self) -> f32 { self.fx.r() }
-    pub fn rr(&mut self, a: f32, b: f32) -> f32 { self.fx.rr(a, b) }
-    pub fn pick<T: Copy>(&mut self, v: &[T]) -> T { v[(self.r() * v.len() as f32) as usize % v.len()] }
+    pub fn r(&self) -> f32 { self.fx.r() }
+    pub fn rr(&self, a: f32, b: f32) -> f32 { self.fx.rr(a, b) }
+    pub fn pick<T: Copy>(&self, v: &[T]) -> T { v[(self.r() * v.len() as f32) as usize % v.len()] }
     pub fn m(&self, k: &str) -> u32 { self.g.m(k) }
     pub fn shake(&mut self, s: f32) { self.cam.shake = (self.cam.shake + s).min(1.0); }
     pub fn play(&mut self, name: &'static str) { self.sfx.play(name); }

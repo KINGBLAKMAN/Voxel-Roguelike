@@ -31,7 +31,7 @@ impl Palette {
                 Mk::Lit => StandardMaterial { base_color: c, perceptual_roughness: 0.8, reflectance: 0.2, ..default() },
                 Mk::Glow => StandardMaterial { base_color: c, emissive: lrgb(hex, 6.0), ..default() },
                 Mk::Ghost => StandardMaterial { base_color: c.with_alpha(0.35), emissive: lrgb(hex, 1.5), alpha_mode: AlphaMode::Add, unlit: true, ..default() },
-                Mk::Flash => StandardMaterial { base_color: Color::WHITE, emissive: LinearRgba::rgb(4.0, 4.0, 4.0), ..default() },
+                Mk::Flash => StandardMaterial { base_color: Color::WHITE, emissive: LinearRgba::rgb(1.2, 1.2, 1.2), ..default() },
                 Mk::Ice => StandardMaterial { base_color: Color::srgba(0.7, 0.9, 1.0, 0.75), emissive: LinearRgba::rgb(0.15, 0.4, 0.6), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.1, reflectance: 0.8, ..default() },
                 Mk::Clear => StandardMaterial { base_color: c.with_alpha(0.55), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.15, reflectance: 0.6, ..default() },
             })

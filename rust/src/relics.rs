@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
 
-pub struct Decoy { pub pos: Vec3, pub t: f32, pub hp: f32 }
+pub struct Decoy { pub pos: Vec3, pub t: f32, pub hp: f32, pub e: Entity }
 
 pub struct RelicInfo { pub id: &'static str, pub name: &'static str, pub color: u32, pub ranks: [&'static str; 5] }
 pub const RELICS: [RelicInfo; 7] = [
@@ -85,7 +85,14 @@ pub fn update_relics(cx: &mut Ctx) {
     let dt = cx.dt;
     // decoys tick down
     for d in cx.g.rel.decoys.iter_mut() { d.t -= dt; if d.hp <= 0.0 { d.t = 0.0; } }
-    cx.g.rel.decoys.retain(|d| d.t > 0.0);
+    let mut k = 0;
+    while k < cx.g.rel.decoys.len() {
+        if cx.g.rel.decoys[k].t > 0.0 { k += 1; continue; }
+        let d = cx.g.rel.decoys.swap_remove(k);
+        cx.c.entity(d.e).despawn_recursive();
+        cx.fx.smoke(d.pos, 0xd8d0c0, 6, 1.2, 0.8, 0.8);
+        cx.gfx().debris(d.pos + Vec3::Y, &[0xe0c070, 0xc8a85a, 0x6a4528], 10, 3.0, 0.12, 4.0);
+    }
     let dead = cx.p.dead;
     let vis = if dead { Visibility::Hidden } else { Visibility::Inherited };
     for l in cx.g.rel.objs.values() { for e in l { cx.c.entity(*e).insert(vis); } }
