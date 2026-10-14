@@ -11,6 +11,8 @@ use std::f32::consts::{PI, TAU};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind { Zombie, Skeleton, Slime, Spider, Cultist, Golem, Bat, Bloater, Brute, Urn, Pig, Sheep, Chicken,
     Spiderling, Gorehorn, Shieldbearer, Shaman, Imp, Necromancer, Wurm, FrostGiant, Colossus, Broodmother, EmberKing, Goblin }
+pub const ALL_KINDS: [Kind; 25] = [Kind::Zombie, Kind::Skeleton, Kind::Slime, Kind::Spider, Kind::Cultist, Kind::Golem, Kind::Bat, Kind::Bloater, Kind::Brute, Kind::Urn, Kind::Pig, Kind::Sheep, Kind::Chicken,
+    Kind::Spiderling, Kind::Gorehorn, Kind::Shieldbearer, Kind::Shaman, Kind::Imp, Kind::Necromancer, Kind::Wurm, Kind::FrostGiant, Kind::Colossus, Kind::Broodmother, Kind::EmberKing, Kind::Goblin];
 pub struct EType { pub name: &'static str, pub hp: f32, pub dmg: f32, pub speed: f32, pub reach: f32, pub cd: f32, pub wind: f32, pub xp: f32, pub w: f32, pub h: f32,
     pub ranged: bool, pub range: f32, pub passive: bool, pub prop: bool, pub fly: bool, pub kb_res: f32, pub elite: bool, pub blood: &'static [u32] }
 pub const fn et(name: &'static str, hp: f32, dmg: f32, speed: f32, xp: f32, w: f32, h: f32, blood: &'static [u32]) -> EType {
@@ -172,8 +174,8 @@ pub fn enemy_model(b: &mut Builder, k: Kind, pos: Vec3, color: u32, size: f32, r
     }
 }
 
-pub struct SpawnOpts { pub size: f32, pub color: u32, pub affix: Option<Affix>, pub boss: bool, pub poi: Option<(i32, i32)>, pub no_rise: bool, pub force: bool }
-impl Default for SpawnOpts { fn default() -> Self { SpawnOpts { size: 1.0, color: 0x6fd46a, affix: None, boss: false, poi: None, no_rise: false, force: false } } }
+pub struct SpawnOpts { pub size: f32, pub color: u32, pub affix: Option<Affix>, pub boss: bool, pub poi: Option<(i32, i32)>, pub no_rise: bool, pub force: bool, pub id: Option<u32> }
+impl Default for SpawnOpts { fn default() -> Self { SpawnOpts { size: 1.0, color: 0x6fd46a, affix: None, boss: false, poi: None, no_rise: false, force: false, id: None } } }
 
 pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usize> {
     let live = cx.g.enemies.iter().filter(|e| !e.dead).count();
@@ -198,7 +200,7 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let mut speed_mul = if quiet { 1.0 } else { (1.0 + (mi * 0.02).min(0.3)) * if cx.g.ember() >= 9 { 1.15 } else { 1.0 } };
     if let Some(a) = o.affix { hp *= 2.6; dmg *= 1.3; if a == Affix::Swift { speed_mul *= 1.5; } if a == Affix::Brute { hp *= 1.5; } let s = if a == Affix::Brute { 1.4 } else { 1.2 }; sc *= s; w *= s; h *= s; }
     if let Some(r) = rig.root { cx.c.entity(r).insert(Transform::from_translation(pos).with_scale(Vec3::splat(sc))); }
-    let id = cx.g.next_id; cx.g.next_id += 1;
+    let id = match o.id { Some(id) => id, None => { let id = cx.g.next_id; cx.g.next_id += 1; id } };
     let rise = if o.no_rise || quiet || t.fly || crate::horde::flies(k) || k == Kind::Wurm { 0.0 } else { 0.7 };
     if rise > 0.0 { cx.gfx().debris(pos + Vec3::Y * 0.1, &[0x6a4a2c, 0x8a5b34, 0x4a3a2a], if o.affix.is_some() { 10 } else { 4 }, 3.0, 0.18, 5.0); }
     let yaw = cx.rr(0.0, TAU); let ph = cx.rr(0.0, 6.0); let atk = cx.rr(0.5, 1.5);
@@ -225,7 +227,8 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
     cx.fx.sparks(c, t.blood[0], 6, 7.0);
     if !t.passive { cx.play(if t.prop { "glass" } else { "die" }); }
     if elite { cx.shake(0.6); let col = affix.map(|a| affix_info(a).1).unwrap_or(0x6ff3ff); let mut g = cx.gfx(); g.ring(pos, col, 0.5, 5.0, 0.5); g.flare(c, col, 5.0, 0.5, true); }
-    if !t.passive && !t.prop { cx.g.kills += 1; crate::augments::on_kill(cx, c); }
+    if !t.passive && !t.prop { cx.g.kills += 1; if !cx.g.net.client() { crate::augments::on_kill(cx, c); } }
+    if !cx.g.net.client() {
     let xp = if no_xp { 0.0 } else { (t.xp * (1.0 + cx.g.minutes() * 0.05) * if affix.is_some() { 4.0 } else { 1.0 } * if kind == Kind::Slime { size } else { 1.0 }).round() };
     if xp > 0.0 && !cx.p.dead { cx.drop_gems(c, xp); }
     if t.passive { let n = if kind == Kind::Chicken { 1 } else { 2 } + if cx.g.st.food > 1.0 { 1 } else { 0 }; for _ in 0..n { cx.drop_pick(c, PickKind::Meat, 0.0); } }
@@ -234,14 +237,16 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
     if kind == Kind::Slime && size > 1.1 { for _ in 0..2 { let p = pos + Vec3::new(cx.rr(-0.5, 0.5), 0.3, cx.rr(-0.5, 0.5)); if let Some(j) = spawn_enemy(cx, Kind::Slime, p, SpawnOpts { size: size * 0.55, color, no_rise: true, force: true, ..default() }) { let v = Vec3::new(cx.rr(-4.0, 4.0), 6.0, cx.rr(-4.0, 4.0)); cx.g.enemies[j].body.vel = v; cx.g.enemies[j].alert = true; } } }
     if affix == Some(Affix::Splitter) { for _ in 0..3 { let p = pos + Vec3::new(cx.rr(-1.0, 1.0), 0.3, cx.rr(-1.0, 1.0)); let k2 = if kind == Kind::Golem { Kind::Zombie } else { kind }; if let Some(j) = spawn_enemy(cx, k2, p, SpawnOpts { size: 0.8, color, no_rise: true, force: true, ..default() }) { let v = Vec3::new(cx.rr(-5.0, 5.0), 6.0, cx.rr(-5.0, 5.0)); cx.g.enemies[j].body.vel = v; } } }
     if affix == Some(Affix::Volatile) {
-        cx.gfx().circle(pos, 0xffd35a, 4.0, 1.0, "fire", 4.0, None, None);
+        crate::net::tele(cx, pos, 0xffd35a, 4.0, 1.0, 0);
         cx.later(1.0, move |cx| { cx.play("boom"); let mut g = cx.gfx(); g.ring(pos, 0xffd35a, 0.5, 4.0, 0.4); g.flare(pos + Vec3::Y, 0xffd35a, 5.0, 0.4, true); g.decal(pos, false, 3.0, 6.0, None); cx.fx.burst(pos + Vec3::Y * 0.6, 0xffd35a, 60, 10.0, 0.6, 0.6, 2.0, 0.0); cx.shake(0.3);
-            if Vec2::new(cx.p.body.pos.x - pos.x, cx.p.body.pos.z - pos.z).length() < 4.0 { cx.hurt_player(22.0, Some(pos), 8.0); } });
+            crate::net::slam(cx, pos, 4.0, 22.0, 8.0); });
     }
     if kind == Kind::Bloater { bloater_pop(cx, i, self_det); }
     crate::horde::on_death(cx, kind, pos);
     if elite { let (nm, _) = affix.map(affix_info).unwrap_or((t.name, 0)); let label = if affix.is_some() { format!("{} {} slain", nm, t.name) } else { format!("{} slain", t.name) }; cx.toast(&label, &format!("+{} experience", xp), 2.5); crate::director::drop_chest(cx, pos, false); }
     if boss { cx.g.boss = None; *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; for _ in 0..8 { let g = (5.0 + cx.g.minutes()).round(); cx.drop_pick(c, PickKind::Gold, g); } }
+    if cx.g.net.host() { let id = cx.g.enemies[i].id; let killer = cx.g.net.last_hitter.remove(&id).unwrap_or(cx.g.net.my_id); let sx = if t.passive || t.prop { 0.0 } else { xp }; cx.g.net.send(crate::net::Msg::Die { id, killer, xp: sx }); }
+    } else if boss { *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; }
     let e = std::mem::replace(&mut cx.g.enemies[i].rig, Rig::default());
     if let Some(ice) = cx.g.enemies[i].ice.take() { cx.c.entity(ice).despawn_recursive(); cx.gfx().debris(c, &[0xbff4ff, 0x8fe6ff, 0xffffff], 12, 6.0, 0.2, 6.0); }
     if t.prop || kind == Kind::Bloater { if let Some(r) = e.root { cx.c.entity(r).despawn_recursive(); } }
@@ -261,7 +266,7 @@ fn bloater_pop(cx: &mut Ctx, i: usize, self_det: bool) {
     if Vec3::distance(cx.p.body.pos, p) < 20.0 { cx.shake(0.25); }
     let dm = (30.0 * (1.0 + cx.g.minutes() * 0.08)).round();
     for (j, _) in cx.near(p, r) { if j == i || cx.g.enemies[j].t.passive || cx.g.enemies[j].t.prop { continue; } cx.apply_damage(j, dm, Hit { kb: 7.0, up: 5.0, src: Some(p), ..default() }); }
-    if self_det && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < r && (cx.p.body.pos.y - p.y).abs() < 3.0 { cx.hurt_player(dmg, Some(p), 9.0); }
+    if self_det { crate::net::slam(cx, p, r, dmg, 9.0); }
 }
 
 pub fn update_corpses(cx: &mut Ctx) {
@@ -323,7 +328,7 @@ fn animate(cx: &mut Ctx, i: usize, moving: bool) {
     }
 }
 
-fn visual(cx: &mut Ctx, i: usize, moving: bool) {
+pub fn visual(cx: &mut Ctx, i: usize, moving: bool) {
     let dt = cx.dt;
     animate(cx, i, moving);
     let rnd = cx.r();
@@ -376,13 +381,14 @@ fn recycle(cx: &mut Ctx, i: usize) -> bool {
 pub fn update_enemies(cx: &mut Ctx) {
     let dt = cx.dt;
     let pp = cx.p.body.pos;
-    let pdead = cx.p.dead;
+    let pdead = cx.p.dead || !cx.p.spawned;
+    let remotes = crate::net::targets(cx.g);
     let n = cx.g.enemies.len();
     for i in 0..n {
         if cx.g.enemies[i].dead { continue; }
         { let e = &mut cx.g.enemies[i]; e.flash -= dt; if e.hit_p > 0.0 { e.hit_p = (e.hit_p - dt).max(0.0); } }
         let (epos, t, poi, boss, fly) = { let e = &cx.g.enemies[i]; (e.body.pos, e.t, e.poi, e.boss, e.t.fly) };
-        let near = Vec2::new(pp.x - epos.x, pp.z - epos.z).length();
+        let near = remotes.iter().map(|r| Vec2::new(r.1.x - epos.x, r.1.z - epos.z).length()).fold(Vec2::new(pp.x - epos.x, pp.z - epos.z).length(), f32::min);
         if t.prop { if near > 90.0 { despawn(cx, i); continue; } let mut b = cx.g.enemies[i].body.clone(); move_body(cx.w, &mut b, dt, 26.0); cx.g.enemies[i].body = b; visual(cx, i, false); continue; }
         if t.passive && near > 96.0 { despawn(cx, i); continue; }
         if poi.is_some() && near > 120.0 { despawn(cx, i); continue; }
@@ -392,11 +398,12 @@ pub fn update_enemies(cx: &mut Ctx) {
             if !fly { let mut b = e.body.clone(); move_body(cx.w, &mut b, dt, 26.0); cx.g.enemies[i].body = b; }
             visual(cx, i, false); continue;
         }
-        // decoys draw aggro
-        let mut tp = pp; let mut target_decoy = false;
+        // hunt the nearest living player (teammates included), and let decoys draw aggro
+        let mut tp = pp; let mut target_decoy = false; let mut tgt_remote: Option<u32> = None;
+        { let mut best = if pdead { f32::MAX } else { Vec2::new(pp.x - epos.x, pp.z - epos.z).length() }; for &(rid, rpos) in remotes.iter() { let d = Vec2::new(rpos.x - epos.x, rpos.z - epos.z).length(); if d < best { best = d; tp = rpos; tgt_remote = Some(rid); } } }
         if let Some(d) = cx.g.rel.decoys.iter().filter(|d| d.t > 0.0).min_by(|a, b| a.pos.distance(epos).partial_cmp(&b.pos.distance(epos)).unwrap()) {
             if d.pos.distance(epos) * 0.5 < near || pdead { tp = d.pos; target_decoy = true; } }
-        let has_tgt = !pdead || target_decoy;
+        let has_tgt = !pdead || target_decoy || tgt_remote.is_some();
         let (dx, dz) = (tp.x - epos.x, tp.z - epos.z);
         let dist = Vec2::new(dx, dz).length().max(0.001);
         let dy = tp.y - epos.y;
@@ -453,19 +460,19 @@ pub fn update_enemies(cx: &mut Ctx) {
                         mvx = tdx; mvz = tdz; if dist < 9.0 { speed *= 1.7; }
                         let e = &mut cx.g.enemies[i];
                         if e.wind > 0.0 { e.wind -= dt; mvx = 0.0; mvz = 0.0; e.swell = 1.0 - e.wind / t.wind; if e.wind <= 0.0 { kill_enemy(cx, i, true, true); continue; } }
-                        else if dist < 2.3 && dy.abs() < 2.0 { e.wind = t.wind; let p = e.body.pos; cx.gfx().circle(p, 0x9aff4a, 3.8, t.wind, "blood", 5.0, None, None); cx.play("swell"); }
+                        else if dist < 2.3 && dy.abs() < 2.0 { e.wind = t.wind; let p = e.body.pos; crate::net::tele(cx, p, 0x9aff4a, 3.8, t.wind, 4); cx.play("swell"); }
                     }
                     Kind::Brute => {
                         mvx = tdx; mvz = tdz;
                         let e = &mut cx.g.enemies[i];
                         if e.wind > 0.0 { e.wind -= dt; mvx = 0.0; mvz = 0.0; if e.wind <= 0.0 { brute_smash(cx, i); } }
-                        else if dist < t.reach + 0.6 && e.atk_t <= 0.0 && dy.abs() < 2.5 { e.wind = t.wind; e.atk_t = t.cd / e.speed_mul; e.smash_at = e.body.pos + Vec3::new(tdx, 0.0, tdz) * 1.8; let p = e.smash_at; cx.gfx().circle(p, 0xff7a3a, 2.8, t.wind, "war", 4.0, None, None); }
+                        else if dist < t.reach + 0.6 && e.atk_t <= 0.0 && dy.abs() < 2.5 { e.wind = t.wind; e.atk_t = t.cd / e.speed_mul; e.smash_at = e.body.pos + Vec3::new(tdx, 0.0, tdz) * 1.8; let p = e.smash_at; crate::net::tele(cx, p, 0xff7a3a, 2.8, t.wind, 1); }
                     }
                     Kind::Golem => {
                         mvx = tdx; mvz = tdz;
                         let e = &mut cx.g.enemies[i];
                         if e.wind > 0.0 { e.wind -= dt; mvx = 0.0; mvz = 0.0; if e.wind <= 0.0 { golem_slam(cx, i); } }
-                        else if dist < t.reach + 1.5 && e.atk_t <= 0.0 { e.wind = t.wind; e.atk_t = t.cd; let p = e.body.pos; cx.gfx().circle(p, 0xff6a3a, 5.2, t.wind, "war", 3.0, None, None); }
+                        else if dist < t.reach + 1.5 && e.atk_t <= 0.0 { e.wind = t.wind; e.atk_t = t.cd; let p = e.body.pos; crate::net::tele(cx, p, 0xff6a3a, 5.2, t.wind, 1); }
                         else if dist > 10.0 && e.throw_t <= 0.0 && dist < 34.0 { e.throw_t = 4.0 + cx.fx.r() * 2.0; golem_throw(cx, i, tp); }
                     }
                     _ => {
@@ -487,6 +494,7 @@ pub fn update_enemies(cx: &mut Ctx) {
         }
         if let Some((d, kb)) = hurt {
             if target_decoy { if let Some(dd) = cx.g.rel.decoys.iter_mut().min_by(|a, b| a.pos.distance(epos).partial_cmp(&b.pos.distance(epos)).unwrap()) { dd.hp -= d; } }
+            else if let Some(rid) = tgt_remote { cx.g.net.out.push((Some(rid), crate::net::Msg::Hurt { to: rid, dmg: d, src: epos.to_array(), kb })); }
             else { cx.hurt_player(d, Some(epos), kb);
                 if cx.g.flags.remove("parried").is_some() { let e = &mut cx.g.enemies[i]; e.stun = e.stun.max(if e.boss { 0.5 } else { 1.5 }); if !e.boss { e.body.vel += Vec3::new(-tdx, 0.4, -tdz) * 9.0; } }
                 if cx.g.enemies[i].affix == Some(Affix::Vampiric) { let e = &mut cx.g.enemies[i]; e.hp = (e.hp + d * 1.5).min(e.max_hp); } }
@@ -559,14 +567,12 @@ fn enemy_shoot(cx: &mut Ctx, i: usize, tp: Vec3) {
 }
 fn golem_slam(cx: &mut Ctx, i: usize) {
     let (c, dmg) = (cx.g.enemies[i].body.pos, cx.g.enemies[i].dmg);
-    slam_fx(cx, c, 5.5);
-    if Vec2::new(cx.p.body.pos.x - c.x, cx.p.body.pos.z - c.z).length() < 5.4 && cx.p.body.pos.y - c.y < 2.5 { cx.hurt_player(dmg, Some(c), 12.0); }
+    crate::net::slam(cx, c, 5.5, dmg, 12.0);
 }
 fn brute_smash(cx: &mut Ctx, i: usize) {
     let (mut c, dmg) = (cx.g.enemies[i].smash_at, cx.g.enemies[i].dmg);
     c.y = cx.ground(c.x, c.z, cx.g.enemies[i].body.pos.y + 1.0);
-    slam_fx(cx, c, 2.8);
-    if Vec2::new(cx.p.body.pos.x - c.x, cx.p.body.pos.z - c.z).length() < 2.9 && (cx.p.body.pos.y - c.y).abs() < 2.5 { cx.hurt_player(dmg, Some(c), 10.0); }
+    crate::net::slam(cx, c, 2.9, dmg, 10.0);
 }
 pub fn slam_fx(cx: &mut Ctx, c: Vec3, r: f32) {
     cx.play("boom"); cx.shake(if r > 4.0 { 0.6 } else { 0.3 });

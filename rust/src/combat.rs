@@ -15,28 +15,30 @@ pub enum Orient { Fixed, Vel, Spin(f32), Tumble }
 pub struct Proj {
     pub pos: Vec3, pub vel: Vec3, pub grav: f32, pub r: f32, pub life: f32, pub age: f32, pub pierce: bool, pub no_world: bool, pub owner: Owner, pub dmg: f32,
     pub hit: Vec<u32>, pub e: Option<Entity>, pub stick: bool, pub orient: Orient, pub homing: f32, pub seek: f32, pub boomer: bool, pub back: bool, pub turn: f32,
-    pub speed: f32, pub bnc: u32, pub on_hit: Option<PFn>, pub on_world: Option<PFn>, pub on_expire: Option<PFn>, pub trail: Option<PFn>, pub data: [f32; 4], pub dead: bool,
+    pub speed: f32, pub bnc: u32, pub on_hit: Option<PFn>, pub on_world: Option<PFn>, pub on_expire: Option<PFn>, pub trail: Option<PFn>, pub data: [f32; 4], pub dead: bool, pub ghost: bool,
 }
 impl Proj {
     pub fn new(pos: Vec3, vel: Vec3) -> Self {
         Proj { pos, vel, grav: 0.0, r: 0.3, life: 2.0, age: 0.0, pierce: false, no_world: false, owner: Owner::Player, dmg: 10.0, hit: vec![], e: None, stick: false, orient: Orient::Vel,
-            homing: 0.0, seek: 12.0, boomer: false, back: false, turn: 0.0, speed: 0.0, bnc: 0, on_hit: None, on_world: None, on_expire: None, trail: None, data: [0.0; 4], dead: false }
+            homing: 0.0, seek: 12.0, boomer: false, back: false, turn: 0.0, speed: 0.0, bnc: 0, on_hit: None, on_world: None, on_expire: None, trail: None, data: [0.0; 4], dead: false, ghost: false }
     }
 }
 pub struct Stuck { pub e: Entity, pub t: f32 }
 
 pub type ZFn = Box<dyn FnMut(&mut Ctx, &mut Zone) + Send + Sync>;
-pub struct Zone { pub pos: Vec3, pub r: f32, pub life: f32, pub t: f32, pub every: f32, pub tick: f32, pub follow: bool, pub on_tick: Option<ZFn>, pub on_frame: Option<ZFn>, pub on_end: Option<ZFn>, pub ents: Vec<Entity>, pub n: u32 }
-impl Zone { pub fn new(pos: Vec3, r: f32, life: f32) -> Self { Zone { pos, r, life, t: 0.0, every: 0.0, tick: 0.0, follow: false, on_tick: None, on_frame: None, on_end: None, ents: vec![], n: 0 } } }
+pub struct Zone { pub pos: Vec3, pub r: f32, pub life: f32, pub t: f32, pub every: f32, pub tick: f32, pub follow: bool, pub on_tick: Option<ZFn>, pub on_frame: Option<ZFn>, pub on_end: Option<ZFn>, pub ents: Vec<Entity>, pub n: u32, pub ghost: bool }
+impl Zone { pub fn new(pos: Vec3, r: f32, life: f32) -> Self { Zone { pos, r, life, t: 0.0, every: 0.0, tick: 0.0, follow: false, on_tick: None, on_frame: None, on_end: None, ents: vec![], n: 0, ghost: false } } }
 
-pub struct Trap { pub pos: Vec3, pub life: f32, pub armed: f32, pub spiked: u32, pub boom: u32, pub field: bool, pub mini: bool, pub root: Entity, pub jaws: [Entity; 2], pub snap: f32 }
+pub struct Trap { pub ghost: bool, pub pos: Vec3, pub life: f32, pub armed: f32, pub spiked: u32, pub boom: u32, pub field: bool, pub mini: bool, pub root: Entity, pub jaws: [Entity; 2], pub snap: f32 }
 
 pub fn spawn_proj(cx: &mut Ctx, mut p: Proj) {
     if cx.g.projs.len() >= 300 { let o = cx.g.projs.remove(0); if let Some(e) = o.e { cx.c.entity(e).despawn_recursive(); } }
-    if p.owner == Owner::Player && p.bnc == 0 { p.bnc = cx.m("x.bounce"); }
+    if p.owner == Owner::Player && p.bnc == 0 && !cx.g.net.ghost { p.bnc = cx.m("x.bounce"); }
+    p.ghost = cx.g.net.ghost;
     cx.g.projs.push(p);
 }
-pub fn zone(cx: &mut Ctx, z: Zone) { if cx.g.zones.len() >= 60 { let mut o = cx.g.zones.remove(0); for e in o.ents.drain(..) { cx.c.entity(e).despawn_recursive(); } } cx.g.zones.push(z); }
+pub fn zone(cx: &mut Ctx, mut z: Zone) {
+    z.ghost = cx.g.net.ghost; if cx.g.zones.len() >= 60 { let mut o = cx.g.zones.remove(0); for e in o.ents.drain(..) { cx.c.entity(e).despawn_recursive(); } } cx.g.zones.push(z); }
 
 // ---------------- meshes for projectiles ----------------
 pub fn arrow_mesh(cx: &mut Ctx, shaft: u32, tip: u32, glow: Option<u32>) -> Entity {
@@ -71,6 +73,7 @@ pub fn update_projs(cx: &mut Ctx) {
     let mut list = std::mem::take(&mut cx.g.projs);
     for p in list.iter_mut() {
         if p.dead { continue; }
+        cx.g.net.ghost = p.ghost;
         p.age += dt;
         let mut end = false;
         if p.homing > 0.0 {
@@ -139,6 +142,7 @@ pub fn update_projs(cx: &mut Ctx) {
             if let Some(e) = p.e { if p.stick { cx.g.rel.stuck.push(Stuck { e, t: 4.0 }); if cx.g.rel.stuck.len() > 120 { let o = cx.g.rel.stuck.remove(0); cx.c.entity(o.e).despawn_recursive(); } } else { cx.c.entity(e).despawn_recursive(); } }
         }
     }
+    cx.g.net.ghost = false;
     list.retain(|p| !p.dead);
     list.append(&mut cx.g.projs);
     cx.g.projs = list;
@@ -158,12 +162,14 @@ pub fn update_zones(cx: &mut Ctx) {
     let dt = cx.dt;
     let mut list = std::mem::take(&mut cx.g.zones);
     for z in list.iter_mut() {
+        cx.g.net.ghost = z.ghost;
         z.t += dt;
         if z.follow { z.pos = cx.p.body.pos; }
         if let Some(mut f) = z.on_frame.take() { f(cx, z); z.on_frame = Some(f); }
         if z.every > 0.0 { z.tick -= dt; if z.tick <= 0.0 { z.tick += z.every; z.n += 1; if let Some(mut f) = z.on_tick.take() { f(cx, z); z.on_tick = Some(f); } } }
         if z.t >= z.life { if let Some(mut f) = z.on_end.take() { f(cx, z); } for e in z.ents.drain(..) { cx.c.entity(e).despawn_recursive(); } }
     }
+    cx.g.net.ghost = false;
     list.retain(|z| z.t < z.life);
     list.append(&mut cx.g.zones);
     cx.g.zones = list;
@@ -173,6 +179,7 @@ pub fn update_zones(cx: &mut Ctx) {
 #[derive(Clone, Copy, PartialEq)]
 pub enum EProj { Arrow, Dark, Rock }
 pub fn fire_enemy_proj(cx: &mut Ctx, k: EProj, from: Vec3, v: Vec3, dmg: f32) {
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 5, a: from.to_array(), b: v.to_array(), f: [dmg, match k { EProj::Arrow => 0.0, EProj::Dark => 1.0, EProj::Rock => 2.0 }, 0.0, 0.0] }); }
     let e = match k { EProj::Arrow => arrow_mesh(cx, 0xc8c2b0, 0x5a5a5a, None), EProj::Dark => glow_ball(cx, 0xb04aff, 0.35), EProj::Rock => {
         let m = cx.pal.mat(cx.mats, 0x7d8088, Mk::Lit); let ico = cx.pal.ico.clone(); let root = cx.c.spawn((Transform::default(), Visibility::default())).id();
         let r = cx.c.spawn((Mesh3d(ico), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(0.75)))).id(); cx.c.entity(root).add_child(r); root } };
@@ -231,12 +238,18 @@ pub fn update_primary(cx: &mut Ctx, lmb: bool) {
             if !cx.p.charging { cx.p.charging = true; cx.p.charge = 0.0; }
             cx.p.charge = (cx.p.charge + cx.dt * 1.55 * cx.g.st.charge_mul).min(1.0);
             if cx.p.charge >= 1.0 && cx.r() < 0.5 { let h = cx.hand(); let v = Vec3::new(cx.rr(-1.0, 1.0), cx.rr(-1.0, 1.0), cx.rr(-1.0, 1.0)); cx.fx.emit(true, h, v, 0.3, 0.3, 0.05, hexc(0xb8ff8a) * 2.5, 0.0, 3.0, 1.0); }
-        } else if cx.p.charging { cx.p.charging = false; let c = cx.p.charge.max(0.15); fire_arrow(cx, c); cx.p.charge = 0.0; cx.g.atk_t = weapon_rate(id); }
+        } else if cx.p.charging { cx.p.charging = false; let c = cx.p.charge.max(0.15); fire_arrow(cx, c); cx.p.charge = 0.0; cx.g.atk_t = weapon_rate(id); let aim = cx.p.aim_pt.to_array(); let me = cx.g.net.my_id; cx.g.net.send(crate::net::Msg::Fire { id: me, charge: c, aim }); }
         return;
     }
     if !lmb || cx.g.atk_t > 0.0 { return; }
     cx.g.atk_t = weapon_rate(id);
     match id { "firestaff" | "frostwand" | "scepter" => cast_primary(cx, id), _ => melee_swing(cx, id) }
+    let aim = cx.p.aim_pt.to_array(); let me = cx.g.net.my_id; cx.g.net.send(crate::net::Msg::Fire { id: me, charge: 0.0, aim });
+}
+/// a teammate's attack, replayed for the visuals
+pub fn replay_primary(cx: &mut Ctx, charge: f32) {
+    let id = cx.p.weapon_id();
+    match id { "longbow" => fire_arrow(cx, charge.max(0.15)), "firestaff" | "frostwand" | "scepter" => cast_primary(cx, id), _ => melee_swing(cx, id) }
 }
 
 pub fn player_arrow(cx: &mut Ctx, from: Vec3, vel: Vec3, dmg: f32, grav: f32, pierce: bool, life: f32, shaft: u32, glow: Option<u32>, split: u32, fire: bool, blast: bool) {
@@ -280,7 +293,7 @@ fn arrow_blast(cx: &mut Ctx, pos: Vec3) {
     { let mut g = cx.gfx(); g.ring(pos - Vec3::Y * 0.4, 0xb8ff8a, 0.4, 3.0, 0.35); g.flare(pos, 0xb8ff8a, 3.0, 0.25, true); }
     cx.aoe(pos, 3.0, &mut |cx, i, _| cx.damage(i, 26.0, Hit { kb: 6.0, src: Some(pos), col: 0xb8ff8a, ..default() }));
 }
-fn fire_arrow(cx: &mut Ctx, charge: f32) {
+pub fn fire_arrow(cx: &mut Ctx, charge: f32) {
     let from = cx.hand();
     let mut dir = (cx.p.aim_pt - from).normalize(); dir.y += 0.02; let dir = dir.normalize();
     let full = charge >= 0.99;

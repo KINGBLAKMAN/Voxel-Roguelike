@@ -82,6 +82,7 @@ pub fn use_ability(cx: &mut Ctx, i: usize) {
     let id = class_abilities(cx.p.cls)[i];
     if !cast(cx, id) { return; }
     cx.g.cds[i] = cd_of(cx, id);
+    { let aim = cx.p.aim_pt.to_array(); let me = cx.g.net.my_id; cx.g.net.send(crate::net::Msg::Cast { id: me, ab: id.to_string(), aim }); }
     if crate::augments::on_cast(cx, false) {
         cx.later(0.35, move |cx| {
             if cx.p.dead || cx.p.leap.is_some() { return; }
@@ -89,6 +90,7 @@ pub fn use_ability(cx: &mut Ctx, i: usize) {
         });
     }
 }
+pub fn cast_remote(cx: &mut Ctx, id: &str) { cast(cx, id); }
 fn cast(cx: &mut Ctx, id: &str) -> bool {
     match id {
         "volley" => volley(cx), "roll" => roll(cx), "snare" => snare(cx), "storm" => storm(cx),
@@ -254,7 +256,8 @@ fn throw_trap(cx: &mut Ctx, to: Vec3, mini: bool) {
         if cx.g.traps.len() >= 24 { let t = cx.g.traps.remove(0); cx.c.entity(t.root).despawn_recursive(); }
         let spiked = cx.m("snare.spiked"); let boom = cx.m("snare.boom");
         let field = !mini && cx.m("snare.field") > 0;
-        cx.g.traps.push(Trap { pos: to, life: 30.0, armed: 0.35, spiked, boom, field, mini, root, jaws, snap: -1.0 });
+        let ghost = cx.g.net.ghost;
+        cx.g.traps.push(Trap { ghost, pos: to, life: 30.0, armed: 0.35, spiked, boom, field, mini, root, jaws, snap: -1.0 });
     }));
     zone(cx, z);
 }
@@ -274,6 +277,7 @@ pub fn update_traps(cx: &mut Ctx) {
             continue;
         }
         if snap >= 0.0 || armed > 0.0 { i += 1; continue; }
+        cx.g.net.ghost = cx.g.traps[i].ghost;
         if cx.r() < 0.25 { let j = Vec3::new(cx.rr(-0.6, 0.6), 0.25, cx.rr(-0.6, 0.6)); cx.fx.emit(true, pos + j, Vec3::Y * 0.8, 0.5, 0.18, 0.04, hexc(0xffe0a0) * 2.5, 0.0, 0.0, 0.9); }
         let rad = if mini { 0.9 } else { 1.3 };
         let victim = cx.g.enemies.iter().position(|e| !e.dead && !e.t.passive && !e.t.prop && !e.t.fly && Vec2::new(e.body.pos.x - pos.x, e.body.pos.z - pos.z).length() < rad + e.body.w && (e.body.pos.y - pos.y).abs() < 1.5);
@@ -290,6 +294,7 @@ pub fn update_traps(cx: &mut Ctx) {
             if boom > 0 { explode_fire(cx, pos + Vec3::Y * 0.5, if mini { 2.5 } else { 4.0 }, if mini { 20.0 } else { 40.0 }, 0, false); }
             if field { cx.later(0.05, move |cx| { for k in 0..4 { let an = k as f32 / 4.0 * TAU + cx.rr(-0.4, 0.4); let d = cx.rr(2.0, 3.5); let mut to = Vec3::new(pos.x + an.cos() * d, 0.0, pos.z + an.sin() * d); to.y = cx.ground(to.x, to.z, pos.y + 2.0); throw_trap(cx, to, true); } }); }
         }
+        cx.g.net.ghost = false;
         i += 1;
     }
 }
@@ -618,7 +623,7 @@ fn meteor_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bo
         if (dx * dx + dz * dz) as f32 + (dy * dy) as f32 * 1.5 > cr * cr { continue; }
         let y = by + dy; if y < 2 { continue; }
         let b = cx.w.get(bx + dx, y, bz + dz); if b == 0 { continue; }
-        cx.w.set(bx + dx, y, bz + dz, 0);
+        cx.set_block(bx + dx, y, bz + dz, 0);
         if cx.r() < 0.6 {
             let d = crate::world::block_def(b); let col = d.top.unwrap_or(d.c); let sc = Color::linear_rgb(col[0], col[1], col[2]).to_srgba();
             let hex = ((sc.red * 255.0) as u32) << 16 | ((sc.green * 255.0) as u32) << 8 | (sc.blue * 255.0) as u32;
@@ -631,7 +636,7 @@ fn meteor_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bo
     if big { for dz in -3..=3i32 { for dx in -3..=3i32 {
         if dx * dx + dz * dz > 9 || crate::noise::hash2(bx + dx, bz + dz, cx.w.seed.wrapping_add(77)) > 0.45 { continue; }
         let t = cx.w.top_at(bx + dx, bz + dz); let b = cx.w.get(bx + dx, t, bz + dz);
-        if b != 0 && b != crate::world::b::EMBER { cx.w.set(bx + dx, t, bz + dz, if crate::noise::hash2(bx + dx, bz + dz, 5) < 0.2 { crate::world::b::EMBER } else { crate::world::b::DSTONE }); }
+        if b != 0 && b != crate::world::b::EMBER { cx.set_block(bx + dx, t, bz + dz, if crate::noise::hash2(bx + dx, bz + dz, 5) < 0.2 { crate::world::b::EMBER } else { crate::world::b::DSTONE }); }
     } } }
     // molten chunks of the meteor itself
     for _ in 0..if big { 14 } else { 5 } { let an = cx.rr(0.0, TAU); let sp = cx.rr(3.0, 9.0); let v = Vec3::new(an.cos() * sp, cx.rr(5.0, 11.0), an.sin() * sp); let col = cx.pick(&[0x3a2a24, 0x52382a, 0xff6a1a]); let sz = cx.rr(0.2, 0.4); let l = cx.rr(1.4, 2.2); cx.gfx().debris_one(c + Vec3::Y * 0.6, v, col, sz, l); }

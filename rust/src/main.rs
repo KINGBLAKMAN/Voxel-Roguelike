@@ -15,6 +15,7 @@ mod game;
 mod horde;
 mod hud;
 mod meta;
+mod net;
 mod mesher;
 mod models;
 mod noise;
@@ -68,7 +69,7 @@ fn main() {
     .init_resource::<settings::PadState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
-    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, camp::update_shop, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }
@@ -91,12 +92,24 @@ fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardM
     p.cls = cls; p.body.pos = pos; p.vis_y = pos.y;
     let (hp, _) = class_stats(cls); p.hp = hp; p.max_hp = hp; p.ghost_hp = hp;
     build_player(c, pal, mats, p);
+    p.spawned = true;
 }
 
 /// starting a run from the menu, and tearing one down to start again
 #[allow(clippy::too_many_arguments)]
-fn run_control(save: Res<meta::Save>, mut c: Commands, mut ui: ResMut<hud::UiState>, mut g: ResMut<Game>, mut p: ResMut<Player>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>,
+fn run_control(link: Option<Res<net::Link>>, save: Res<meta::Save>, mut c: Commands, mut ui: ResMut<hud::UiState>, mut g: ResMut<Game>, mut p: ResMut<Player>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>,
     mut fx: ResMut<fx::Fx>, w: Option<ResMut<world::Voxels>>, mut dc: ResMut<DayCycle>, mut ctl: ResMut<Controls>, mut sfx: ResMut<audio::Sfx>) {
+    if ui.req_host && link.is_none() {
+        ui.req_host = false;
+        match net::Link::host() { Ok(l) => { ui.net_msg = l.status.lock().unwrap().clone(); c.insert_resource(l); g.net.mode = net::Mode::Host; g.net.my_id = 1; } Err(e) => ui.net_msg = format!("Could not host: {}", e) }
+    }
+    if let Some(addr) = ui.req_join.take() {
+        if link.is_none() { match net::Link::join(&addr) { Ok(l) => { ui.net_msg = l.status.lock().unwrap().clone(); c.insert_resource(l); g.net.mode = net::Mode::Client; } Err(e) => ui.net_msg = format!("Could not connect: {}", e) } }
+    }
+    if let Some(l) = link.as_ref() { let s = l.status.lock().unwrap().clone(); if ui.net_msg != s && !ui.net_msg.starts_with("Could") { ui.net_msg = s; } }
+    // joining a host means playing in the host's world
+    let join_seed = g.net.seed.take();
+    if join_seed.is_some() { ui.restart = true; }
     if let Some(cls) = ui.start.take() {
         begin_player(&mut c, &mut pal, &mut mats, &mut p, cls);
         meta::apply_start(&save, &mut g, &mut p);
@@ -125,11 +138,15 @@ fn run_control(save: Res<meta::Save>, mut c: Commands, mut ui: ResMut<hud::UiSta
     for d in fx.debris.drain(..) { c.entity(d.e).insert(Visibility::Hidden); fx.debris_free.push(d.e); }
     fx.add.clear(); fx.blend.clear();
     for e in ents { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } }
+    let netstate = std::mem::take(&mut g.net);
     *g = Game::default();
+    g.net = netstate; g.net.out.clear();
     if let Some(r) = p.rig.root.take() { c.entity(r).despawn_recursive(); }
     // a fresh world
     if let Some(w) = w { for ch in w.chunks.values() { for e in [ch.entity, ch.fol_entity].into_iter().flatten() { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } } } }
-    let mut nw = world::Voxels::new(rand::random::<u32>() % 1_000_000_000);
+    let seed = join_seed.unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
+    let mut nw = world::Voxels::new(seed);
+    if let Some(l) = link.as_ref() { if l.host { for id in l.peer_ids() { l.send(Some(id), &net::Msg::Welcome { id, seed }); } } }
     let sp = nw.spawn_point();
     *p = Player::default(); p.body.pos = sp; p.vis_y = sp.y;
     c.insert_resource(nw);
@@ -145,17 +162,25 @@ pub struct Sim<'w, 's> {
 }
 
 /// one frame of the game: input, the player, weapons, enemies, projectiles, zones, pickups, the director, relics, camera
-fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, paused: Res<Paused>, ctl: Res<Controls>,
-    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>) {
+#[allow(clippy::too_many_arguments)]
+fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, paused: Res<Paused>, ctl: Res<Controls>,
+    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>) {
     let s = &mut s;
     let Some(w) = s.w.as_mut() else { return };
     let w: &mut world::Voxels = w;
     let raw = time.delta_secs().min(0.05);
     let Ok((ce, mut proj)) = camq.get_single_mut() else { return };
-    if paused.0 { return; }
+    if paused.0 && link.is_none() { return; }
     let mut dt = raw;
     if s.g.hitstop > 0.0 { s.g.hitstop -= raw; dt = raw * 0.08; }
     let mut cx = Ctx { c: &mut s.c, g: &mut s.g, w, p: &mut s.p, pal: &mut s.pal, mats: &mut s.mats, meshes: &mut s.meshes, fx: &mut s.fx, q: &mut s.q, cam: &mut s.cam, dc: &s.dc, sfx: &mut s.sfx, dt };
+    let link = link.as_deref();
+    if let Some(l) = link { net::process(&mut cx, l); }
+    if !cx.p.spawned { if let Some(l) = link { net::flush(&mut cx, l, raw); } return; }
+    // co-op never pauses, so menus only take the player's hands off the controls
+    let input = ui.screen == hud::Screen::Playing;
+    let idle = ButtonInput::<KeyCode>::default();
+    let keys: &ButtonInput<KeyCode> = if input { &keys_in } else { &idle };
     // scripted test actions
     let mut hold = false;
     if let Some(t) = test.as_mut() {
@@ -166,18 +191,18 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     }
     cx.g.run_t += dt;
     // guard and dodge, for every class
-    let rmb = mouse.pressed(MouseButton::Right) && (ctl.locked || ctl.pad);
+    let rmb = input && mouse.pressed(MouseButton::Right) && (ctl.locked || ctl.pad);
     if rmb && !cx.p.dead && cx.p.stam > 0.0 && cx.p.dash.is_none() && cx.p.leap.is_none() { if cx.p.blocking <= 0.0 { cx.play("swing"); } cx.p.blocking += dt; } else { cx.p.blocking = 0.0; }
     cx.p.dodge_cd -= dt;
     if keys.just_pressed(KeyCode::ControlLeft) || keys.just_pressed(KeyCode::AltLeft) { dodge(&mut cx); }
-    let lmb = ((mouse.pressed(MouseButton::Left) && (ctl.locked || ctl.pad)) || hold) && cx.p.blocking <= 0.0;
+    let lmb = ((input && mouse.pressed(MouseButton::Left) && (ctl.locked || ctl.pad)) || hold) && cx.p.blocking <= 0.0;
     cx.p.firing = lmb;
     // the player
     let st = cx.g.st;
     let cspeed = class_stats(cx.p.cls).1;
     let guard = if cx.p.blocking > 0.0 { 0.5 } else { 1.0 };
     let slowed = guard * if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
-    move_player(cx.w, cx.p, &keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
+    move_player(cx.w, cx.p, keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
     // hunger: food keeps you going; starving bleeds health
     if !cx.p.dead {
         cx.p.hunger = (cx.p.hunger - dt * 100.0 / 330.0).max(0.0);
@@ -197,7 +222,8 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { abilities::use_ability(&mut cx, i); } }
     update_aim(&mut cx, ce);
     combat::update_primary(&mut cx, lmb);
-    enemies::update_enemies(&mut cx);
+    if cx.g.net.client() { net::puppets(&mut cx); } else { enemies::update_enemies(&mut cx); }
+    net::remotes(&mut cx);
     combat::update_projs(&mut cx);
     abilities::update_abilities(&mut cx);
     combat::update_zones(&mut cx);
@@ -205,15 +231,19 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     update_pickups(&mut cx);
     enemies::update_corpses(&mut cx);
     run_timers(&mut cx);
-    director::update_director(&mut cx);
-    director::update_pois(&mut cx);
-    events::update(&mut cx);
+    if !cx.g.net.client() {
+        director::update_director(&mut cx);
+        director::update_pois(&mut cx);
+        events::update(&mut cx);
+    }
+    if cx.g.net.host() { cx.g.net.day = Some(cx.dc.time); }
     relics::update_relics(&mut cx);
     augments::update_augments(&mut cx);
     let it = director::find_interact(&mut cx);
     let evp = events::interact_prompt(cx.g, cx.p.body.pos);
     cx.g.prompt = match (&it, &evp) { (Some((l, _)), _) => format!("[E]  {}", l), (None, Some((_, l))) => l.clone(), _ => String::new() };
-    if keys.just_pressed(KeyCode::KeyE) {
+    if cx.g.net.on() { if let Some(pr) = net::revive_prompt(&mut cx, input && keys_in.pressed(KeyCode::KeyE)) { cx.g.prompt = pr; } }
+    if keys.just_pressed(KeyCode::KeyE) && !cx.g.net.client() {
         if let Some((_, it)) = it { director::interact(&mut cx, it); }
         else if let Some((i, _)) = evp { if events::use_event(&mut cx, i) { cx.g.flags.insert("open_shop", 1.0); } }
     }
@@ -222,7 +252,10 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     let mut rng = noise::mulberry32((time.elapsed_secs() * 1000.0) as u32);
     update_camera(cx.w, cx.p, cx.cam, &mut ct, &mut proj, raw, &mut rng);
     *cx.q.get_mut(ce).unwrap() = ct;
+    if let Some(l) = link { net::flush(&mut cx, l, raw); }
 }
+/// clients follow the host's time of day
+fn net_day(g: Res<Game>, mut dc: ResMut<DayCycle>) { if g.net.client() { if let Some(t) = g.net.day { dc.time = t; } } }
 
 /// what the crosshair points at: the first enemy or block along the camera ray
 fn update_aim(cx: &mut Ctx, ce: Entity) {

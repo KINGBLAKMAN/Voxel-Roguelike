@@ -203,7 +203,8 @@ pub fn animate(e: &mut Enemy, q: &mut Query<&mut Transform>, moving: bool) {
 }
 
 // ---------------- attacks ----------------
-fn enemy_ball(cx: &mut Ctx, from: Vec3, vel: Vec3, dmg: f32, col: u32, grav: f32, web: bool) {
+pub fn enemy_ball(cx: &mut Ctx, from: Vec3, vel: Vec3, dmg: f32, col: u32, grav: f32, web: bool) {
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 6, a: from.to_array(), b: vel.to_array(), f: [dmg, col as f32, grav, if web { 1.0 } else { 0.0 }] }); }
     let e = glow_ball(cx, col, if web { 0.3 } else { 0.35 });
     let mut p = Proj::new(from, vel); p.owner = Owner::Enemy; p.dmg = dmg; p.e = Some(e); p.r = 0.45; p.life = 4.0; p.grav = grav; p.orient = Orient::Fixed;
     p.trail = Some(Box::new(move |cx, p, _| { let c = hexc(col) * 2.5; let v = Vec3::new(cx.rr(-0.5, 0.5), cx.rr(-0.2, 0.8), cx.rr(-0.5, 0.5)); cx.fx.emit(true, p.pos, v, 0.4, 0.45, 0.05, c, -1.0, 1.0, 1.0); }));
@@ -212,10 +213,11 @@ fn enemy_ball(cx: &mut Ctx, from: Vec3, vel: Vec3, dmg: f32, col: u32, grav: f32
     spawn_proj(cx, p);
 }
 /// a lobbed bomb: the landing spot is marked, then it bursts
-fn bomb(cx: &mut Ctx, from: Vec3, to: Vec3, dmg: f32) {
+pub fn bomb(cx: &mut Ctx, from: Vec3, to: Vec3, dmg: f32) {
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 7, a: from.to_array(), b: to.to_array(), f: [dmg, 0.0, 0.0, 0.0] }); }
     let tt = 1.0; let g = 18.0;
     let v = Vec3::new((to.x - from.x) / tt, (to.y - from.y + 0.5 * g * tt * tt) / tt, (to.z - from.z) / tt);
-    cx.gfx().circle(to, 0xff6a1a, 2.6, tt + 0.1, "fire", 3.0, None, None);
+    crate::net::tele(cx, to, 0xff6a1a, 2.6, tt + 0.1, 0);
     let e = glow_ball(cx, 0xff8a2a, 0.3);
     let mut p = Proj::new(from, v); p.owner = Owner::Enemy; p.dmg = dmg; p.e = Some(e); p.r = 0.35; p.life = 3.0; p.grav = g; p.orient = Orient::Fixed;
     p.trail = Some(Box::new(|cx, p, _| { let c = hexc(0xffb03a) * 2.5; cx.fx.emit(true, p.pos, Vec3::Y * 0.5, 0.3, 0.3, 0.05, c, 0.0, 0.0, 1.0); }));
@@ -229,12 +231,18 @@ fn bomb(cx: &mut Ctx, from: Vec3, to: Vec3, dmg: f32) {
     spawn_proj(cx, p);
 }
 /// a burning patch that hurts the player
-fn hot_ground(cx: &mut Ctx, pos: Vec3, r: f32, life: f32, dmg: f32) {
+pub fn hot_ground(cx: &mut Ctx, pos: Vec3, r: f32, life: f32, dmg: f32) {
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 8, a: pos.to_array(), b: [0.0; 3], f: [r, life, dmg, 0.0] }); }
     { let mut g = cx.gfx(); g.disk(pos, 0xff3a10, r, life, 0.3); g.decal(pos, false, r, life + 2.0, Some(0xff4a1a)); }
     let mut z = Zone::new(pos, r, life); z.every = 0.5;
     z.on_tick = Some(Box::new(move |cx, z| { let (p, rr) = (z.pos, z.r); if !cx.p.dead && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < rr && (cx.p.body.pos.y - p.y).abs() < 2.0 { cx.hurt_player(dmg, None, 0.0); } }));
     z.on_frame = Some(Box::new(|cx, z| { let a = cx.rr(0.0, TAU); let rr = cx.r().sqrt() * z.r; let c = hexc(cx.pick(&[0xff6a1a, 0xffb03a])) * 2.5; let v = Vec3::new(0.0, cx.rr(1.0, 3.0), 0.0); cx.fx.emit(true, z.pos + Vec3::new(a.cos() * rr, 0.15, a.sin() * rr), v, 0.5, 0.45, 0.06, c, -1.0, 0.5, 1.0); }));
     zone(cx, z);
+}
+/// ice crystals bursting from the ground (frost giant slams)
+pub fn spikes_fx(cx: &mut Ctx, c: Vec3, r: f32) {
+    cx.gfx().spikes(c, 0xbff4ff, 12, r, 1.6, 1.6, true);
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 9, a: c.to_array(), b: [0.0; 3], f: [r, 0.0, 0.0, 0.0] }); }
 }
 fn summon(cx: &mut Ctx, at: Vec3, k: Kind, n: usize, r: f32, col: u32) {
     cx.gfx().circle(at, col, r + 1.0, 1.2, "blood", 3.0, None, None);
@@ -271,7 +279,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
             _ => {
                 if dist > 5.0 && dist < 18.0 && ai.cd <= 0.0 {
                     let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.ai.t = 0.9; e.ai.v = dir;
-                    cx.gfx().streak(epos + Vec3::Y * 0.2, epos + dir * 20.0 + Vec3::Y * 0.2, 0xff3a1a, 0.9, 0.5); cx.play("shout");
+                    crate::net::fx_streak(cx, epos + Vec3::Y * 0.2, epos + dir * 20.0 + Vec3::Y * 0.2, 0xff3a1a, 0.9, 0.5); cx.play("shout");
                 } else { out.2 = melee(cx, i, 2.2); }
             }
         },
@@ -280,7 +288,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
             if dist < 9.0 { out.0 = -tdx; out.1 = -tdz; } else if dist < 13.0 { out.0 = -tdz * 0.5; out.1 = tdx * 0.5; }
             if ai.cd <= 0.0 {
                 cx.g.enemies[i].ai.cd = 5.0; cx.g.enemies[i].wind = 0.6;
-                cx.play("holy"); cx.gfx().circle(epos, 0x9aff5a, 3.0, 0.8, "nature", 3.0, None, None);
+                cx.play("holy"); crate::net::tele(cx, epos, 0x9aff5a, 3.0, 0.8, 3);
                 let mut healed = 0;
                 for j in 0..cx.g.enemies.len() {
                     if j == i || healed >= 8 { continue; }
@@ -312,7 +320,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
                 if ai.t <= 0.0 {
                     let e = &mut cx.g.enemies[i]; e.ai.st = 2; e.ai.t = 2.4; e.ai.hidden = false; e.body.pos = ai.v;
                     cx.play("boom"); cx.shake(0.35); cx.gfx().debris(ai.v + Vec3::Y * 0.3, &[0xc8a868, 0xe0cd8c, 0x8a6a40], 18, 7.0, 0.3, 10.0); cx.fx.smoke(ai.v, 0xd8c8a0, 10, 2.5, 1.2, 1.4);
-                    if Vec2::new(tp.x - ai.v.x, tp.z - ai.v.z).length() < 2.6 { out.2 = Some((dmg, 3.0)); cx.p.body.vel.y = 12.0; }
+                    crate::net::slam(cx, ai.v, 2.6, dmg, 3.0);
                 }
             }
             2 => { out.0 = 0.0; out.1 = 0.0; cx.g.enemies[i].ai.sink = (cx.g.enemies[i].ai.sink - dt * 6.0).max(0.0); out.2 = melee(cx, i, 3.0);
@@ -326,18 +334,18 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
                 out = (0.0, 0.0, None, 0.0);
                 if cx.r() < 0.6 { cx.fx.emit(false, Vec3::new(p.x, gy + 0.2, p.z), Vec3::new(cx.rr(-1.0, 1.0), cx.rr(1.0, 2.5), cx.rr(-1.0, 1.0)), 0.6, 0.3, 0.7, hexc(0xc8b080), 3.0, 1.0, 0.8); }
                 if cx.r() < 0.2 { let v = Vec3::new(cx.rr(-1.0, 1.0), 3.0, cx.rr(-1.0, 1.0)); cx.gfx().debris_one(Vec3::new(p.x, gy + 0.2, p.z), v, 0xc8a868, 0.14, 0.6); }
-                if dist < 3.0 && ai.cd <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.ai.t = 1.0; let mut at = tp; at.y = cx.ground(tp.x, tp.z, tp.y + 2.0); cx.g.enemies[i].ai.v = at; cx.play("rumble"); cx.gfx().circle(at, 0xd8b868, 2.6, 1.1, "war", 4.0, None, None); }
+                if dist < 3.0 && ai.cd <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.ai.t = 1.0; let mut at = tp; at.y = cx.ground(tp.x, tp.z, tp.y + 2.0); cx.g.enemies[i].ai.v = at; cx.play("rumble"); crate::net::tele(cx, at, 0xd8b868, 2.6, 1.1, 1); }
             }
         },
         Kind::FrostGiant => {
             if cx.g.enemies[i].wind > 0.0 {
                 out.0 = 0.0; out.1 = 0.0; cx.g.enemies[i].wind -= dt;
                 if cx.g.enemies[i].wind <= 0.0 {
-                    let c = cx.g.enemies[i].ai.v; slam_fx(cx, c, 3.6); cx.gfx().spikes(c, 0xbff4ff, 12, 3.0, 1.6, 1.6, true);
-                    if Vec2::new(tp.x - c.x, tp.z - c.z).length() < 3.6 && (tp.y - c.y).abs() < 2.5 { out.2 = Some((dmg, 9.0)); cx.g.buffs.insert("chill", 2.5); }
+                    let c = cx.g.enemies[i].ai.v; let near = Vec2::new(cx.p.body.pos.x - c.x, cx.p.body.pos.z - c.z).length() < 3.6; crate::net::slam(cx, c, 3.6, dmg, 9.0); spikes_fx(cx, c, 3.0);
+                    if near { cx.g.buffs.insert("chill", 2.5); }
                 }
             } else if dist < 4.0 && cx.g.enemies[i].atk_t <= 0.0 {
-                let e = &mut cx.g.enemies[i]; e.wind = 1.0; e.atk_t = e.t.cd; let c = e.body.pos + dir * 1.6; e.ai.v = c; cx.gfx().circle(c, 0xbff4ff, 3.6, 1.0, "frost", 3.0, None, None);
+                let e = &mut cx.g.enemies[i]; e.wind = 1.0; e.atk_t = e.t.cd; let c = e.body.pos + dir * 1.6; e.ai.v = c; crate::net::tele(cx, c, 0xbff4ff, 3.6, 1.0, 2);
             }
         }
         Kind::Colossus => {
@@ -345,16 +353,16 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
             if cx.g.enemies[i].wind > 0.0 { out.0 = 0.0; out.1 = 0.0; cx.g.enemies[i].wind -= dt;
                 if cx.g.enemies[i].wind <= 0.0 { match cx.g.enemies[i].ai.st {
                     1 => { cx.play("bow"); let from = epos + Vec3::Y * h * 0.75; for k in 0..7 { let a = (k as f32 - 3.0) * 0.12; let d = (Quat::from_rotation_y(a) * (tp + Vec3::Y - from).normalize()).normalize(); let mut v = d * 34.0; v.y += 3.0; fire_enemy_proj(cx, EProj::Arrow, from, v, dmg * 0.6); } }
-                    _ => { slam_fx(cx, epos, 5.5); if dist < 5.5 { out.2 = Some((dmg * 1.4, 12.0)); } }
+                    _ => { crate::net::slam(cx, epos, 5.5, dmg * 1.4, 12.0); }
                 } } }
-            else if dist < 5.0 && ai.cd2 <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 2; e.wind = 1.0; e.ai.cd2 = 5.0; cx.gfx().circle(epos, 0xff6a3a, 5.5, 1.0, "war", 3.0, None, None); }
+            else if dist < 5.0 && ai.cd2 <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 2; e.wind = 1.0; e.ai.cd2 = 5.0; crate::net::tele(cx, epos, 0xff6a3a, 5.5, 1.0, 1); }
             else if ai.cd <= 0.0 && dist < 30.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.wind = 0.7; e.ai.cd = 3.0; }
             else if ai.cd3 <= 0.0 { cx.g.enemies[i].ai.cd3 = 12.0; summon(cx, epos, Kind::Skeleton, 4, 4.0, 0x9a5aff); }
         }
         Kind::Broodmother => {
             let e = &mut cx.g.enemies[i];
             if e.leaping > 0.0 { e.leaping -= dt; out.0 = 0.0; out.1 = 0.0;
-                if e.body.on_ground && e.leaping < 0.6 { e.leaping = 0.0; let c = e.body.pos; slam_fx(cx, c, 4.0); if Vec2::new(tp.x - c.x, tp.z - c.z).length() < 4.0 { out.2 = Some((dmg * 1.2, 10.0)); } } }
+                if e.body.on_ground && e.leaping < 0.6 { e.leaping = 0.0; let c = e.body.pos; crate::net::slam(cx, c, 4.0, dmg * 1.2, 10.0); } }
             else if ai.cd <= 0.0 && dist > 5.0 && dist < 20.0 && e.body.on_ground { e.ai.cd = 5.0; e.leaping = 1.2; e.body.vel = Vec3::new(tdx * dist.min(16.0) * 0.9, 11.0, tdz * dist.min(16.0) * 0.9); cx.play("whoosh"); }
             else if ai.cd2 <= 0.0 && dist < 22.0 { cx.g.enemies[i].ai.cd2 = 4.0; let from = epos + Vec3::Y * 1.2; let v = (tp + Vec3::Y - from).normalize() * 20.0; enemy_ball(cx, from, v, dmg * 0.4, 0xf0f0f0, 0.0, true); }
             else if ai.cd3 <= 0.0 { cx.g.enemies[i].ai.cd3 = 9.0; summon(cx, epos, Kind::Spiderling, 5, 2.5, 0xff3a3a); }
@@ -366,7 +374,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
             let phase = if hp < mhp * 0.15 && cx.g.ember() >= 10 { 3 } else if hp < mhp * 0.33 { 2 } else if hp < mhp * 0.66 { 1 } else { 0 };
             if phase > ai.phase {
                 cx.g.enemies[i].ai.phase = phase;
-                cx.toast(if phase == 1 { "The Ember King burns hotter" } else if phase == 3 { "THE EMBER KING UNLEASHED" } else { "The Ember King is enraged" }, if phase == 1 { "Fire rains from the sky" } else { "He will not fall quietly" }, 2.5);
+                cx.announce(if phase == 1 { "The Ember King burns hotter" } else if phase == 3 { "THE EMBER KING UNLEASHED" } else { "The Ember King is enraged" }, if phase == 1 { "Fire rains from the sky" } else { "He will not fall quietly" }, 2.5);
                 cx.play("bomb"); cx.shake(0.8);
                 { let mut g = cx.gfx(); g.shock(epos, 0xff6a1a, 0.5, 12.0, 0.6, 3.0); g.ring(epos, 0xffb03a, 0.5, 12.0, 0.6); }
                 if dist < 12.0 { cx.p.body.vel += dir * 14.0 + Vec3::Y * 6.0; }
@@ -376,9 +384,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
             match ai.st {
                 1 => { out.0 = 0.0; out.1 = 0.0;
                     if ai.t <= 0.0 { cx.g.enemies[i].ai.st = 0;
-                        let yaw = ai.v.x.atan2(ai.v.z); let c = epos + Vec3::Y * 2.0; cx.gfx().swoosh(c, yaw, 6.5, 2.4, 0xff7a2a, 0.3, 0.0, 1.0); cx.play("heavy"); cx.shake(0.4);
-                        let to = (tp - epos).with_y(0.0); let ang = to.normalize_or_zero().dot(ai.v);
-                        if to.length() < 6.5 && ang > 0.3 { out.2 = Some((dmg * 1.5, 12.0)); }
+                        crate::net::cleave(cx, epos, ai.v, 6.5, dmg * 1.5, 12.0); cx.shake(0.4);
                         hot_ground(cx, epos + ai.v * 3.0, 2.5, 3.0, dmg * 0.15);
                     } }
                 2 => { out.0 = 0.0; out.1 = 0.0;
@@ -391,9 +397,9 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
                     else if ai.t <= 0.0 || cx.g.enemies[i].body.hit_wall { cx.g.enemies[i].ai.st = 0; }
                 }
                 _ => {
-                    if dist < 6.0 && ai.cd <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.ai.t = 0.8 - 0.15 * phase as f32; e.ai.cd = 2.2; e.ai.v = dir; cx.gfx().circle(epos + dir * 3.0, 0xff3a1a, 4.0, 0.8, "fire", 3.0, None, None); }
-                    else if ai.cd2 <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 2; e.ai.t = 0.6; e.ai.cd2 = 6.0 - phase as f32; cx.gfx().circle(epos, 0xff6a1a, 3.0, 0.6, "fire", 5.0, None, None); }
-                    else if phase >= 2 && ai.cd3 <= 0.0 && dist > 6.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 3; e.ai.t = 1.2; e.ai.v = dir; e.ai.cd3 = 5.0; cx.gfx().streak(epos + Vec3::Y * 0.2, epos + dir * 22.0 + Vec3::Y * 0.2, 0xff3a1a, 0.8, 0.8); cx.play("shout"); }
+                    if dist < 6.0 && ai.cd <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 1; e.ai.t = 0.8 - 0.15 * phase as f32; e.ai.cd = 2.2; e.ai.v = dir; crate::net::tele(cx, epos + dir * 3.0, 0xff3a1a, 4.0, 0.8, 0); }
+                    else if ai.cd2 <= 0.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 2; e.ai.t = 0.6; e.ai.cd2 = 6.0 - phase as f32; crate::net::tele(cx, epos, 0xff6a1a, 3.0, 0.6, 0); }
+                    else if phase >= 2 && ai.cd3 <= 0.0 && dist > 6.0 { let e = &mut cx.g.enemies[i]; e.ai.st = 3; e.ai.t = 1.2; e.ai.v = dir; e.ai.cd3 = 5.0; crate::net::fx_streak(cx, epos + Vec3::Y * 0.2, epos + dir * 22.0 + Vec3::Y * 0.2, 0xff3a1a, 0.8, 0.8); cx.play("shout"); }
                     else if phase >= 1 && ai.cd3 <= 0.0 {
                         cx.g.enemies[i].ai.cd3 = 9.0;
                         for k in 0..6 { let a = cx.rr(0.0, TAU); let r = if k == 0 { 0.0 } else { cx.rr(3.0, 9.0) }; let mut c = tp + Vec3::new(a.cos() * r, 0.0, a.sin() * r); c.y = cx.ground(c.x, c.z, tp.y + 3.0); crate::director::eruption(cx, c, 2.4, 1.0 + k as f32 * 0.2); }
@@ -411,8 +417,8 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
 pub fn on_death(cx: &mut Ctx, kind: Kind, pos: Vec3) {
     match kind {
         Kind::Broodmother => { for _ in 0..8 { let p = pos + Vec3::new(cx.rr(-2.0, 2.0), 0.4, cx.rr(-2.0, 2.0)); if let Some(j) = spawn_enemy(cx, Kind::Spiderling, p, SpawnOpts { no_rise: true, force: true, ..default() }) { cx.g.enemies[j].body.vel = Vec3::new(cx.rr(-6.0, 6.0), 6.0, cx.rr(-6.0, 6.0)); } } }
-        Kind::Goblin => { for _ in 0..8 { let g = (6.0 + cx.g.minutes()).round(); cx.drop_pick(pos + Vec3::Y, PickKind::Gold, g); } crate::director::drop_chest(cx, pos, false); cx.toast("Caught the goblin!", "Its hoard is yours", 2.5); }
-        Kind::EmberKing => { cx.g.flags.insert("victory", cx.g.run_t); cx.toast("The Ember King has fallen", "The wild is yours", 4.0); cx.play("relic"); cx.g.flash = 0.4;
+        Kind::Goblin => { for _ in 0..8 { let g = (6.0 + cx.g.minutes()).round(); cx.drop_pick(pos + Vec3::Y, PickKind::Gold, g); } crate::director::drop_chest(cx, pos, false); cx.announce("Caught the goblin!", "Its hoard is yours", 2.5); }
+        Kind::EmberKing => { cx.g.flags.insert("victory", cx.g.run_t); cx.g.net.send(crate::net::Msg::Victory); cx.announce("The Ember King has fallen", "The wild is yours", 4.0); cx.play("relic"); cx.g.flash = 0.4;
             let mut g = cx.gfx(); g.pillar(pos, 0xffd35a, 3.0, 40.0, 3.0); g.shock(pos, 0xffd35a, 0.5, 20.0, 1.0, 4.0); }
         _ => {}
     }

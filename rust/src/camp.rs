@@ -26,8 +26,25 @@ pub fn setup_camp(mut c: Commands, r: Res<HudRefs>) {
     let set_b = button(&mut c, UiBtn::Settings, 170.0); let t = c.spawn(txt("Settings  (S)", 20.0, 0xfff3d8)).id(); c.entity(set_b).add_child(t);
     c.entity(row).add_children(&[camp_b, dn, ember, up, set_b]);
     let ember_desc = c.spawn(txt("", 15.0, 0xd8ccbc)).id();
+    let row2 = c.spawn(Node { column_gap: px(14.0), align_items: AlignItems::Center, margin: UiRect::top(px(8.0)), ..default() }).id();
+    let host_b = button(&mut c, UiBtn::Host, 190.0); let t = c.spawn(txt("Host co-op  (H)", 18.0, 0x9fe0ff)).id(); c.entity(host_b).add_child(t);
+    let join_b = button(&mut c, UiBtn::Join, 190.0); let t = c.spawn(txt("Join co-op  (J)", 18.0, 0x9fe0ff)).id(); c.entity(join_b).add_child(t);
+    c.entity(row2).add_children(&[host_b, join_b]);
+    let net = c.spawn(txt("", 14.0, 0x9fe0ff)).id();
     let info = c.spawn((txt("", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(6.0)), ..default() })).id();
-    c.entity(r.menu).add_children(&[row, ember_desc, info]);
+    c.entity(r.menu).add_children(&[row, ember_desc, row2, net, info]);
+
+    // the join screen: type the host's address
+    let jroot = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(10.0), ..default() },
+        BackgroundColor(col(0x0a0806, 0.92)), Visibility::Hidden)).id();
+    let jt = c.spawn(txt("JOIN CO-OP", 38.0, 0x9fe0ff)).id();
+    let jh = c.spawn(txt("Type the host's address (shown on their title screen) and press Enter", 16.0, 0xd8ccbc)).id();
+    let jbox = c.spawn((Node { width: px(420.0), padding: UiRect::all(px(10.0)), border: UiRect::all(px(2.0)), justify_content: JustifyContent::Center, ..default() }, BackgroundColor(col(0x100c14, 0.95)), BorderColor(col(0x9fe0ff, 0.6)), BorderRadius::all(px(8.0)))).id();
+    let jtext = c.spawn(txt("", 24.0, 0xfff3d8)).id(); c.entity(jbox).add_child(jtext);
+    let jmsg = c.spawn(txt("", 14.0, 0x9fe0ff)).id();
+    let back = button(&mut c, UiBtn::Back, 220.0); let t = c.spawn((txt("Back  (Esc)", 18.0, 0xfff3d8), Node { align_self: AlignSelf::Center, ..default() })).id(); c.entity(back).add_child(t);
+    c.entity(jroot).add_children(&[jt, jh, jbox, jmsg, back]);
+    c.insert_resource(JoinRefs { root: jroot, text: jtext, msg: jmsg, net });
 
     // the camp itself
     let root = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(4.0), ..default() },
@@ -74,6 +91,31 @@ pub fn setup_camp(mut c: Commands, r: Res<HudRefs>) {
     let back = button(&mut c, UiBtn::Back, 220.0); let t = c.spawn((txt("Leave  (Esc)", 18.0, 0xfff3d8), Node { align_self: AlignSelf::Center, ..default() })).id(); c.entity(back).add_child(t);
     c.entity(shop).add_child(back);
     c.insert_resource(ShopRefs { root: shop, gold: sg, offers });
+}
+#[derive(Resource)]
+pub struct JoinRefs { root: Entity, text: Entity, msg: Entity, net: Entity }
+/// typing on the join screen, and the co-op status line on the title screen
+pub fn update_join(mut ui: ResMut<UiState>, r: Res<JoinRefs>, mut kb: EventReader<bevy::input::keyboard::KeyboardInput>, time: Res<Time>, link: Option<Res<crate::net::Link>>, mut was: Local<bool>, mut q: Q) {
+    use bevy::input::keyboard::Key;
+    if let Ok((_, _, Some(mut v))) = q.get_mut(r.root) { *v = if ui.screen == Screen::Join { Visibility::Inherited } else { Visibility::Hidden }; }
+    let peers = link.as_ref().map(|l| l.peer_count()).unwrap_or(0);
+    let status = if ui.net_msg.is_empty() { String::new() } else if link.is_some() && peers > 0 { format!("{}   |   {} connected", ui.net_msg, peers) } else { ui.net_msg.clone() };
+    set_text(&mut q, r.net, &status);
+    let fresh = !*was; *was = ui.screen == Screen::Join;
+    if ui.screen != Screen::Join || fresh { kb.clear(); return; }
+    for ev in kb.read() {
+        if !ev.state.is_pressed() { continue; }
+        match &ev.logical_key {
+            Key::Character(ch) => for c in ch.chars() { if (c.is_ascii_alphanumeric() || c == '.' || c == ':' || c == '-') && ui.join_text.len() < 60 { ui.join_text.push(c); } },
+            Key::Backspace => { ui.join_text.pop(); }
+            Key::Enter => { let t = ui.join_text.trim().to_string(); ui.req_join = Some(if t.is_empty() { "127.0.0.1".into() } else { t }); ui.screen = Screen::Menu; }
+            _ => {}
+        }
+    }
+    let caret = if (time.elapsed_secs() * 2.0) as u32 % 2 == 0 { "|" } else { " " };
+    set_text(&mut q, r.text, &format!("{}{}", if ui.join_text.is_empty() { "127.0.0.1".to_string() } else { ui.join_text.clone() }, caret));
+    set_col(&mut q, r.text, if ui.join_text.is_empty() { 0x6a6a6a } else { 0xfff3d8 });
+    set_text(&mut q, r.msg, &ui.net_msg);
 }
 #[derive(Resource)]
 pub struct ShopRefs { root: Entity, gold: Entity, offers: Vec<(Entity, Entity, Entity)> }

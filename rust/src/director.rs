@@ -105,9 +105,11 @@ pub fn spawn_pack(cx: &mut Ctx, around: Vec3, yaw: f32, k: Kind, n: u32, o: Pack
 }
 
 pub fn update_director(cx: &mut Ctx) {
-    if cx.p.dead { return; }
+    let mut anchors: Vec<(Vec3, f32)> = crate::net::targets(cx.g).into_iter().map(|t| (t.1, 0.0)).collect();
+    if !cx.p.dead && cx.p.spawned { anchors.push((cx.p.body.pos, cx.p.yaw)); }
+    if anchors.is_empty() { return; }
     let dt = cx.dt;
-    let (pp, yaw) = (cx.p.body.pos, cx.p.yaw);
+    let (pp, yaw) = anchors[(cx.r() * anchors.len() as f32) as usize % anchors.len()];
     let (mut hostile, mut animals, mut urns, mut ranged, mut near) = (0.0f32, 0, 0, 0.0f32, 0.0f32);
     for e in cx.g.enemies.iter() {
         if e.dead { continue; }
@@ -170,6 +172,7 @@ pub fn update_director(cx: &mut Ctx) {
 
 /// a rune burns into the ground, then the earth bursts upward in fire
 pub fn eruption(cx: &mut Ctx, c: Vec3, r: f32, delay: f32) {
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Fx { k: 4, a: c.to_array(), b: [0.0; 3], f: [r, delay, 0.0, 0.0] }); }
     cx.gfx().circle(c, 0xff3a1a, r, delay + 0.1, "fire", 2.5, None, None);
     cx.gfx().decal(c, true, r * 0.9, delay + 3.0, Some(0xff5a1a));
     cx.later(delay, move |cx| {
@@ -182,7 +185,7 @@ pub fn eruption(cx: &mut Ctx, c: Vec3, r: f32, delay: f32) {
         let m = cx.g.minutes();
         if !cx.p.dead && Vec2::new(cx.p.body.pos.x - c.x, cx.p.body.pos.z - c.z).length() < r && (cx.p.body.pos.y - c.y).abs() < 3.0 { cx.hurt_player(10.0 + 2.0 * m, Some(c), 9.0); }
         // the horde gets caught in it too
-        cx.aoe(c, r, &mut |cx, i, _| { if !cx.g.enemies[i].t.prop { cx.apply_damage(i, 30.0, Hit { kb: 4.0, up: 6.0, src: Some(c), ..default() }); } });
+        if !cx.g.net.client() { cx.aoe(c, r, &mut |cx, i, _| { if !cx.g.enemies[i].t.prop { cx.apply_damage(i, 30.0, Hit { kb: 4.0, up: 6.0, src: Some(c), ..default() }); } }); }
     });
 }
 
@@ -194,7 +197,7 @@ fn horde_event(cx: &mut Ctx, i: u32) {
         0 => {
             // encircled: a full ring of the dead rises all around you at once
             let n = (14 + (m * 3.0) as u32).min(44); let r = cx.rr(19.0, 23.0);
-            cx.toast("The horde closes in!", "They rise all around you", 2.8);
+            cx.announce("The horde closes in!", "They rise all around you", 2.8);
             for k in 0..n {
                 let an = k as f32 / n as f32 * TAU;
                 let Some(s) = cx.w.surface_spot(pp.x + an.cos() * r, pp.z + an.sin() * r) else { continue };
@@ -206,14 +209,14 @@ fn horde_event(cx: &mut Ctx, i: u32) {
             // a shrieking swarm from one direction
             let n = (10 + (m * 2.5) as u32).min(40); let an = cx.rr(0.0, TAU);
             let dir = ["east", "south", "west", "north"][((an / (TAU / 4.0)).round() as usize) % 4];
-            cx.toast("A swarm descends!", &format!("Bats pour in from the {}", dir), 2.8);
+            cx.announce("A swarm descends!", &format!("Bats pour in from the {}", dir), 2.8);
             for _ in 0..n {
                 let d = cx.rr(26.0, 34.0); let sp = an + cx.rr(-0.35, 0.35);
                 if let Some(s) = cx.w.surface_spot(pp.x + sp.cos() * d, pp.z + sp.sin() * d) { let y = s.y + cx.rr(3.0, 6.0); spawn_enemy(cx, Kind::Bat, Vec3::new(s.x, y, s.z), SpawnOpts { force: true, ..default() }); }
             }
         }
         _ => {
-            cx.toast("Elites approach", "A war band hunts you", 2.8);
+            cx.announce("Elites approach", "A war band hunts you", 2.8);
             let lead = if m > 8.0 { Kind::Brute } else if m > 4.0 { cx.pick(&[Kind::Zombie, Kind::Spider]) } else { Kind::Zombie };
             let at = ring_spot(cx, pp, yaw, 24.0, 30.0);
             if at.is_none() { return; }
@@ -248,7 +251,7 @@ fn boss_schedule(cx: &mut Ctx) {
         return;
     }
     let Some(&(at, k, title, sub)) = BOSSES.get(cx.g.dir.next_boss) else { return };
-    if t >= at - 8.0 && !cx.g.dir.warned { cx.g.dir.warned = true; cx.play("rumble"); cx.toast("The ground trembles...", "Something huge is coming", 3.0); cx.shake(0.3); }
+    if t >= at - 8.0 && !cx.g.dir.warned { cx.g.dir.warned = true; cx.play("rumble"); cx.announce("The ground trembles...", "Something huge is coming", 3.0); cx.shake(0.3); }
     if t >= at && spawn_boss(cx, k, title, sub) { cx.g.dir.next_boss += 1; cx.g.dir.warned = false; }
 }
 fn spawn_boss(cx: &mut Ctx, k: Kind, title: &str, sub: &str) -> bool {
@@ -256,7 +259,7 @@ fn spawn_boss(cx: &mut Ctx, k: Kind, title: &str, sub: &str) -> bool {
     let Some(s) = ring_spot(cx, pp, yaw, 22.0, 28.0) else { return false };
     if let Some(i) = spawn_enemy(cx, k, s, SpawnOpts { boss: true, force: true, ..default() }) {
         let id = cx.g.enemies[i].id; cx.g.boss = Some(id);
-        cx.toast(title, sub, 3.5); cx.play("horn"); cx.play("boom"); cx.shake(0.7);
+        cx.announce(title, sub, 3.5); cx.play("horn"); cx.play("boom"); cx.shake(0.7);
         let mut g = cx.gfx(); g.pillar(s, 0xff3a1a, 2.5, 30.0, 1.5); g.shock(s, 0xff6a3a, 0.5, 14.0, 0.8, 3.0);
         true
     } else { false }
@@ -313,7 +316,7 @@ fn begin_trial(cx: &mut Ctx, p: &Poi) {
     cx.g.dir.used.insert((p.gx, p.gz));
     let c = Vec3::new(p.x as f32 + 0.5, p.y as f32 + 1.0, p.z as f32 + 0.5);
     cx.g.dir.trial = Some(Trial { poi: (p.gx, p.gz), c, t: 35.0, spawn: 1.0 });
-    cx.toast("The altar awakens", "Survive 35 seconds near the altar", 3.0); cx.play("horn");
+    cx.announce("The altar awakens", "Survive 35 seconds near the altar", 3.0); cx.play("horn");
     { let mut g = cx.gfx(); g.pillar(c, 0xff3a4a, 2.0, 30.0, 1.5); g.ring(c, 0xff3a4a, 0.5, 12.0, 0.8); g.shock(c, 0xff3a4a, 0.5, 12.0, 0.6, 3.0); g.circle(c, 0xff3a4a, 12.0, 35.0, "blood", 0.4, None, None); }
     cx.shake(0.5);
 }
@@ -333,7 +336,7 @@ fn update_trial(cx: &mut Ctx) {
     if !cx.p.dead && d > 40.0 { cx.toast("The trial is broken", "You strayed too far from the altar", 2.5); cx.g.dir.trial = None; return; }
     if t <= 0.0 {
         cx.g.dir.trial = None;
-        cx.toast("Trial complete", "The altar yields a relic", 3.0); cx.play("chest");
+        cx.announce("Trial complete", "The altar yields a relic", 3.0); cx.play("chest");
         let cp = c + Vec3::new(0.0, 0.0, 3.0);
         drop_chest(cx, cp, true);
         cx.gfx().pillar(c, 0xffd35a, 2.0, 30.0, 1.5);

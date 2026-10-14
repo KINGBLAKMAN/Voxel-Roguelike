@@ -73,7 +73,7 @@ fn spawn_event(cx: &mut Ctx, kind: EvKind) {
         EvKind::Totem => ("A war totem rises", "Defend it for 40 seconds"),
         EvKind::Merchant => ("A wandering merchant", "Spend your gold before he moves on"),
     };
-    cx.toast(a, b, 3.0); cx.play("horn");
+    cx.announce(a, b, 3.0); cx.play("horn");
     if kind == EvKind::Merchant { roll_shop(cx); }
     cx.g.ev.list.push(Ev { kind, pos: s, root, life: if kind == EvKind::Merchant { 70.0 } else { 60.0 }, active: 0.0, used: false, hp: 0.0 });
 }
@@ -122,7 +122,7 @@ pub fn use_event(cx: &mut Ctx, i: usize) -> bool {
         EvKind::Cursed => {
             let e = &mut cx.g.ev.list[i]; e.used = true; e.active = 60.0;
             cx.g.flags.insert("curse", 1.0);
-            cx.toast("The curse takes hold", "Survive a minute of fury", 2.5); cx.play("bomb"); cx.shake(0.5);
+            cx.announce("The curse takes hold", "Survive a minute of fury", 2.5); cx.play("bomb"); cx.shake(0.5);
             let mut g = cx.gfx(); g.circle(pos, 0xb04aff, 9.0, 60.0, "blood", 0.6, None, None); g.shock(pos, 0xb04aff, 0.5, 12.0, 0.6, 3.0);
         }
         EvKind::Totem => {
@@ -130,7 +130,7 @@ pub fn use_event(cx: &mut Ctx, i: usize) -> bool {
             let hp = 500.0 + m * 60.0;
             let e = &mut cx.g.ev.list[i]; e.used = true; e.active = 40.0; e.hp = hp;
             cx.g.rel.decoys.push(crate::relics::Decoy { pos, t: 40.5, hp, e: root });
-            cx.toast("Defend the totem", "The horde will come for it", 2.5); cx.play("horn");
+            cx.announce("Defend the totem", "The horde will come for it", 2.5); cx.play("horn");
             cx.gfx().circle(pos, 0xffd35a, 6.0, 40.0, "war", 0.5, None, None);
         }
     }
@@ -185,8 +185,8 @@ pub fn update(cx: &mut Ctx) {
         let (kind, target, base, t, start) = (c.kind, c.target, c.base, c.t, c.start);
         let done = match kind { ChKind::Slay => cx.g.kills.saturating_sub(base) >= target, ChKind::Untouched => t <= 0.0 && cx.g.last_hit < start };
         let failed = match kind { ChKind::Slay => t <= 0.0, ChKind::Untouched => cx.g.last_hit >= start };
-        if done { cx.g.ev.challenge = None; cx.toast("Challenge complete", "Your reward falls from the sky", 2.5); reward(cx, pp + cx.p.fwd() * 3.0, 20.0 + m * 3.0, false); }
-        else if failed { cx.g.ev.challenge = None; cx.toast("Challenge failed", "", 1.8); cx.play("hurt"); }
+        if done { cx.g.ev.challenge = None; cx.announce("Challenge complete", "Your reward falls from the sky", 2.5); reward(cx, pp + cx.p.fwd() * 3.0, 20.0 + m * 3.0, false); }
+        else if failed { cx.g.ev.challenge = None; cx.announce("Challenge failed", "", 1.8); cx.play("hurt"); }
     }
     // goblin escape timer
     if let Some((id, t)) = cx.g.ev.goblin.as_mut() {
@@ -196,7 +196,7 @@ pub fn update(cx: &mut Ctx) {
             None => cx.g.ev.goblin = None,
             Some(i) if t <= 0.0 => {
                 let p = cx.g.enemies[i].body.pos; cx.fx.smoke(p, 0xd8d0c0, 10, 2.0, 1.0, 1.0); cx.gfx().flare(p + Vec3::Y, 0xffd35a, 3.0, 0.4, true);
-                kill_enemy(cx, i, true, false); cx.toast("The goblin escaped", "", 1.8); cx.g.ev.goblin = None;
+                kill_enemy(cx, i, true, false); cx.announce("The goblin escaped", "", 1.8); cx.g.ev.goblin = None;
             }
             _ => {}
         }
@@ -212,7 +212,7 @@ pub fn update(cx: &mut Ctx) {
         match kind {
             EvKind::Cursed if used && active <= 0.0 => {
                 cx.g.flags.remove("curse");
-                cx.toast("The curse lifts", "The shrine yields its relic", 2.5);
+                cx.announce("The curse lifts", "The shrine yields its relic", 2.5);
                 reward(cx, pos, 40.0 + m * 4.0, true);
                 cx.gfx().debris(pos + Vec3::Y * 1.5, &[0x14101a, 0x1a1420, 0xb04aff], 18, 5.0, 0.35, 6.0);
                 remove = true;
@@ -220,11 +220,11 @@ pub fn update(cx: &mut Ctx) {
             EvKind::Totem if used => {
                 let alive = cx.g.rel.decoys.iter().any(|d| d.e == root);
                 if !alive {
-                    if active > 0.6 { cx.toast("The totem fell", "", 2.0); cx.play("hurt"); } else { cx.toast("The totem stands", "Its spirits reward you", 2.5); reward(cx, pos, 30.0 + m * 4.0, true); }
+                    if active > 0.6 { cx.announce("The totem fell", "", 2.0); cx.play("hurt"); } else { cx.announce("The totem stands", "Its spirits reward you", 2.5); reward(cx, pos, 30.0 + m * 4.0, true); }
                     cx.g.ev.list.swap_remove(k); continue; // the decoy system already removed the model
                 }
             }
-            EvKind::Merchant if life <= 0.0 => { cx.toast("The merchant moves on", "", 1.6); remove = true; }
+            EvKind::Merchant if life <= 0.0 => { cx.announce("The merchant moves on", "", 1.6); remove = true; }
             _ if !used && life <= 0.0 => { remove = true; }
             _ => {}
         }
@@ -238,10 +238,10 @@ pub fn debug_start(cx: &mut Ctx, k: u32) { match k { 0 => start_challenge(cx), 1
 fn start_challenge(cx: &mut Ctx) {
     let m = cx.g.minutes();
     let c = if cx.r() < 0.6 {
-        let n = (30.0 + m * 4.0) as u32; cx.toast("Challenge", &format!("Slay {} monsters in 45 seconds", n), 3.0);
+        let n = (30.0 + m * 4.0) as u32; cx.announce("Challenge", &format!("Slay {} monsters in 45 seconds", n), 3.0);
         Challenge { kind: ChKind::Slay, target: n, base: cx.g.kills, t: 45.0, start: cx.g.run_t }
     } else {
-        cx.toast("Challenge", "Take no damage for 30 seconds", 3.0);
+        cx.announce("Challenge", "Take no damage for 30 seconds", 3.0);
         Challenge { kind: ChKind::Untouched, target: 0, base: 0, t: 30.0, start: cx.g.run_t }
     };
     cx.play("horn");
@@ -253,7 +253,7 @@ fn spawn_goblin(cx: &mut Ctx) {
     if let Some(i) = spawn_enemy(cx, Kind::Goblin, s, SpawnOpts { force: true, no_rise: true, ..default() }) {
         cx.g.enemies[i].flee = 999.0;
         let id = cx.g.enemies[i].id; cx.g.ev.goblin = Some((id, 25.0));
-        cx.toast("A treasure goblin!", "Catch it before it gets away", 2.5); cx.play("relic");
+        cx.announce("A treasure goblin!", "Catch it before it gets away", 2.5); cx.play("relic");
         cx.gfx().flare(s + Vec3::Y, 0xffd35a, 4.0, 0.5, true);
     }
 }

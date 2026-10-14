@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::f32::consts::TAU;
 
 pub type Act = Box<dyn FnOnce(&mut Ctx) + Send + Sync>;
-pub struct Timer { pub t: f32, pub f: Act }
+pub struct Timer { pub t: f32, pub f: Act, pub ghost: bool }
 
 #[derive(Clone, Copy, Default)]
 pub struct Stats { pub dmg: f32, pub cd: f32, pub speed: f32, pub leech: f32, pub crit: f32, pub armor: f32, pub regen: f32, pub food: f32, pub elite: f32, pub magnet: f32, pub area: f32,
@@ -36,14 +36,14 @@ pub struct Game {
     pub next_id: u32, pub run_t: f32, pub kills: u32, pub hitstop: f32, pub st: Stats, pub mods: HashMap<String, u32>, pub perks: Vec<String>,
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
-    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>, pub ev: crate::events::EventState, pub prompt: String,
+    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>, pub ev: crate::events::EventState, pub prompt: String, pub net: crate::net::Net,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new() }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default() }
     }
 }
 impl Game {
@@ -66,7 +66,11 @@ pub struct Ctx<'a, 'w, 's> {
 impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn gfx(&mut self) -> Gfx<'_, 'w, 's> { Gfx { c: &mut *self.c, meshes: &mut *self.meshes, mats: &mut *self.mats, pal: &mut *self.pal, fx: &mut *self.fx } }
     pub fn builder(&mut self) -> Builder<'_, 'w, 's> { Builder::new(&mut *self.c, &mut *self.pal, &mut *self.mats) }
-    pub fn later(&mut self, t: f32, f: impl FnOnce(&mut Ctx) + Send + Sync + 'static) { self.g.timers.push(Timer { t, f: Box::new(f) }); }
+    pub fn later(&mut self, t: f32, f: impl FnOnce(&mut Ctx) + Send + Sync + 'static) { let ghost = self.g.net.ghost; self.g.timers.push(Timer { t, f: Box::new(f), ghost }); }
+    /// a toast every player sees
+    pub fn announce(&mut self, a: &str, b: &str, d: f32) { self.toast(a, b, d); if self.g.net.host() { self.g.net.send(crate::net::Msg::Toast { a: a.into(), b: b.into() }); } }
+    /// change a block and tell the other players
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, b: u8) { self.w.set(x, y, z, b); if !self.g.net.ghost { self.g.net.send(crate::net::Msg::Block { x, y, z, b }); } }
     pub fn r(&self) -> f32 { self.fx.r() }
     pub fn rr(&self, a: f32, b: f32) -> f32 { self.fx.rr(a, b) }
     pub fn pick<T: Copy>(&self, v: &[T]) -> T { v[(self.r() * v.len() as f32) as usize % v.len()] }
@@ -91,6 +95,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn find(&self, id: u32) -> Option<usize> { self.g.enemies.iter().position(|e| e.id == id && !e.dead) }
     /// player damage to an enemy, with crits, lifesteal, knockback, popups and hit sparks
     pub fn damage(&mut self, i: usize, amount: f32, o: Hit) {
+        if self.g.net.ghost || self.g.net.no_enemy_dmg { return; }
         if i >= self.g.enemies.len() || self.g.enemies[i].dead || self.g.enemies[i].ai.hidden { return; }
         let crit = self.r() < self.g.st.crit || self.g.buff("focus") > 0.0;
         let (elite, frozen, brute, pos, h, prop) = { let e = &self.g.enemies[i]; (e.elite, e.frozen > 0.0, e.affix == Some(Affix::Brute), e.body.pos, e.body.h, e.t.prop) };
@@ -120,6 +125,13 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         self.apply_damage(i, a, o);
     }
     pub fn apply_damage(&mut self, i: usize, a: f32, o: Hit) {
+        if self.g.net.ghost || self.g.net.no_enemy_dmg || i >= self.g.enemies.len() { return; }
+        // clients report their hits to the host, which owns every monster's health
+        if self.g.net.client() {
+            let e = &mut self.g.enemies[i]; if e.dead || e.ai.hidden { return; } e.flash = 0.1; e.hit_p = 0.14;
+            let m = crate::net::Msg::Hit { id: e.id, dmg: a, kb: o.kb, up: o.up, src: o.src.unwrap_or(e.body.pos).to_array(), from: self.g.net.my_id };
+            self.g.net.send(m); return;
+        }
         let e = &mut self.g.enemies[i];
         if e.dead || e.ai.hidden { return; }
         e.hp -= a; e.flash = 0.1; e.hit_p = 0.14; e.alert = true;
@@ -138,7 +150,8 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         if dead { kill_enemy(self, i, false, false); }
     }
     pub fn status(&mut self, i: usize, s: Status) {
-        if i >= self.g.enemies.len() { return; }
+        if i >= self.g.enemies.len() || self.g.net.ghost || self.g.net.no_enemy_dmg { return; }
+        if self.g.net.client() { let id = self.g.enemies[i].id; self.g.net.send(crate::net::Msg::Status { id, stun: s.stun, slow: s.slow, freeze: s.freeze, burn: s.burn, poison: s.poison, fear: s.fear, chill: s.chill, thr: s.thr, push: s.push.map(|v| v.to_array()) }); return; }
         let e = &mut self.g.enemies[i];
         if e.dead || e.t.prop { return; }
         let el = if e.boss { 0.25 } else if e.elite { 0.5 } else { 1.0 };
@@ -167,7 +180,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
 
     // ---------------- the player ----------------
     pub fn heal(&mut self, a: f32, quiet: bool) {
-        if self.p.dead { return; }
+        if self.p.dead || self.g.net.ghost { return; }
         let a = a * if self.g.ember() >= 4 { 0.75 } else { 1.0 };
         let before = self.p.hp; self.p.hp = (self.p.hp + a).min(self.p.max_hp);
         let d = (self.p.hp - before).round();
@@ -175,14 +188,14 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     }
     /// healing over time and lifesteal: capped by a budget of 4% max health per second, halved for 2s after a hit
     pub fn sustain(&mut self, a: f32) {
-        if self.p.dead { return; }
+        if self.p.dead || self.g.net.ghost { return; }
         let a = (a * if self.g.run_t - self.g.last_hit < 2.0 { 0.5 } else { 1.0 }).min(self.g.heal_budget);
         if a <= 0.0 { return; }
         self.g.heal_budget -= a;
         self.heal(a, true);
     }
     pub fn hurt_player(&mut self, amount: f32, src: Option<Vec3>, kb: f32) {
-        if self.p.dead || self.g.over { return; }
+        if self.p.dead || self.g.over || self.g.net.ghost || !self.p.spawned { return; }
         let pp = self.p.body.pos;
         // a dodge that slips a hit at the last moment is perfect: stamina back and a moment of guaranteed crits
         let since_dodge = self.g.run_t - self.g.flags.get("dodge_at").copied().unwrap_or(-9.0);
@@ -236,12 +249,14 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         }
         if crate::augments::phoenix(self) { return; }
         self.p.hp = 0.0; self.p.dead = true; self.p.death_t = 0.0; self.p.charging = false;
+        if self.g.net.on() { self.play("die"); self.toast("You are down", "A teammate can revive you", 3.0); return; }
         self.play("die"); self.g.hitstop = 0.25;
         let pp = self.p.body.pos + Vec3::Y;
         self.fx.burst(pp, 0xff4a3a, 40, 6.0, 0.9, 0.4, 0.0, 6.0);
         self.g.over = true;
     }
     pub fn gain_xp(&mut self, n: f32) {
+        if self.g.net.ghost { return; }
         self.g.xp += n * self.g.st.xp_mul;
         while self.g.xp >= self.g.xp_need() {
             self.g.xp -= self.g.xp_need(); self.g.lvl += 1; self.g.level_pending += 1;
@@ -252,6 +267,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     // ---------------- loot ----------------
     pub fn drop_gems(&mut self, pos: Vec3, xp: f32) { let n = ((xp / 9.0).ceil() as usize).clamp(1, 6); for _ in 0..n { self.drop_pick(pos, PickKind::Xp, xp / n as f32); } }
     pub fn drop_pick(&mut self, pos: Vec3, kind: PickKind, v: f32) {
+        if self.g.net.ghost || self.g.net.client() { return; }
         if self.g.pickups.len() >= 260 { if kind == PickKind::Xp { if let Some(o) = self.g.pickups.iter_mut().find(|p| p.kind == PickKind::Xp) { o.v += v; return; } } else { return; } }
         let vel = Vec3::new(self.rr(-3.0, 3.0), self.rr(3.0, 6.0), self.rr(-3.0, 3.0));
         let ph = self.rr(0.0, 6.0);
@@ -307,7 +323,7 @@ pub fn run_timers(cx: &mut Ctx) {
     let mut due = vec![];
     let mut i = 0;
     while i < cx.g.timers.len() { cx.g.timers[i].t -= dt; if cx.g.timers[i].t <= 0.0 { due.push(cx.g.timers.swap_remove(i)); } else { i += 1; } }
-    for t in due { (t.f)(cx); }
+    for t in due { cx.g.net.ghost = t.ghost; (t.f)(cx); cx.g.net.ghost = false; }
 }
 
 pub fn update_pickups(cx: &mut Ctx) {

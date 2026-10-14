@@ -34,13 +34,17 @@ impl TestCfg {
     }
 }
 
-pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
+pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::hud::UiState>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
     t.frame += 1;
     let f = t.frame;
     if f <= 2 {
         if let Some(v) = t.time { dc.time = v; }
         if let Some(v) = t.yaw { p.yaw = v; }
         if let Some(v) = t.pitch { p.pitch = v; }
+    }
+    for (af, a) in t.acts.clone() {
+        if af != f { continue; }
+        match a.as_str() { "host" => ui.req_host = true, "join" => ui.req_join = Some("127.0.0.1".into()), "start" => ui.start = Some(t.class), _ => {} }
     }
     for (sf, path) in t.shots.clone() { if sf == f { c.spawn(Screenshot::primary_window()).observe(save_to_disk(path)); } }
     if f >= t.exit { ex.send(AppExit::Success); }
