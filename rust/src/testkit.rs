@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 #[derive(Resource, Clone)]
-pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32 }
+pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32, pub held: Vec<KeyCode>, pub no_foliage: bool }
 
 /// scripted tests only exist in dev builds
 pub fn active() -> bool { cfg!(feature = "dev") && std::env::var("EW_TEST").is_ok() }
@@ -15,9 +15,9 @@ impl TestCfg {
     pub fn from_env() -> Option<Self> {
         if !cfg!(feature = "dev") { return None; }
         let s = std::env::var("EW_TEST").ok()?;
-        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6 };
+        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6, held: vec![], no_foliage: false };
         for kv in s.split(';') {
-            let Some((k, v)) = kv.split_once('=') else { continue };
+            let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
             match k {
                 "seed" => t.seed = v.parse().unwrap_or(1),
                 "class" => t.class = match v { "ranger" => Class::Ranger, "mage" => Class::Mage, "priest" => Class::Priest, _ => Class::Warrior },
@@ -30,6 +30,7 @@ impl TestCfg {
                 "menu" => t.menu = true,
                 "autopick" => t.autopick = true,
                 "camp" => t.camp = true,
+                "nofoliage" => t.no_foliage = true,
                 "orbit" => t.orbit = v.parse().unwrap_or(0.0),
                 "dist" => t.dist = v.parse().unwrap_or(6.6),
                 _ => {}
@@ -50,6 +51,7 @@ pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::h
         cr.orbit = t.orbit; cr.max_d = t.dist;
     }
     keys.release(KeyCode::KeyQ);
+    for k in t.held.clone() { keys.press(k); }
     for (af, a) in t.acts.clone() {
         if af != f { continue; }
         match a.as_str() {
@@ -57,6 +59,9 @@ pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::h
             // animation stills: freeze attack progress, pick the combo step, swap weapons
             "swap" => keys.press(KeyCode::KeyQ),
             "tab" => ui.screen = crate::hud::Screen::Character,
+            // hold movement keys: run, sprint, strafe, backpedal; "stop" lets go
+            "w" => t.held.push(KeyCode::KeyW), "s" => t.held.push(KeyCode::KeyS), "d" => t.held.push(KeyCode::KeyD), "shift" => t.held.push(KeyCode::ShiftLeft),
+            "stop" => { for k in t.held.drain(..) { keys.release(k); } }
             a if a.starts_with("cursor") => { if let Some((x, y)) = a[6..].split_once(',') { if let (Ok(x), Ok(y), Ok(mut w)) = (x.parse::<f32>(), y.parse::<f32>(), win.get_single_mut()) { w.set_cursor_position(Some(Vec2::new(x, y))); } } }
             "noft" => crate::player::FREEZE.store(f32::NAN.to_bits(), std::sync::atomic::Ordering::Relaxed),
             a if a.starts_with("ft") => { if let Ok(v) = a[2..].parse::<f32>() { crate::player::FREEZE.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed); } }

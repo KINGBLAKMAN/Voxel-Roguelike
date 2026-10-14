@@ -43,8 +43,8 @@ use scene::*;
 
 /// tunables the renderer and streaming read; `focus` overrides the streaming centre (menus, tests)
 #[derive(Resource)]
-pub struct GameCfg { pub view: i32, pub chunk_budget: usize, pub time_runs: bool, pub focus: Option<Vec3>, pub damage_numbers: bool }
-impl Default for GameCfg { fn default() -> Self { GameCfg { view: 8, chunk_budget: 3, time_runs: true, focus: None, damage_numbers: true } } }
+pub struct GameCfg { pub view: i32, pub chunk_budget: usize, pub time_runs: bool, pub focus: Option<Vec3>, pub damage_numbers: bool, pub no_foliage: bool }
+impl Default for GameCfg { fn default() -> Self { GameCfg { view: 8, chunk_budget: 3, time_runs: true, focus: None, damage_numbers: true, no_foliage: false } } }
 
 /// the simulation is frozen (menus, level-up cards)
 #[derive(Resource, Default)]
@@ -104,6 +104,7 @@ fn main() {
 
 fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>, mut p: ResMut<Player>, mut ctl: ResMut<Controls>, mut ui: ResMut<hud::UiState>, test: Option<Res<testkit::TestCfg>>) {
     let seed = test.as_ref().map(|t| t.seed).unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
+    if test.as_ref().map(|t| t.no_foliage).unwrap_or(false) { c.queue(|w: &mut bevy::prelude::World| w.resource_mut::<GameCfg>().no_foliage = true); }
     let mut w = world::Voxels::new(seed);
     let sp = w.spawn_point();
     p.body.pos = sp; p.vis_y = sp.y;

@@ -212,7 +212,7 @@ pub fn stream_chunks(mut c: Commands, world: Option<ResMut<Voxels>>, cfg: Res<Ga
         let root = c.spawn((Transform::default(), Visibility::default(), ChunkMesh)).id();
         if !m.solid.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.solid.into_mesh())), MeshMaterial3d(h.chunk_mat.clone()), Transform::default())).id(); c.entity(root).add_child(e); }
         if !m.glow.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.glow.into_mesh())), MeshMaterial3d(h.glow_mat.clone()), Transform::default(), NotShadowCaster)).id(); c.entity(root).add_child(e); }
-        if !m.foliage.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.foliage.into_mesh())), MeshMaterial3d(h.fol_mat.clone()), Transform::default())).id(); c.entity(root).add_child(e); }
+        if !m.foliage.is_empty() && !cfg.no_foliage { let e = c.spawn((Mesh3d(meshes.add(m.foliage.into_mesh())), MeshMaterial3d(h.fol_mat.clone()), Transform::default())).id(); c.entity(root).add_child(e); }
         ch.entity = Some(root);
         ch.dirty = false;
     }

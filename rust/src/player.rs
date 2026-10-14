@@ -28,13 +28,14 @@ pub struct Player {
     pub walk_ph: f32, pub idle_ph: f32, pub swing_t: f32, pub swing_dur: f32, pub swing_side: f32, pub swing_kind: u8, pub cast_kick: f32,
     pub charge: f32, pub charging: bool, pub firing: bool, pub anim: Option<(Pose, f32, f32)>, pub roll_t: f32, pub dash: Option<Dash>, pub leap: Option<Leap>,
     pub whirl: f32, pub coyote: f32, pub move_dir: Vec3, pub aim_pt: Vec3, pub aim_dist: f32, pub sprinting: bool, pub spawned: bool, pub blocking: f32, pub dodge_cd: f32,
+    pub land: f32, pub air_t: f32, pub prev_yaw: f32, pub lean: f32, pub hip: f32,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0 }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0 }
     }
 }
 impl Player {
@@ -162,25 +163,47 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
         t.rotation = Quat::from_rotation_y(cur + dy * if freeze.is_some() { 1.0 } else { (dt * 18.0).min(1.0) });
     } }
     if p.dead { let k = (p.death_t * 3.0).min(std::f32::consts::FRAC_PI_2); set_rot(q, r.body, -k, 0.0, 0.0); set_pos(q, r.body, Vec3::new(0.0, (p.death_t).min(0.3), 0.0)); return; }
-    let hs = Vec2::new(p.body.vel.x, p.body.vel.z).length();
-    p.walk_ph += dt * hs * 1.7;
+    // the run cycle: phase follows distance covered, so feet never skate
+    let vel = Vec2::new(p.body.vel.x, p.body.vel.z);
+    let hs = vel.length();
+    let (fw, rt) = (p.fwd(), p.right());
+    let (vf, vr) = (vel.dot(Vec2::new(fw.x, fw.z)), vel.dot(Vec2::new(rt.x, rt.z)));
+    let back = vf < -0.3 * hs && hs > 0.5;
+    let stride = if p.sprinting { 2.15 } else { 1.75 };
+    p.walk_ph += dt * hs * stride * if back { -1.0 } else { 1.0 };
     p.idle_ph += dt;
     let amt = (hs / 6.0).min(1.0) * if p.body.on_ground { 1.0 } else { 0.3 };
+    let run = ((hs - 2.5) / 3.5).clamp(0.0, 1.0);
+    let spr = if p.sprinting { 1.0 } else { 0.0 };
     let (s, c) = (p.walk_ph.sin(), p.walk_ph.cos());
+    // landing: a squash that the knees absorb
+    if !p.body.on_ground { p.air_t += dt; } else { if p.air_t > 0.25 { p.land = (p.air_t * 0.5).min(0.35); } p.air_t = 0.0; }
+    p.land = (p.land - dt * 1.6).max(0.0);
+    // hips turn towards the direction of travel (shoulders keep facing the aim); bank into turns
+    let move_a = if hs > 0.8 && !back { vr.atan2(vf) } else { 0.0 };
+    p.hip += (-(move_a.clamp(-0.85, 0.85)) * amt - p.hip) * (dt * 10.0).min(1.0);
+    let yaw_rate = { let d = ((p.yaw - p.prev_yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)) - std::f32::consts::PI; d / dt.max(1e-4) };
+    p.prev_yaw = p.yaw;
+    let bank = (-yaw_rate * 0.035 + vr / 6.4 * 0.08).clamp(-0.22, 0.22) * amt;
+    p.lean += (bank - p.lean) * (dt * 6.0).min(1.0);
     let mut t = Tg::default();
-    // legs: stride with knees that lift on the forward swing; tucked in the air
-    let stride = if p.sprinting { 0.95 } else { 0.75 };
-    t.leg_l = s * stride * amt; t.leg_r = -s * stride * amt;
-    t.kn_l = (-c).max(0.0) * 1.15 * amt + 0.06; t.kn_r = c.max(0.0) * 1.15 * amt + 0.06;
-    if !p.body.on_ground && p.leap.is_none() && p.dash.is_none() { t.leg_l = -0.55; t.leg_r = 0.25; t.kn_l = 0.9; t.kn_r = 0.5; }
-    t.body_pos = Vec3::new(0.0, s.abs() * 0.06 * amt - 0.03 * amt + (p.idle_ph * 2.2).sin() * 0.012 * (1.0 - amt), 0.0);
-    t.body.y = if p.whirl > 0.0 { p.idle_ph * 22.0 } else { 0.0 };
-    if p.whirl > 0.0 { p.whirl -= dt; }
-    t.torso = Vec3::new(amt * 0.08 + if p.sprinting { 0.14 } else { 0.0 } - p.pitch * 0.12, s * 0.06 * amt, 0.0);
-    t.head = Vec3::new(-p.pitch * 0.45 - t.torso.x * 0.5, 0.0, 0.0);
+    // legs: a longer reach forward than back, knees lift on the swing and soften on contact
+    let reach = 0.55 + 0.35 * run + 0.25 * spr;
+    t.leg_l = (s * reach - s.max(0.0) * 0.12) * amt; t.leg_r = (-s * reach + (-s).max(0.0) * 0.12) * amt;
+    let lift = 0.7 + 0.8 * run + 0.4 * spr;
+    t.kn_l = ((-c).max(0.0) * lift + (c.max(0.0) * 0.18)) * amt + 0.06; t.kn_r = (c.max(0.0) * lift + ((-c).max(0.0) * 0.18)) * amt + 0.06;
+    if !p.body.on_ground && p.leap.is_none() && p.dash.is_none() { t.leg_l = -0.65; t.leg_r = 0.3; t.kn_l = 1.1; t.kn_r = 0.65; }
+    // highest in mid-stride, lowest as a foot passes under the body; landing dips
+    let bob = s.abs() * (0.05 + 0.05 * run) - 0.04 * run;
+    t.body_pos = Vec3::new(0.0, bob * amt + (p.idle_ph * 2.2).sin() * 0.012 * (1.0 - amt) - p.land * 0.5, 0.0);
+    t.kn_l += p.land * 2.2; t.kn_r += p.land * 2.2; t.leg_l -= p.land * 1.1; t.leg_r -= p.land * 1.1;
+    t.body = Vec3::new(0.0, p.hip + s * 0.1 * amt, p.lean);
+    if p.whirl > 0.0 { t.body.y = p.idle_ph * 22.0; p.whirl -= dt; }
+    // lean into the run; the shoulders counter the hips so the chest keeps facing the aim
+    t.torso = Vec3::new(amt * (0.1 + 0.12 * run) + spr * 0.18 + p.land * 0.6 - p.pitch * 0.12, -(p.hip + s * 0.1 * amt) - s * 0.12 * amt, -p.lean * 0.4);
+    t.head = Vec3::new(-p.pitch * 0.45 - t.torso.x * 0.7, s * 0.05 * amt, p.lean * 0.3);
     // arms: the weapon stance with a walk swing layered on
     let id = p.weapon_id();
-    let walk_a = s * 0.45 * amt;
     let st = crate::anim::stance(id);
     let mut pose = st;
     p.cast_kick = (p.cast_kick - dt * 5.0).max(0.0);
@@ -193,9 +216,24 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     } else if attacking {
         pose = crate::anim::attack(id, p.swing_kind, sw);
     }
-    let swinging_arms = attacking || p.charging;
-    t.arm_r = pose.ar + if swinging_arms { Vec3::ZERO } else { Vec3::new(walk_a * 0.6, 0.0, 0.0) };
-    t.arm_l = pose.al + if swinging_arms || id == "swordshield" || id == "greatsword" { Vec3::ZERO } else { Vec3::new(-walk_a, 0.0, 0.0) };
+    let busy = attacking || p.charging;
+    // arms: free arms pump against the legs with bent elbows; arms holding a weapon keep the stance and bounce with it
+    let pump = 0.45 + 0.45 * run + 0.25 * spr;
+    let (pump_r, pump_l) = (-s * pump * amt, s * pump * amt);
+    let pump_el = -(0.35 + 0.95 * run * amt + 0.3 * spr);
+    let two_hand = matches!(id, "greatsword" | "swordshield" | "longbow");
+    t.arm_r = pose.ar; t.arm_l = pose.al;
+    if !busy {
+        if id == "daggers" && p.sprinting && amt > 0.5 {
+            // the swept-back sprint
+            t.arm_r = Vec3::new(1.05, 0.0, 0.18); t.arm_l = Vec3::new(1.05, 0.0, -0.18); pose.er = -0.15; pose.el = -0.15; pose.hr = Vec3::new(-0.6, 0.0, 0.0); pose.hl = Vec3::new(-0.6, 0.0, 0.0);
+        } else if two_hand {
+            t.arm_r.x += pump_r * 0.25; t.arm_l.x += pump_l * 0.25; t.arm_r.x -= bob * amt * 1.5; t.arm_l.x -= bob * amt * 1.5;
+        } else {
+            t.arm_r.x += pump_r * 0.45;
+            t.arm_l = Vec3::new(st.al.x * (1.0 - amt) + pump_l, 0.0, st.al.z - 0.06 * amt); pose.el = st.el * (1.0 - amt) + pump_el * amt;
+        }
+    }
     t.el_r = pose.er; t.el_l = pose.el; t.hand_r = pose.hr; t.hand_l = pose.hl;
     t.torso += pose.torso;
     t.body_pos.z += pose.step;
