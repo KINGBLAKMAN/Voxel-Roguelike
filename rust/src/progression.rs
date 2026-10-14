@@ -9,7 +9,7 @@ use crate::player::{class_weapons, Player};
 use crate::relics::{relic_count, rk, RELICS, RMAX, RSLOTS};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum CardKind { Upgrade, Mastery, Relic, Chaos, Boon }
+pub enum CardKind { Upgrade, Mastery, Relic, Chaos, Boon, Evolution }
 #[derive(Clone)]
 pub struct Card { pub kind: CardKind, pub key: String, pub name: String, pub desc: String, pub tag: String, pub color: u32, pub w: f32 }
 
@@ -59,11 +59,18 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
             if r < m.4 { out.push(Card { kind: CardKind::Upgrade, key, name: m.2.into(), desc: m.3.into(), tag: format!("{} upgrade - rank {}/{}", weapon_info(w).0, r + 1, m.4), color: class_color(cls), w: 0.8 }); }
         }
     }
+    // evolutions: the most exciting card in the game, so they come up often once unlocked
+    for e in crate::relics::EVOS.iter() {
+        if rk(g, e.0) >= RMAX && !crate::relics::ev(g, e.0) && g.perks.iter().any(|q| q == e.2) {
+            out.push(Card { kind: CardKind::Evolution, key: format!("e.{}", e.0), name: e.3.into(), desc: e.4.into(), tag: "Evolution".into(), color: 0xffd35a, w: 8.0 });
+        }
+    }
     let owned = relic_count(g);
     for rl in RELICS.iter() {
         let r = rk(g, rl.id);
         if r >= RMAX || (r == 0 && owned >= RSLOTS) { continue; }
-        out.push(Card { kind: CardKind::Relic, key: format!("r.{}", rl.id), name: rl.name.into(), desc: rl.ranks[r as usize].into(), tag: if r > 0 { format!("Relic - rank {}/{}", r + 1, RMAX) } else { "New relic".into() }, color: rl.color, w: if r > 0 { 1.7 } else if owned < 2 { 2.4 } else { 1.3 } });
+        let evo_hint = if r + 1 == RMAX { crate::relics::EVOS.iter().find(|e| e.0 == rl.id).map(|e| format!(" Max rank: evolves with {}.", e.2)).unwrap_or_default() } else { String::new() };
+        out.push(Card { kind: CardKind::Relic, key: format!("r.{}", rl.id), name: rl.name.into(), desc: format!("{}{}", rl.ranks[r as usize], evo_hint), tag: if r > 0 { format!("Relic - rank {}/{}", r + 1, RMAX) } else { "New relic".into() }, color: rl.color, w: if r > 0 { 1.7 } else if owned < 2 { 2.4 } else { 1.3 } });
     }
     // two chaos augments per run, so they're a choice
     let chaos_owned = AUGS.iter().filter(|a| g.m(&format!("x.{}", a.id)) > 0).count();
@@ -81,7 +88,7 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
 /// draw three distinct cards; relic chests offer only relics and masteries
 pub fn roll(g: &Game, cls: Class, relic_only: bool, rnd: &mut impl FnMut() -> f32) -> Vec<Card> {
     let mut pool = options(g, cls);
-    if relic_only { let r: Vec<Card> = pool.iter().filter(|c| matches!(c.kind, CardKind::Relic | CardKind::Mastery)).cloned().collect(); if !r.is_empty() { pool = r; } }
+    if relic_only { let r: Vec<Card> = pool.iter().filter(|c| matches!(c.kind, CardKind::Relic | CardKind::Mastery | CardKind::Evolution)).cloned().collect(); if !r.is_empty() { pool = r; } }
     let mut out = vec![];
     while out.len() < 3 && !pool.is_empty() {
         let tot: f32 = pool.iter().map(|c| c.w).sum();

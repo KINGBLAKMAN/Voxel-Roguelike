@@ -251,7 +251,8 @@ pub fn ui_flow(mut ui: ResMut<UiState>, keys: Res<ButtonInput<KeyCode>>, btns: Q
             if keys.just_pressed(KeyCode::KeyR) && g.rerolls > 0 { g.rerolls -= 1; ui.cards_dirty = true; sfx.play("pick"); }
             if let Some(i) = pick { if let Some(card) = ui.cards.get(i).cloned() {
                 apply(&mut g, &mut p, &card);
-                sfx.play(match card.kind { CardKind::Chaos => "bomb", CardKind::Relic => "relic", _ => "pick" });
+                sfx.play(match card.kind { CardKind::Chaos => "bomb", CardKind::Relic | CardKind::Evolution => "relic", _ => "pick" });
+                if card.kind == CardKind::Evolution { g.toasts.push((format!("EVOLUTION: {}", card.name), card.desc.clone(), 3.0)); g.flash = 0.3; }
                 if card.kind == CardKind::Relic && g.m(&card.key) == 1 { g.toasts.push((card.name.clone(), "A new relic joins your arsenal".into(), 2.0)); }
                 if g.level_pending > 0 { g.level_pending -= 1; } else if g.chest_pending > 0 { g.chest_pending -= 1; }
                 if g.level_pending > 0 || g.chest_pending > 0 { ui.cards_dirty = true; ui.relic_only = g.level_pending == 0 && g.flags.remove("relic_chest").is_some(); } else { ui.screen = Screen::Playing; ctl.relock = true; }
@@ -341,7 +342,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     if g.dir.trial.is_some() { bl.push(format!("Altar trial  {:.0}s", g.dir.trial.as_ref().unwrap().t.max(0.0))); }
     if p.hunger <= 0.0 { bl.push("Starving".into()); } else if p.hunger > 75.0 { bl.push("Well fed".into()); }
     set_text(&mut q, r.buffs, &bl.join("\n"));
-    let rl: Vec<String> = crate::relics::RELICS.iter().filter_map(|x| { let k = crate::relics::rk(&g, x.id); if k > 0 { Some(format!("{}  {}", x.name, "I".repeat(k as usize))) } else { None } }).collect();
+    let rl: Vec<String> = crate::relics::RELICS.iter().filter_map(|x| { let k = crate::relics::rk(&g, x.id); if crate::relics::ev(&g, x.id) { crate::relics::EVOS.iter().find(|e| e.0 == x.id).map(|e| format!("{}  *", e.3)) } else if k > 0 { Some(format!("{}  {}", x.name, "I".repeat(k as usize))) } else { None } }).collect();
     let au: Vec<String> = crate::augments::AUGS.iter().filter_map(|x| { let k = g.m(&format!("x.{}", x.id)); if k > 0 { Some(format!("{} {}", x.name, k)) } else { None } }).collect();
     set_text(&mut q, r.relics, &[rl.join("\n"), au.join("\n")].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("\n\n"));
     // crosshair turns red on a hit
@@ -389,7 +390,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         set_text(&mut q, r.lv_sub, &if chest { if ui.relic_only { "The altar offers its power. Choose one.".to_string() } else { "The chest holds a relic. Choose one.".into() } } else { format!("Level {}. Choose one{}", g.lvl - g.level_pending + 1, if g.level_pending > 1 { format!("  |  {} more to come", g.level_pending - 1) } else { String::new() }) });
         for (i, (b, tag, name, desc)) in r.cards.iter().enumerate() {
             match ui.cards.get(i) {
-                Some(c) => { set_vis(&mut q, *b, true); set_text(&mut q, *tag, &c.tag.to_uppercase()); set_tcol(&mut q, *tag, srgb(c.color)); set_text(&mut q, *name, &c.name); set_tcol(&mut q, *name, srgb(match c.kind { CardKind::Chaos => 0xff7ae8, CardKind::Mastery => 0xffd27a, _ => 0xfff3d8 })); set_text(&mut q, *desc, &c.desc); }
+                Some(c) => { set_vis(&mut q, *b, true); set_text(&mut q, *tag, &c.tag.to_uppercase()); set_tcol(&mut q, *tag, srgb(c.color)); set_text(&mut q, *name, &c.name); set_tcol(&mut q, *name, srgb(match c.kind { CardKind::Chaos => 0xff7ae8, CardKind::Mastery | CardKind::Evolution => 0xffd27a, _ => 0xfff3d8 })); set_text(&mut q, *desc, &c.desc); }
                 None => set_vis(&mut q, *b, false),
             }
         }

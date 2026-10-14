@@ -24,6 +24,18 @@ pub const RELICS: [RelicInfo; 7] = [
     RelicInfo { id: "frost", name: "Frost Halo", color: 0x9fe6ff, ranks: ["A ring of ice shards bursts from you every 4s.", "+4 shards.", "Shards chill: three chills freeze.", "+40% damage.", "Bursts come 40% faster and shards pierce."] },
 ];
 pub const RMAX: u32 = 5;
+/// evolutions: a max-rank relic plus the matching boon becomes something far stronger
+/// (relic, boon id, boon name, evolved name, description)
+pub const EVOS: [(&str, &str, &str, &str, &str); 7] = [
+    ("blades", "might", "Might", "Storm of Swords", "Eight great golden swords orbit in a wide ring and cut for double damage."),
+    ("thunder", "crit", "Keen Edge", "Storm Throne", "Lightning falls every second on up to four foes, and every bolt chains three times."),
+    ("aura", "skin", "Ironhide", "Heart of the Sun", "A furnace 60% wider that burns twice as hot, with columns of flame."),
+    ("wisp", "wis", "Wisdom", "Choir of Spirits", "Four wisps fire piercing bolts twice as fast."),
+    ("axe", "fury", "Fury", "Reaper's Cyclone", "Six huge axes fly out and back every 1.4 seconds."),
+    ("flask", "aoe", "Amplify", "Inferno Cask", "Four flasks at a time leave huge, scorching pools."),
+    ("frost", "haste", "Haste", "Absolute Winter", "Every two seconds 24 piercing shards burst out and freeze what they hit."),
+];
+pub fn ev(g: &Game, id: &str) -> bool { g.m(&format!("e.{}", id)) > 0 }
 pub const RSLOTS: usize = 4;
 
 #[derive(Default)]
@@ -110,17 +122,17 @@ pub fn update_relics(cx: &mut Ctx) {
     let pp = cx.p.body.pos; let now = cx.g.run_t;
 
     // Whirling Blades: orbiting steel that cuts on contact
-    let r = rk(cx.g, "blades");
-    let bl = objs(cx, "blades", [0, 2, 3, 3, 4, 5][r.min(5) as usize], blade_mesh);
+    let r = rk(cx.g, "blades"); let evo = ev(cx.g, "blades");
+    let bl = objs(cx, "blades", if evo { 8 } else { [0, 2, 3, 3, 4, 5][r.min(5) as usize] }, blade_mesh);
     if !bl.is_empty() {
-        cx.g.rel.ang += dt * 3.1 * if r >= 5 { 1.4 } else { 1.0 };
+        cx.g.rel.ang += dt * 3.1 * if r >= 5 { 1.4 } else { 1.0 } * if evo { 1.3 } else { 1.0 };
         let ang = cx.g.rel.ang;
-        let rad = 2.6 * if r >= 4 { 1.25 } else { 1.0 } * area; let dmg = 12.0 * if r >= 3 { 1.35 } else { 1.0 }; let n = bl.len();
+        let rad = 2.6 * if r >= 4 { 1.25 } else { 1.0 } * area * if evo { 1.5 } else { 1.0 }; let dmg = 12.0 * if r >= 3 { 1.35 } else { 1.0 } * if evo { 2.4 } else { 1.0 }; let n = bl.len();
         for (i, e) in bl.iter().enumerate() {
             let an = ang + i as f32 / n as f32 * TAU;
             let p = Vec3::new(pp.x + an.cos() * rad, pp.y + 1.05 + (ang * 2.0 + i as f32).sin() * 0.15, pp.z + an.sin() * rad);
-            if let Ok(mut t) = cx.q.get_mut(*e) { t.translation = p; t.rotation = Quat::from_euler(EulerRot::YXZ, -an, 0.0, (ang * 3.0 + i as f32).sin() * 0.4); }
-            if cx.r() < 0.5 { cx.fx.emit(true, p, Vec3::ZERO, 0.22, 0.28, 0.04, hexc(0xcfe6ff) * 2.0, 0.0, 0.0, 0.7); }
+            if let Ok(mut t) = cx.q.get_mut(*e) { t.translation = p; t.rotation = Quat::from_euler(EulerRot::YXZ, -an, 0.0, (ang * 3.0 + i as f32).sin() * 0.4); t.scale = Vec3::splat(if evo { 1.8 } else { 1.0 }); }
+            if cx.r() < 0.5 { cx.fx.emit(true, p, Vec3::ZERO, 0.22, if evo { 0.5 } else { 0.28 }, 0.04, hexc(if evo { 0xffd35a } else { 0xcfe6ff }) * 2.0, 0.0, 0.0, 0.7); }
             let hits: Vec<usize> = cx.g.enemies.iter().enumerate().filter(|(_, e)| !e.dead && !e.t.passive && Vec2::new(e.body.pos.x - p.x, e.body.pos.z - p.z).length() < 0.75 + e.body.w && p.y > e.body.pos.y - 0.4 && p.y < e.body.pos.y + e.body.h + 0.4).map(|(i, _)| i).collect();
             for j in hits {
                 let id = cx.g.enemies[j].id;
@@ -132,21 +144,21 @@ pub fn update_relics(cx: &mut Ctx) {
         }
     }
     // Thunder Call: lightning on random nearby foes
-    let r = rk(cx.g, "thunder");
+    let r = rk(cx.g, "thunder"); let evo = ev(cx.g, "thunder");
     if r > 0 && tick(cx, "thunder", 1.0) <= 0.0 {
-        reset(cx, "thunder", 2.5 * if r >= 3 { 0.7 } else { 1.0 } * cd);
+        reset(cx, "thunder", if evo { 1.0 } else { 2.5 * if r >= 3 { 0.7 } else { 1.0 } } * cd);
         let mut fs: Vec<usize> = cx.foes(pp, 20.0).into_iter().take(10).collect();
-        let n = fs.len().min(1 + (r >= 2) as usize + (r >= 4) as usize);
-        let dmg = 34.0 * if r >= 4 { 1.3 } else { 1.0 };
+        let n = fs.len().min(if evo { 4 } else { 1 + (r >= 2) as usize + (r >= 4) as usize });
+        let dmg = 34.0 * if r >= 4 { 1.3 } else { 1.0 } * if evo { 1.5 } else { 1.0 };
         let mut ids = vec![];
         for _ in 0..n { let k = (cx.r() * fs.len() as f32) as usize % fs.len(); let i = fs.swap_remove(k); ids.push(cx.g.enemies[i].id); }
         for id in ids {
             let Some(i) = cx.find(id) else { continue };
             let ep = cx.g.enemies[i].body.pos;
             let g = lightning_strike(cx, ep, dmg, 1.9, 0xa8dcff);
-            if r >= 5 {
+            if r >= 5 || evo {
                 let mut from = g + Vec3::Y; let mut hit = vec![id];
-                for _ in 0..2 {
+                for _ in 0..if evo { 3 } else { 2 } {
                     let Some(nx) = cx.foes(from, 8.0).into_iter().find(|&q| !hit.contains(&cx.g.enemies[q].id)) else { break };
                     hit.push(cx.g.enemies[nx].id);
                     let to = cx.g.enemies[nx].body.pos + Vec3::Y * cx.g.enemies[nx].body.h * 0.5;
@@ -158,7 +170,7 @@ pub fn update_relics(cx: &mut Ctx) {
         }
     }
     // Ember Aura: a ring of embers that follows you
-    let r = rk(cx.g, "aura");
+    let r = rk(cx.g, "aura"); let evo = ev(cx.g, "aura");
     let au = objs(cx, "aura", if r > 0 { 1 } else { 0 }, |cx| {
         let ring = cx.fx.ring.clone(); let disk = cx.fx.disk.clone();
         let m1 = cx.mats.add(StandardMaterial { base_color: srgb(0xff8a3a).with_alpha(0.55), emissive: lrgb(0xff8a3a, 3.0), unlit: true, alpha_mode: AlphaMode::Add, double_sided: true, cull_mode: None, ..default() });
@@ -169,15 +181,16 @@ pub fn update_relics(cx: &mut Ctx) {
         cx.c.entity(root).add_children(&[a, b]); root
     });
     if let Some(&e) = au.first() {
-        let rad = 3.0 * if r >= 2 { 1.2 } else { 1.0 } * if r >= 5 { 1.25 } else { 1.0 } * area; let dmg = 5.0 * if r >= 3 { 1.4 } else { 1.0 } * if r >= 5 { 1.4 } else { 1.0 };
+        let rad = 3.0 * if r >= 2 { 1.2 } else { 1.0 } * if r >= 5 { 1.25 } else { 1.0 } * area * if evo { 1.6 } else { 1.0 }; let dmg = 5.0 * if r >= 3 { 1.4 } else { 1.0 } * if r >= 5 { 1.4 } else { 1.0 } * if evo { 2.2 } else { 1.0 };
+        if evo && cx.r() < 0.35 { let an = cx.rr(0.0, TAU); let p = pp + Vec3::new(an.cos() * rad * 0.9, 0.0, an.sin() * rad * 0.9); cx.gfx().pillar(p, 0xff8a2a, 0.35, 3.5, 0.5); }
         if let Ok(mut t) = cx.q.get_mut(e) { t.translation = pp + Vec3::Y * 0.12; t.scale = Vec3::splat(rad); t.rotation = Quat::from_rotation_y(now * 0.8); }
         for _ in 0..2 { let an = cx.rr(0.0, TAU); let rr = rad * cx.rr(0.7, 1.0); let v = Vec3::new(-an.sin() * 1.5, cx.rr(1.0, 2.5), an.cos() * 1.5); let c = hexc(cx.pick(&[0xff6a1a, 0xffb03a, 0xff3a10])) * 2.5; cx.fx.emit(true, pp + Vec3::new(an.cos() * rr, 0.2, an.sin() * rr), v, 0.6, 0.35, 0.05, c, -1.0, 0.5, 1.0); }
         if tick(cx, "aura", 0.0) <= 0.0 { reset(cx, "aura", 0.5);
             cx.aoe(pp, rad, &mut |cx, i, _| { if cx.g.enemies[i].t.passive { return; } cx.damage(i, dmg, Hit { kb: 1.2, src: Some(pp), col: 0xff9a4a, quiet: true, ..default() }); cx.status(i, Status { burn: if r >= 4 { 1.5 } else { 1.0 }, slow: if r >= 4 { 0.8 } else { 0.0 }, ..default() }); }); }
     }
     // Spirit Wisp: a lantern-like spirit at your shoulder that shoots the nearest foe
-    let r = rk(cx.g, "wisp");
-    let ws = objs(cx, "wisp", if r == 0 { 0 } else if r >= 5 { 2 } else { 1 }, |cx| {
+    let r = rk(cx.g, "wisp"); let evo = ev(cx.g, "wisp");
+    let ws = objs(cx, "wisp", if r == 0 { 0 } else if evo { 4 } else if r >= 5 { 2 } else { 1 }, |cx| {
         let e = glow_ball(cx, 0xb8f0ff, 0.24);
         // a little crown of orbiting motes makes it read as a creature, not a bullet
         let m = cx.pal.mat(cx.mats, 0xffffff, Mk::Glow); let cube = cx.pal.cube.clone();
@@ -195,23 +208,23 @@ pub fn update_relics(cx: &mut Ctx) {
             if cx.r() < 0.6 { let v = Vec3::new(cx.rr(-0.3, 0.3), cx.rr(-0.2, 0.4), cx.rr(-0.3, 0.3)); cx.fx.emit(true, p, v, 0.5, 0.3, 0.03, hexc(0xb8f0ff) * 2.5, 0.0, 1.0, 0.9); }
         }
         if tick(cx, "wisp", 0.5) <= 0.0 {
-            reset(cx, "wisp", 1.15 * if r >= 2 { 0.65 } else { 1.0 } * cd);
+            reset(cx, "wisp", 1.15 * if r >= 2 { 0.65 } else { 1.0 } * if evo { 0.5 } else { 1.0 } * cd);
             let f = cx.foes(pp, 22.0);
             if !f.is_empty() {
                 cx.play("arcane");
                 for wi in 0..ws.len() { for k in 0..if r >= 3 { 2 } else { 1 } {
                     let e = &cx.g.enemies[f[k % f.len()]]; let from = cx.g.rel.wisp_pos[wi];
                     let d = e.body.pos + Vec3::Y * e.body.h * 0.5 - from;
-                    seek_bolt(cx, from, d, (12.0f32 * if r >= 4 { 1.4 } else { 1.0 }).round(), 0xb8f0ff, r >= 5, 0.16, 30.0, 4.0);
+                    seek_bolt(cx, from, d, (12.0f32 * if r >= 4 { 1.4 } else { 1.0 } * if evo { 1.6 } else { 1.0 }).round(), 0xb8f0ff, r >= 5 || evo, 0.16, 30.0, 4.0);
                 } }
             }
         }
     }
     // Ricochet Axe: spinning axes that fly out through the horde and come back
-    let r = rk(cx.g, "axe");
+    let r = rk(cx.g, "axe"); let evo = ev(cx.g, "axe");
     if r > 0 && tick(cx, "axe", 1.2) <= 0.0 {
-        reset(cx, "axe", 2.6 * if r >= 5 { 0.65 } else { 1.0 } * cd);
-        let n = 1 + (r >= 2) as usize + (r >= 4) as usize; let big = r >= 3;
+        reset(cx, "axe", if evo { 1.4 } else { 2.6 * if r >= 5 { 0.65 } else { 1.0 } } * cd);
+        let n = if evo { 6 } else { 1 + (r >= 2) as usize + (r >= 4) as usize }; let big = r >= 3;
         let f = cx.foes(pp, 18.0);
         cx.play("whoosh");
         for i in 0..n {
@@ -225,15 +238,15 @@ pub fn update_relics(cx: &mut Ctx) {
                 if let Some(e) = p.e { if let Ok(mut t) = cx.q.get_mut(e) { t.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(p.age * 16.0); } }
                 if cx.r() < 0.5 { cx.fx.emit(true, p.pos, Vec3::ZERO, 0.2, 0.3, 0.04, hexc(0xe8c890) * 2.0, 0.0, 0.0, 0.7); }
             }));
-            p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, (22.0f32 * if big { 1.35 } else { 1.0 }).round(), Hit { kb: 5.0, src: Some(s), col: 0xe8c890, ..default() }); cx.fx.sparks(s, 0xffe0b0, 5, 7.0); } }));
+            p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, (22.0f32 * if big { 1.35 } else { 1.0 } * if evo { 1.8 } else { 1.0 }).round(), Hit { kb: 5.0, src: Some(s), col: 0xe8c890, ..default() }); cx.fx.sparks(s, 0xffe0b0, 5, 7.0); } }));
             spawn_proj(cx, p);
         }
     }
     // Firebomb Flask: a corked bottle lobbed into the thick of the horde; it shatters into a burning pool
-    let r = rk(cx.g, "flask");
+    let r = rk(cx.g, "flask"); let evo = ev(cx.g, "flask");
     if r > 0 && tick(cx, "flask", 2.0) <= 0.0 {
-        reset(cx, "flask", 3.4 * cd);
-        let n = 1 + (r >= 2) as usize + (r >= 4) as usize;
+        reset(cx, "flask", if evo { 2.4 } else { 3.4 } * cd);
+        let n = if evo { 4 } else { 1 + (r >= 2) as usize + (r >= 4) as usize };
         let f: Vec<usize> = cx.foes(pp, 16.0).into_iter().take(8).collect();
         for _ in 0..n {
             let tp = if f.is_empty() { pp + Vec3::new(cx.rr(-8.0, 8.0), 0.0, cx.rr(-8.0, 8.0)) } else { let j = cx.pick(&f); cx.g.enemies[j].body.pos };
@@ -242,26 +255,26 @@ pub fn update_relics(cx: &mut Ctx) {
             let e = flask_mesh(cx);
             let mut p = Proj::new(from, v); p.e = Some(e); p.grav = g; p.r = 0.3; p.life = 3.0; p.orient = Orient::Tumble;
             p.trail = Some(Box::new(|cx, p, _| { if cx.r() < 0.5 { cx.fx.emit(true, p.pos + Vec3::Y * 0.25, Vec3::Y * 0.5, 0.3, 0.25, 0.04, hexc(0xffb03a) * 2.5, 0.0, 0.0, 1.0); } }));
-            let (prad, plife, pdmg, pslow) = (2.2 * if r >= 3 { 1.3 } else { 1.0 } * area, 3.0 + if r >= 3 { 1.5 } else { 0.0 }, flask_dmg(r), r >= 5);
+            let (prad, plife, pdmg, pslow) = (2.2 * if r >= 3 { 1.3 } else { 1.0 } * area * if evo { 1.5 } else { 1.0 }, 3.0 + if r >= 3 { 1.5 } else { 0.0 }, flask_dmg(r) * if evo { 2.0 } else { 1.0 }, r >= 5 || evo);
             let land = move |cx: &mut Ctx, p: &mut Proj, _: Option<usize>| flask_land(cx, p.pos, prad, plife, pdmg, pslow);
             p.on_hit = Some(Box::new(land)); p.on_world = Some(Box::new(land)); p.on_expire = Some(Box::new(land));
             spawn_proj(cx, p);
         }
     }
     // Frost Halo: a crown of ice shards that bursts outward
-    let r = rk(cx.g, "frost");
+    let r = rk(cx.g, "frost"); let evo = ev(cx.g, "frost");
     if r > 0 && tick(cx, "frost", 1.5) <= 0.0 {
-        reset(cx, "frost", 4.0 * if r >= 5 { 0.6 } else { 1.0 } * cd);
-        let n = 10 + if r >= 2 { 4 } else { 0 }; let dmg = (11.0f32 * if r >= 4 { 1.4 } else { 1.0 }).round();
+        reset(cx, "frost", if evo { 2.0 } else { 4.0 * if r >= 5 { 0.6 } else { 1.0 } } * cd);
+        let n = if evo { 24 } else { 10 + if r >= 2 { 4 } else { 0 } }; let dmg = (11.0f32 * if r >= 4 { 1.4 } else { 1.0 }).round();
         let c = pp + Vec3::Y; cx.play("ice");
         cx.gfx().ring(pp, 0x9fe6ff, 0.5, 4.0, 0.35); cx.fx.burst(c, 0xbff4ff, 20, 5.0, 0.4, 0.35, 0.0, 0.0);
         let ang = cx.g.rel.ang;
         for i in 0..n {
             let an = i as f32 / n as f32 * TAU + ang * 0.3;
             let e = shard_mesh(cx, 0xbff4ff, 2.4);
-            let mut p = Proj::new(c, Vec3::new(an.cos(), 0.0, an.sin()) * 24.0); p.e = Some(e); p.r = 0.3; p.life = 0.9; p.pierce = r >= 5;
+            let mut p = Proj::new(c, Vec3::new(an.cos(), 0.0, an.sin()) * 24.0); p.e = Some(e); p.r = 0.3; p.life = 0.9; p.pierce = r >= 5 || evo;
             p.trail = Some(Box::new(|cx, p, _| cx.fx.emit(true, p.pos, Vec3::ZERO, 0.25, 0.3, 0.04, hexc(0x9fe6ff) * 2.5, 0.0, 0.0, 0.8)));
-            p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, dmg, Hit { kb: 2.0, src: Some(s), col: 0x9fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, chill: if r >= 3 { 1 } else { 0 }, thr: 3, ..default() }); } }));
+            p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, dmg, Hit { kb: 2.0, src: Some(s), col: 0x9fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, chill: if r >= 3 { 1 } else { 0 }, thr: 3, freeze: if evo { 1.2 } else { 0.0 }, ..default() }); } }));
             spawn_proj(cx, p);
         }
     }
