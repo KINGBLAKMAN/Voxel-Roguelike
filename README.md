@@ -1,6 +1,6 @@
 # Emberwild
 
-A voxel horde-survival roguelike in the spirit of Vampire Survivors. Pick one of four classes and fight an endless horde that rises from the ground all around you and grows every minute. Level up, stack relics and ability masteries, crack open urns and altars, and see how long you last. When you fall, the run is over.
+A voxel horde-survival roguelike in the spirit of Vampire Survivors. Pick one of four classes and survive 20 minutes against a horde that rises from the ground all around you and grows every minute. A boss arrives every five minutes, and the Ember King waits at 20:00; beat him to win the run (or carry on in endless mode). Level up, evolve relics, dodge and parry, take on events, and spend the gold you bring home at the Camp on permanent upgrades. Play alone or with up to three friends.
 
 ## Play
 
@@ -10,7 +10,7 @@ Emberwild is a native Windows game written in Rust on the [Bevy](https://bevyeng
 
 **From source:** install Rust, then `cd rust && cargo run --release`. On Linux you need the usual Bevy packages (`libasound2-dev libudev-dev libxkbcommon-x11-0`).
 
-The original browser version (with co-op) is still in `index.html` and `src/`, with its Electron wrapper in `desktop/`. Co-op hasn't been ported to the Rust build yet.
+The original browser version is still in `index.html` and `src/`, with its Electron wrapper in `desktop/`.
 
 ## Controls
 
@@ -24,10 +24,24 @@ The original browser version (with co-op) is still in `index.html` and `src/`, w
 | 1 to 3, R | On level-up: pick an upgrade, reroll |
 | Shift | Sprint |
 | Space | Jump or swim |
-| E | Interact: chests, shrines, altars |
+| Ctrl or Alt | Dodge roll (perfectly timed: refunds stamina and guarantees crits briefly) |
+| Right mouse | Block; raise it just before a hit to parry |
+| E | Interact: chests, shrines, altars, totems, the merchant; hold to revive a teammate |
 | F | Eat |
 | Esc | Pause |
 | M | Mute |
+| C, S, H, J | On the title screen: Camp, Settings, Host co-op, Join co-op |
+
+Gamepads work too: left stick moves, right stick looks, RT attacks, LT blocks, A jumps, B dodges, X, Y, LB and RB cast. Sensitivity, volume, field of view, view distance, shadows, screen shake and more are under **Settings**.
+
+## Runs, bosses and the Camp
+
+- A run lasts 20 minutes. The **Ancient Golem**, **Bone Colossus** and **Broodmother** arrive at 5, 10 and 15 minutes, and the three-phase **Ember King** at 20:00. Killing him wins the run, after which you can keep going in endless mode.
+- Something happens every 70 to 100 seconds: a timed challenge, a cursed shrine (a minute of a nastier horde in exchange for a relic), a war totem to defend, or a treasure goblin that drips gold as it flees. A **wandering merchant** visits every few minutes and sells relic caches, healing, rerolls and more for run gold.
+- **Relic evolutions:** a max-rank relic plus the matching boon evolves into something much stronger (Storm of Swords, Storm Throne, Heart of the Sun, Choir of Spirits, Reaper's Cyclone, Inferno Cask, Absolute Winter).
+- Runs pay out gold. At the **Camp** it buys permanent upgrades (health, damage, speed, cooldowns, armour, XP, pickup range, gold, rerolls and a Second Chance) and unlocks the Mage, the Priest and three relics.
+- **Ember 1 to 10:** each win unlocks the next difficulty level, and each level adds a twist. Pick it on the title screen.
+- Progress, settings and your last 30 runs are saved in `%APPDATA%/Emberwild/save.json`.
 
 ## Classes
 
@@ -65,10 +79,10 @@ Relics are auto-firing weapons any class can pick up. You can carry 4, and each 
 
 ## The horde
 
-Monsters don't wander: they hunt you. A director spawns packs in a ring just around the players (they claw up out of the ground), and both the headcount and their toughness climb with every minute you survive; the timer and threat level (Calm to Apocalypse) sit at the top of the screen. New kinds join as the run goes on: zombies and slimes first, then bats, skeletons, spiders, **bloaters** (they swell and burst; kill them in a crowd for chain reactions), cultists and club-swinging **brutes**. Stragglers that fall far behind are recycled to the front of the fight.
+Monsters don't wander: they hunt you. A director spawns packs in a ring just around the players (they claw up out of the ground), and both the headcount and their toughness climb with every minute you survive; the timer and threat level (Calm to Apocalypse) sit at the top of the screen. New kinds join as the run goes on: zombies and slimes first, then bats, skeletons, spiders, **bloaters** (they swell and burst; kill them in a crowd for chain reactions), cultists and club-swinging **brutes**, then monsters with jobs: **Gorehorn** chargers, **Shieldbearers** that block hits from the front, **Bone Shamans** that heal and haste the horde, **Ember Imps** that bomb from above and **Necromancers** that raise the dead. Deserts have **Sand Wurms** that tunnel and erupt under you, and the snow has **Frost Giants** whose slams chill. Stragglers that fall far behind are recycled to the front of the fight.
 
 - Every 75 to 100 seconds there's an event: a full ring of the dead rising around you, a bat swarm from one direction, or an elite war band.
-- Every 5 minutes an **Ancient Golem** boss arrives, and every third night is a **Blood Moon**.
+- Every third night is a **Blood Moon**, and from minute 6 telegraphed eruptions land where you're heading.
 - **Elites** carry affixes: Swift, Brute, Splitting, Vampiric and Volatile, and drop a treasure chest.
 - Enemies drop experience gems (blue, green and red by value). Breakable **urns** and rare drops hold hearts, a Lodestone that pulls in every gem, and a Holy Relic that scours the horde.
 - **Cursed altars** (red diamonds on the minimap): awaken one and survive 35 seconds of waves near it to earn a relic.
@@ -85,11 +99,11 @@ Gently rolling meadows, forests that open into glades, lakes with reeds and lily
 
 ## Co-op
 
-1. **Host:** in the desktop app, enter a name and click **Host a game**. The menu shows your LAN address, such as `192.168.1.20:7777`. Windows asks once to allow Emberwild through the firewall; allow it.
-2. **Friends:** enter that address and click **Join**, then pick a class.
+1. **Host:** on the title screen, click **Host co-op** (or press H). The title screen shows your LAN address, such as `192.168.1.20:7777`. Windows asks once to allow Emberwild through the firewall; allow it. Then pick a class.
+2. **Friends:** click **Join co-op** (or press J), type that address (the port can be left off) and press Enter. You load into the host's world; pick a class.
 3. To play over the internet, forward TCP port 7777 on the host's router, or use a LAN tunnel such as Tailscale or ZeroTier.
 
-The host runs the enemies and the world clock. Everyone shares the world, the XP from kills, and the day/night cycle; loot from chests is per player. A downed player can be revived by a teammate holding E, and everyone gets back up at dawn. You can also run a standalone relay on any machine with `npm run relay` and have everyone join it; the first player to connect becomes the host.
+Up to four players. The host runs the horde, the bosses, events and the clock; everyone sees each other's spells and shares the XP from kills. Gold, loot and Camp progress are your own. A downed player can be revived by a teammate holding E next to them; the run ends when everyone is down. The game doesn't pause during co-op.
 
 ## Layout
 
