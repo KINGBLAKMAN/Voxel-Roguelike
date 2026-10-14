@@ -3,9 +3,11 @@
 //! Emberwild: a voxel horde-survival roguelike.
 
 mod abilities;
+mod anim;
 mod audio;
 mod camp;
 mod augments;
+mod bot;
 mod combat;
 mod director;
 mod enemies;
@@ -46,13 +48,31 @@ impl Default for GameCfg { fn default() -> Self { GameCfg { view: 8, chunk_budge
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
+/// write panics to a crash log next to the save, since the Windows build has no console to show them
+fn install_crash_log() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let body = format!("Emberwild {} crashed (unix time {})\nOS: {} {}\n\n{}\n\nBacktrace:\n{}\n", env!("CARGO_PKG_VERSION"), stamp, std::env::consts::OS, std::env::consts::ARCH, info, bt);
+        let dir = meta::data_dir(); let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(format!("crash-{}.log", stamp));
+        if std::fs::write(&path, &body).is_ok() { eprintln!("crash log written to {}", path.display()); }
+        default(info);
+    }));
+}
+
 fn main() {
+    install_crash_log();
+    let bot = bot::from_env();
     let test = testkit::TestCfg::from_env();
-    let fullscreen = test.is_none() && std::env::var("EMBERWILD_WINDOWED").is_err();
+    let fullscreen = test.is_none() && bot.is_none() && std::env::var("EMBERWILD_WINDOWED").is_err();
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: "Emberwild".into(), resolution: (1280.0f32, 720.0f32).into(), present_mode: PresentMode::AutoVsync,
+            title: if bot.is_some() { "Emberwild balance bot".into() } else { "Emberwild".into() },
+            resolution: if bot.is_some() { (640.0f32, 360.0f32).into() } else { (1280.0f32, 720.0f32).into() },
+            present_mode: if bot.is_some() { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
             mode: if fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Primary) } else { WindowMode::Windowed }, ..default()
         }),
         ..default()
@@ -71,7 +91,9 @@ fn main() {
     .add_plugins((ScenePlugin, fx::FxPlugin))
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
     .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    app.add_systems(Update, player::weapon_trails.after(game_tick));
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
+    if let Some(b) = bot { app.insert_resource(b).init_resource::<bot::BotState>().add_systems(Update, bot::bot_drive.after(settings::gamepad_bridge).before(hud::ui_flow)); }
     app.run();
 }
 
@@ -165,12 +187,15 @@ pub struct Sim<'w, 's> {
 /// one frame of the game: input, the player, weapons, enemies, projectiles, zones, pickups, the director, relics, camera
 #[allow(clippy::too_many_arguments)]
 fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, paused: Res<Paused>, ctl: Res<Controls>,
-    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>) {
+    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>, bot: Option<Res<bot::BotCfg>>) {
     let s = &mut s;
+    let Ok((ce, mut proj)) = camq.get_single_mut() else { return };
+    if paused.0 && link.is_none() { return; }
+    // the balance bot runs several fixed steps per frame
+    let (steps, raw) = match bot.as_ref() { Some(b) => (b.turbo, 1.0 / 30.0), None => (1, time.delta_secs().min(0.05)) };
+    for _step in 0..steps {
     let Some(w) = s.w.as_mut() else { return };
     let w: &mut world::Voxels = w;
-    let raw = time.delta_secs().min(0.05);
-    let Ok((ce, mut proj)) = camq.get_single_mut() else { return };
     if paused.0 && link.is_none() { return; }
     let mut dt = raw;
     if s.g.hitstop > 0.0 { s.g.hitstop -= raw; dt = raw * 0.08; }
@@ -254,6 +279,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     update_camera(cx.w, cx.p, cx.cam, &mut ct, &mut proj, raw, &mut rng);
     *cx.q.get_mut(ce).unwrap() = ct;
     if let Some(l) = link { net::flush(&mut cx, l, raw); }
+    }
 }
 /// clients follow the host's time of day
 fn net_day(g: Res<Game>, mut dc: ResMut<DayCycle>) { if g.net.client() { if let Some(t) = g.net.day { dc.time = t; } } }

@@ -299,7 +299,7 @@ pub fn fire_arrow(cx: &mut Ctx, charge: f32) {
     let full = charge >= 0.99;
     let sp = crate::noise::lerp(32.0, 72.0, charge);
     let dmg = crate::noise::lerp(10.0, 40.0, charge).round();
-    cx.play("bow"); cx.p.cast_kick = 1.0;
+    cx.play("bow"); cx.p.cast_kick = 1.0; cx.p.swing_t = 0.0; cx.p.swing_dur = 0.42; cx.p.swing_kind = 1;
     let split = if full && cx.m("w.longbow.split") > 0 { 3 } else { 0 };
     let blast = full && cx.m("w.longbow.blast") > 0;
     player_arrow(cx, from, dir * sp, dmg, if full { 3.0 } else { 9.0 }, full, 3.0, 0x6a4528, if full { Some(0xb8ff8a) } else { None }, split, false, blast);
@@ -311,13 +311,26 @@ pub fn fire_arrow(cx: &mut Ctx, charge: f32) {
 fn melee_swing(cx: &mut Ctx, id: &'static str) {
     let (dmg0, range0, arc0, col, heavy) = melee(id);
     let rate = weapon_rate(id);
-    cx.p.swing_t = 0.0; cx.p.swing_dur = rate * 0.85; cx.p.swing_side *= -1.0; cx.g.hits += 1;
-    let n = cx.g.hits; let yaw = cx.p.yaw; let side = cx.p.swing_side;
+    cx.g.hits += 1;
+    let n = cx.g.hits;
+    // the third blow of every combo is the heavy variant (slam, thrust, scissor cut, uppercut)
+    let combo = ((n + 2) % 3) as u8;
+    let spd = (cx.g.st.atk_spd * crate::augments::atk_mul(cx)).max(0.3);
+    cx.p.swing_t = 0.0; cx.p.swing_dur = (rate * 0.95 / spd).clamp(0.2, 0.9); cx.p.swing_kind = combo;
+    cx.p.swing_side = if combo == 1 { -1.0 } else { 1.0 };
+    let side = cx.p.swing_side;
     cx.play(if heavy { "heavy" } else { "swing" });
     let reach = if id == "greatsword" && cx.m("w.greatsword.reach") > 0 { 1.3 } else { 1.0 };
     let (range, arc) = (range0 * reach, arc0 * if reach > 1.0 { 1.15 } else { 1.0 });
+    // the arc of light lands with the blade, after the wind-up
+    let (tilt, overhead) = (if id == "greatsword" { 0.0 } else { side * 0.25 }, combo == 2);
+    cx.later(cx.p.swing_dur * 0.24, move |cx| {
+        let c = cx.p.body.pos + Vec3::Y * 1.0; let yaw = cx.p.yaw;
+        let mut g = cx.gfx();
+        g.swoosh(c, yaw, range, arc, col, if heavy { 0.3 } else { 0.2 }, if overhead { 1.3 } else { tilt }, side);
+        if heavy { g.swoosh(c + Vec3::Y * 0.15, yaw, range * 0.8, arc * 0.9, 0xffffff, 0.18, if overhead { 1.3 } else { 0.0 }, side); }
+    });
     let c = cx.p.body.pos + Vec3::Y * 1.0;
-    { let mut g = cx.gfx(); g.swoosh(c, yaw, range, arc, col, if heavy { 0.3 } else { 0.2 }, if id == "greatsword" { 0.0 } else { side * 0.25 }, side); if heavy { g.swoosh(c + Vec3::Y * 0.15, yaw, range * 0.8, arc * 0.9, 0xffffff, 0.18, 0.0, side); } }
     if id == "greatsword" && cx.m("w.greatsword.wave") > 0 { sword_wave(cx, c, 0xfff1d6, 18.0, false); }
     if cx.g.buff("cry") > 0.0 && cx.m("cry.warlord") > 0 { sword_wave(cx, c, 0xff5b4c, 22.0, true); }
     if id == "daggers" && n % 3 == 0 && cx.m("w.daggers.shadow") > 0 {
@@ -328,7 +341,7 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
         p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 16.0, Hit { kb: 2.0, src: Some(s), col: 0xa98aff, ..default() }); cx.fx.sparks(s, 0xa98aff, 6, 6.0); } }));
         spawn_proj(cx, p);
     }
-    cx.later(rate * 0.22, move |cx| {
+    cx.later(cx.p.swing_dur * 0.27, move |cx| {
         if cx.p.dead { return; }
         let f = cx.p.fwd(); let pp = cx.p.body.pos;
         let mut hit_n = 0;
@@ -430,6 +443,9 @@ fn cast_primary(cx: &mut Ctx, id: &str) {
     let from = cx.hand();
     let dir = (cx.p.aim_pt - from).normalize();
     cx.p.cast_kick = 1.0;
+    let spd = (cx.g.st.atk_spd * crate::augments::atk_mul(cx)).max(0.3);
+    cx.p.swing_side *= -1.0; cx.p.swing_kind = if cx.p.swing_side > 0.0 { 0 } else { 1 };
+    cx.p.swing_t = 0.0; cx.p.swing_dur = (weapon_rate(id) * 1.1 / spd).clamp(0.24, 0.75);
     match id {
         "firestaff" => {
             cx.play("fire");

@@ -37,13 +37,14 @@ pub struct Game {
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
     pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>, pub ev: crate::events::EventState, pub prompt: String, pub net: crate::net::Net,
+    pub dmg_taken: f32, pub healed: f32,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default() }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default(), dmg_taken: 0.0, healed: 0.0 }
     }
 }
 impl Game {
@@ -182,7 +183,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn heal(&mut self, a: f32, quiet: bool) {
         if self.p.dead || self.g.net.ghost { return; }
         let a = a * if self.g.ember() >= 4 { 0.75 } else { 1.0 };
-        let before = self.p.hp; self.p.hp = (self.p.hp + a).min(self.p.max_hp);
+        let before = self.p.hp; self.p.hp = (self.p.hp + a).min(self.p.max_hp); self.g.healed += self.p.hp - before;
         let d = (self.p.hp - before).round();
         if d >= 2.0 && !quiet { let pp = self.p.body.pos + Vec3::Y * 2.1; self.pop(pp, format!("+{}", d as i32), 2); }
     }
@@ -228,7 +229,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let mut a = amount * (1.0 - self.g.st.armor);
         if self.p.weapon_id() == "swordshield" { a *= 0.7 - 0.1 * self.m("w.swordshield.bulwark") as f32; }
         a = a.round().max(1.0);
-        self.p.hp -= a; self.p.hit_t = 0.35; self.g.last_hit = self.g.run_t;
+        self.p.hp -= a; self.p.hit_t = 0.35; self.g.last_hit = self.g.run_t; self.g.dmg_taken += a;
         self.shake(0.35 + a / 60.0);
         self.play("hurt");
         self.pop(pp + Vec3::Y * 2.0, format!("-{}", a as i32), 4);

@@ -12,7 +12,7 @@ pub struct Palette { pub cube: Handle<Mesh>, pub sphere: Handle<Mesh>, pub ico: 
 impl FromWorld for Palette {
     fn from_world(w: &mut bevy::prelude::World) -> Self {
         let mut meshes = w.resource_mut::<Assets<Mesh>>();
-        let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+        let cube = meshes.add(bevel_cube(0.09));
         let sphere = meshes.add(Sphere::new(1.0).mesh().ico(3).unwrap());
         let ico = meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap());
         let octa = meshes.add(octahedron());
@@ -39,6 +39,38 @@ impl Palette {
     }
 }
 
+/// a unit cube with chamfered edges, so every box part catches a thin highlight along its edges
+pub fn bevel_cube(b: f32) -> Mesh {
+    let h = 0.5; let i = h - b;
+    let (mut p, mut n) = (vec![], vec![]);
+    let mut quad = |a: Vec3, bb: Vec3, c: Vec3, d: Vec3| { let nn = (bb - a).cross(c - a).normalize(); for v in [a, bb, c, a, c, d] { p.push(v.to_array()); n.push(nn.to_array()); } };
+    // the six inset faces, then the twelve edge strips; each built for +axis and mirrored by sign
+    for ax in 0..3 { for sg in [-1.0f32, 1.0] {
+        let f = |u: f32, v: f32| { let mut q = [0.0; 3]; q[ax] = sg * h; q[(ax + 1) % 3] = u; q[(ax + 2) % 3] = v; Vec3::from(q) };
+        if sg > 0.0 { quad(f(-i, -i), f(i, -i), f(i, i), f(-i, i)); } else { quad(f(-i, -i), f(-i, i), f(i, i), f(i, -i)); }
+    } }
+    for ax in 0..3 { for su in [-1.0f32, 1.0] { for sv in [-1.0f32, 1.0] {
+        // edge running along axis `ax`, between the faces of axes u and v
+        let (u, v) = ((ax + 1) % 3, (ax + 2) % 3);
+        let pt = |t: f32, on_u: bool| { let mut q = [0.0; 3]; q[ax] = t; if on_u { q[u] = su * h; q[v] = sv * i; } else { q[u] = su * i; q[v] = sv * h; } Vec3::from(q) };
+        let (a, bb, c, d) = (pt(-i, true), pt(i, true), pt(i, false), pt(-i, false));
+        let mid = (a + bb + c + d) / 4.0; let out = { let mut q = [0.0; 3]; q[u] = su; q[v] = sv; Vec3::from(q) };
+        let nn = (bb - a).cross(c - a);
+        if nn.dot(out) > 0.0 { quad(a, bb, c, d); } else { quad(a, d, c, bb); }
+        let _ = mid;
+    } } }
+    // eight corner triangles
+    for sx in [-1.0f32, 1.0] { for sy in [-1.0f32, 1.0] { for sz in [-1.0f32, 1.0] {
+        let a = Vec3::new(sx * h, sy * i, sz * i); let bb = Vec3::new(sx * i, sy * h, sz * i); let c = Vec3::new(sx * i, sy * i, sz * h);
+        let nn = (bb - a).cross(c - a); let out = Vec3::new(sx, sy, sz);
+        let tri = if nn.dot(out) > 0.0 { [a, bb, c] } else { [a, c, bb] };
+        let nn = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize();
+        for v in tri { p.push(v.to_array()); n.push(nn.to_array()); }
+    } } }
+    Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList, bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, p).with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, n)
+}
+
 pub fn octahedron() -> Mesh {
     let v = [[0., 1., 0.], [1., 0., 0.], [0., 0., 1.], [-1., 0., 0.], [0., 0., -1.], [0., -1., 0.]];
     let tris = [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 1, 4], [5, 1, 2], [5, 2, 3], [5, 3, 4], [5, 4, 1]];
@@ -55,6 +87,7 @@ pub struct Rig {
     pub root: Option<Entity>, pub body: Option<Entity>, pub torso: Option<Entity>, pub head: Option<Entity>,
     pub arm_l: Option<Entity>, pub arm_r: Option<Entity>, pub leg_l: Option<Entity>, pub leg_r: Option<Entity>,
     pub hand_l: Option<Entity>, pub hand_r: Option<Entity>, pub cape: Option<Entity>, pub extra: Vec<Entity>,
+    pub elbow_l: Option<Entity>, pub elbow_r: Option<Entity>, pub knee_l: Option<Entity>, pub knee_r: Option<Entity>,
     pub parts: Vec<(Entity, u32, Mk)>,
 }
 
@@ -94,9 +127,13 @@ pub fn humanoid(b: &mut Builder, pos: Vec3, o: &Look) -> Rig {
     let th = if o.thin { 0.6 } else { 1.0 };
     let leg_l = b.pivot(body, Vec3::new(-0.13, 0.78, 0.0));
     let leg_r = b.pivot(body, Vec3::new(0.13, 0.78, 0.0));
+    let mut knees = vec![];
     for l in [leg_l, leg_r] {
-        b.bx(l, Vec3::new(0.22 * th, 0.78, 0.24 * th), o.pants, Vec3::new(0.0, -0.39, 0.0));
-        if let Some(bt) = o.boots { b.bx(l, Vec3::new(0.25, 0.2, 0.29), bt, Vec3::new(0.0, -0.69, 0.02)); }
+        b.bx(l, Vec3::new(0.23 * th, 0.44, 0.25 * th), o.pants, Vec3::new(0.0, -0.2, 0.0));
+        let k = b.pivot(l, Vec3::new(0.0, -0.4, 0.0));
+        b.bx(k, Vec3::new(0.21 * th, 0.4, 0.23 * th), o.pants, Vec3::new(0.0, -0.18, 0.0));
+        if let Some(bt) = o.boots { b.bx(k, Vec3::new(0.25, 0.2, 0.3), bt, Vec3::new(0.0, -0.29, 0.025)); }
+        knees.push(k);
     }
     let torso = b.pivot(body, Vec3::new(0.0, 0.78, 0.0));
     b.bx(torso, Vec3::new(0.52 * if o.thin { 0.75 } else { 1.0 }, 0.7, 0.3 * if o.thin { 0.7 } else { 1.0 }), o.shirt, Vec3::new(0.0, 0.35, 0.0));
@@ -111,13 +148,18 @@ pub fn humanoid(b: &mut Builder, pos: Vec3, o: &Look) -> Rig {
     let sl = o.sleeve.unwrap_or(o.shirt);
     let arm_l = b.pivot(torso, Vec3::new(-0.35, 0.64, 0.0));
     let arm_r = b.pivot(torso, Vec3::new(0.35, 0.64, 0.0));
+    let mut elbows = vec![]; let mut hands = vec![];
     for a in [arm_l, arm_r] {
-        b.bx(a, Vec3::new(0.18 * th, 0.6, 0.2 * th), sl, Vec3::new(0.0, -0.28, 0.0));
-        b.bx(a, Vec3::new(0.16 * th, 0.12, 0.18 * th), o.skin, Vec3::new(0.0, -0.62, 0.0));
+        b.bx(a, Vec3::new(0.19 * th, 0.36, 0.21 * th), sl, Vec3::new(0.0, -0.14, 0.0));
+        let e = b.pivot(a, Vec3::new(0.0, -0.3, 0.0));
+        b.bx(e, Vec3::new(0.17 * th, 0.28, 0.19 * th), sl, Vec3::new(0.0, -0.12, 0.0));
+        b.bx(e, Vec3::new(0.16 * th, 0.12, 0.18 * th), o.skin, Vec3::new(0.0, -0.32, 0.0));
+        hands.push(b.pivot(e, Vec3::new(0.0, -0.32, 0.0)));
+        elbows.push(e);
     }
-    let hand_l = b.pivot(arm_l, Vec3::new(0.0, -0.62, 0.0));
-    let hand_r = b.pivot(arm_r, Vec3::new(0.0, -0.62, 0.0));
-    Rig { root: Some(root), body: Some(body), torso: Some(torso), head: Some(head), arm_l: Some(arm_l), arm_r: Some(arm_r), leg_l: Some(leg_l), leg_r: Some(leg_r), hand_l: Some(hand_l), hand_r: Some(hand_r), ..default() }
+    let (hand_l, hand_r) = (hands[0], hands[1]);
+    Rig { root: Some(root), body: Some(body), torso: Some(torso), head: Some(head), arm_l: Some(arm_l), arm_r: Some(arm_r), leg_l: Some(leg_l), leg_r: Some(leg_r), hand_l: Some(hand_l), hand_r: Some(hand_r),
+        elbow_l: Some(elbows[0]), elbow_r: Some(elbows[1]), knee_l: Some(knees[0]), knee_r: Some(knees[1]), ..default() }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]

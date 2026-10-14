@@ -7,12 +7,12 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 #[derive(Resource, Clone)]
-pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool }
+pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32 }
 
 impl TestCfg {
     pub fn from_env() -> Option<Self> {
         let s = std::env::var("EW_TEST").ok()?;
-        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false };
+        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6 };
         for kv in s.split(';') {
             let Some((k, v)) = kv.split_once('=') else { continue };
             match k {
@@ -27,6 +27,8 @@ impl TestCfg {
                 "menu" => t.menu = true,
                 "autopick" => t.autopick = true,
                 "camp" => t.camp = true,
+                "orbit" => t.orbit = v.parse().unwrap_or(0.0),
+                "dist" => t.dist = v.parse().unwrap_or(6.6),
                 _ => {}
             }
         }
@@ -34,17 +36,28 @@ impl TestCfg {
     }
 }
 
-pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::hud::UiState>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
+#[allow(clippy::too_many_arguments)]
+pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::hud::UiState>, mut keys: ResMut<ButtonInput<KeyCode>>, mut cr: ResMut<crate::player::CamRig>, mut p: ResMut<Player>, mut dc: ResMut<DayCycle>, mut ex: EventWriter<AppExit>) {
     t.frame += 1;
     let f = t.frame;
     if f <= 2 {
         if let Some(v) = t.time { dc.time = v; }
         if let Some(v) = t.yaw { p.yaw = v; }
         if let Some(v) = t.pitch { p.pitch = v; }
+        cr.orbit = t.orbit; cr.max_d = t.dist;
     }
+    keys.release(KeyCode::KeyQ);
     for (af, a) in t.acts.clone() {
         if af != f { continue; }
-        match a.as_str() { "host" => ui.req_host = true, "join" => ui.req_join = Some("127.0.0.1".into()), "start" => ui.start = Some(t.class), _ => {} }
+        match a.as_str() {
+            "host" => ui.req_host = true, "join" => ui.req_join = Some("127.0.0.1".into()), "start" => ui.start = Some(t.class),
+            // animation stills: freeze attack progress, pick the combo step, swap weapons
+            "swap" => keys.press(KeyCode::KeyQ),
+            "noft" => crate::player::FREEZE.store(f32::NAN.to_bits(), std::sync::atomic::Ordering::Relaxed),
+            a if a.starts_with("ft") => { if let Ok(v) = a[2..].parse::<f32>() { crate::player::FREEZE.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed); } }
+            a if a.starts_with("cb") => { p.swing_kind = a[2..].parse().unwrap_or(0); }
+            _ => {}
+        }
     }
     for (sf, path) in t.shots.clone() { if sf == f { c.spawn(Screenshot::primary_window()).observe(save_to_disk(path)); } }
     if f >= t.exit { ex.send(AppExit::Success); }

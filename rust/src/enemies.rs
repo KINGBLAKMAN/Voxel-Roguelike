@@ -296,6 +296,9 @@ fn animate(cx: &mut Ctx, i: usize, moving: bool) {
     match e.kind {
         Kind::Zombie | Kind::Skeleton | Kind::Cultist | Kind::Bloater | Kind::Brute => {
             set_rot(q, r.leg_l, s * 0.7, 0.0, 0.0); set_rot(q, r.leg_r, -s * 0.7, 0.0, 0.0);
+            let c = if moving { e.ph.cos() } else { 0.0 };
+            set_rot(q, r.knee_l, (-c).max(0.0) * 0.9 + 0.05, 0.0, 0.0); set_rot(q, r.knee_r, c.max(0.0) * 0.9 + 0.05, 0.0, 0.0);
+            set_rot(q, r.elbow_l, -0.25, 0.0, 0.0); set_rot(q, r.elbow_r, -0.25, 0.0, 0.0);
             let (mut al, mut ar, mut tx, mut tz, mut hz) = (Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::new(s * 0.5, 0.0, 0.0), 0.0, s * 0.05, 0.0);
             match e.kind {
                 Kind::Zombie => { al = Vec3::new(-PI / 2.0 + (e.ph * 0.5).sin() * 0.15, 0.0, 0.0); ar = Vec3::new(-PI / 2.0 - (e.ph * 0.5).sin() * 0.15, 0.0, 0.0); hz = (e.ph * 0.3).sin() * 0.15;

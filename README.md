@@ -91,7 +91,42 @@ Enemy health scales with the number of players. To keep big fights smooth, the g
 
 ## Graphics
 
-The scene renders into an HDR buffer with bloom, sun shafts, a filmic tone curve, colour grading and FXAA, so fire, magic and glowing blocks actually glow. Every ability has its own cast pose and effects: magic circles, sweeping weapon trails, scorch and crack decals, ice and rock spikes, light flares and afterimages. **Low** graphics turns post-processing off; **Medium** keeps bloom and anti-aliasing but drops the sun shafts.
+Everything is generated in code; there are no art files.
+
+- **Renderer:** HDR with bloom, SMAA anti-aliasing, screen-space ambient occlusion, cascaded soft sun shadows, and a thin haze around the camera that the sun lights into god rays through the trees. Tone mapping is filmic (TonyMcMapface) with gentle colour grading.
+- **Sky:** a painted sky with drifting cumulus clouds that catch the sun, plus stars and the moon at night.
+- **Blocks:** every block face has a 32px pixel-art texture with a matching normal and roughness map, all painted at startup. That covers grass with blades, cracked stone, bark, leaves, bricks, planks, magma and more.
+- **Plants:** grass, flowers, ferns, reeds and lily pads are textured cut-out cards that sway in the wind. Bushes are domes of leaf clusters (berry bushes carry berries). Tree crowns have leafy fringes instead of cube edges, and all foliage casts leaf-shaped shadows.
+- **Ambient life:** fireflies drift over meadows at night, pollen glints in sunbeams, and leaves fall in forests.
+- **Characters:**
+  - Bevelled parts, with elbows and knees.
+  - Every weapon has keyframed attacks: a wind-up, a strike timed to the hit, a follow-through and a recovery. Melee weapons chain three different attacks, with a heavy third blow.
+  - The bow draws back as it charges and kicks on release. Staffs thrust, wands flick and the scepter points.
+  - Joints blend smoothly into each pose, and blades leave ribbon trails.
+
+**Settings → Graphics quality:**
+
+| Level | Ambient occlusion | God rays | Shadows |
+|---|---|---|---|
+| Low | none | none | small shadow maps |
+| Medium | light | none | standard |
+| High (default) | yes | yes | standard |
+| Ultra | higher quality | longer | 4K shadow maps |
+
+## Tools
+
+- **Crash log:** if the game crashes, it writes `crash-<time>.log` (the error and a backtrace) to `%APPDATA%/Emberwild/`. Send that file along with a bug report.
+- **Balance bot:** run `Emberwild.exe --bot` from a command prompt.
+  - The game plays complete runs on its own in a small window, simulating several steps per frame so runs go much faster than real time. It aims, kites, draws the bow, casts abilities, dodges, eats, opens chests and picks level-up cards.
+  - Each run is appended to `balance-<time>.csv` in the current folder, and a per-class summary goes to `balance-<time>-summary.txt`. The summary covers win rate, survival time, level, kills per minute, damage taken and healed per minute, and the heal-to-damage ratio.
+  - Your save is never touched.
+  - Options go in one quoted string, for example: `Emberwild.exe --bot "runs=5;classes=warrior,mage;minutes=20;turbo=8;ember=3"`.
+    - `runs`: runs per class.
+    - `classes`: any of ranger, mage, warrior, priest.
+    - `minutes`: the run cap.
+    - `turbo`: steps per frame.
+    - `ember`: difficulty.
+    - `seed`: the base world seed. Each run's world is derived from it, so a change can be compared on the same worlds.
 
 ## The world
 
@@ -109,14 +144,14 @@ Up to four players. The host runs the horde, the bosses, events and the clock; e
 
 | Path | What |
 |---|---|
-| `index.html` | Menus, HUD and styles |
-| `src/core.js` | World generation, chunk meshing, audio, particles and effects, models, class data |
-| `src/render.js` | Post-processing: HDR, bloom, sun shafts, tone mapping, grading, FXAA |
-| `src/vfx.js` | Procedural effect textures and the ability effect primitives |
-| `src/game.js` | Players, abilities and upgrades, enemies, pickups, co-op networking, HUD and game flow |
-| `src/relics.js` | Auto-firing relic weapons |
-| `src/augments.js` | Chaos augments |
-| `src/director.js` | Horde spawning, events, bosses, urns, altar trials and the generative music |
-| `vendor/three.min.js` | three.js r128 |
-| `desktop/` | Electron shell (`main.js`, `preload.js`) and the co-op relay (`relay.js`) |
-| `.github/workflows/windows-build.yml` | Builds the portable exe and the installer on Windows |
+| `rust/src/main.rs` | App setup, the game tick, run start/restart, crash log |
+| `rust/src/scene.rs`, `rust/src/shaders/` | Camera and post-processing, sky, water, terrain and foliage materials (WGSL), day/night, chunk streaming |
+| `rust/src/textures.rs`, `rust/src/mesher.rs`, `rust/src/world.rs` | Procedural block and foliage textures, chunk meshing (faces, bushes, canopy fringes, plants), world generation |
+| `rust/src/models.rs`, `rust/src/player.rs`, `rust/src/anim.rs` | Box-built models, the player controller, camera, joint blending, weapon trails, and the keyframed weapon animations |
+| `rust/src/combat.rs`, `abilities.rs`, `relics.rs`, `augments.rs` | Weapons, the 16 abilities, relics and evolutions, chaos augments |
+| `rust/src/enemies.rs`, `horde.rs`, `director.rs`, `events.rs` | Monsters and their AI, bosses, the horde director, run events and the merchant |
+| `rust/src/hud.rs`, `camp.rs`, `settings.rs`, `meta.rs` | Menus and HUD, the Camp, settings and gamepad, the save file |
+| `rust/src/net.rs` | Co-op |
+| `rust/src/bot.rs`, `testkit.rs` | The balance bot and the scripted screenshot tests |
+| `.github/workflows/windows-build.yml` | Builds the Windows exe and publishes releases |
+| `index.html`, `src/`, `desktop/` | The original browser version |

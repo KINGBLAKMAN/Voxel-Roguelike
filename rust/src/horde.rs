@@ -189,6 +189,8 @@ pub fn animate(e: &mut Enemy, q: &mut Query<&mut Transform>, moving: bool) {
         _ => {
             // humanoid bosses and specialists
             set_rot(q, r.leg_l, s * 0.6, 0.0, 0.0); set_rot(q, r.leg_r, -s * 0.6, 0.0, 0.0);
+            let c = if moving { e.ph.cos() } else { 0.0 };
+            set_rot(q, r.knee_l, (-c).max(0.0) * 0.8 + 0.05, 0.0, 0.0); set_rot(q, r.knee_r, c.max(0.0) * 0.8 + 0.05, 0.0, 0.0);
             let winding = e.wind > 0.0 || e.ai.st == 1;
             let (al, ar) = match e.kind {
                 Kind::Shieldbearer => (Vec3::new(-1.2, 0.0, 0.2), if winding { Vec3::new(-2.6, 0.0, 0.0) } else { Vec3::new(-0.4 + s * 0.3, 0.0, 0.0) }),

@@ -139,61 +139,70 @@ fn get_rot(q: &Query<&mut Transform>, e: Option<Entity>) -> Vec3 {
 fn blend(q: &mut Query<&mut Transform>, e: Option<Entity>, to: Vec3, w: f32) { let r = get_rot(q, e); let n = r.lerp(to, w); set_rot(q, e, n.x, n.y, n.z); }
 fn set_pos(q: &mut Query<&mut Transform>, e: Option<Entity>, p: Vec3) { if let Some(e) = e { if let Ok(mut t) = q.get_mut(e) { t.translation = p; } } }
 
+/// test hook: freeze attack/draw progress at a value (f32 bits; NaN = off) so stills can be captured mid-swing
+pub static FREEZE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
+pub fn frozen() -> Option<f32> { let v = f32::from_bits(FREEZE.load(std::sync::atomic::Ordering::Relaxed)); if v.is_nan() { None } else { Some(v) } }
+
+/// joint targets for one frame, blended onto the rig at the end
+#[derive(Clone, Copy, Default)]
+struct Tg { body: Vec3, body_pos: Vec3, torso: Vec3, head: Vec3, arm_l: Vec3, arm_r: Vec3, el_l: f32, el_r: f32, hand_l: Vec3, hand_r: Vec3, leg_l: f32, leg_r: f32, kn_l: f32, kn_r: f32 }
+fn drive(q: &mut Query<&mut Transform>, e: Option<Entity>, v: Vec3, k: f32) {
+    if let Some(e) = e { if let Ok(mut t) = q.get_mut(e) { let target = Quat::from_euler(EulerRot::XYZ, v.x, v.y, v.z); t.rotation = if k >= 1.0 { target } else { t.rotation.slerp(target, k) }; } }
+}
+pub fn is_melee(id: &str) -> bool { matches!(id, "greatsword" | "swordshield" | "daggers" | "mace") }
+
 /// all the player's body animation for one frame
 pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     let r = p.rig.clone();
+    let freeze = frozen();
     if let Some(root) = r.root { if let Ok(mut t) = q.get_mut(root) {
         t.translation = Vec3::new(p.body.pos.x, p.vis_y, p.body.pos.z);
         let cur = t.rotation.to_euler(EulerRot::YXZ).0;
         let dy = ((p.yaw - cur) % std::f32::consts::TAU + std::f32::consts::TAU * 1.5) % std::f32::consts::TAU - std::f32::consts::PI;
-        t.rotation = Quat::from_rotation_y(cur + dy * (dt * 18.0).min(1.0));
+        t.rotation = Quat::from_rotation_y(cur + dy * if freeze.is_some() { 1.0 } else { (dt * 18.0).min(1.0) });
     } }
     if p.dead { let k = (p.death_t * 3.0).min(std::f32::consts::FRAC_PI_2); set_rot(q, r.body, -k, 0.0, 0.0); set_pos(q, r.body, Vec3::new(0.0, (p.death_t).min(0.3), 0.0)); return; }
     let hs = Vec2::new(p.body.vel.x, p.body.vel.z).length();
     p.walk_ph += dt * hs * 1.7;
     p.idle_ph += dt;
     let amt = (hs / 6.0).min(1.0) * if p.body.on_ground { 1.0 } else { 0.3 };
-    let s = p.walk_ph.sin();
-    let mut legl = s * 0.75 * amt; let mut legr = -s * 0.75 * amt;
-    if !p.body.on_ground && p.leap.is_none() && p.dash.is_none() { legl = -0.5; legr = 0.3; }
-    set_rot(q, r.leg_l, legl, 0.0, 0.0); set_rot(q, r.leg_r, legr, 0.0, 0.0);
-    set_pos(q, r.body, Vec3::new(0.0, s.abs() * 0.06 * amt + (p.idle_ph * 2.2).sin() * 0.012 * (1.0 - amt), 0.0));
-    set_rot(q, r.body, 0.0, if p.whirl > 0.0 { p.idle_ph * 22.0 } else { 0.0 }, 0.0);
+    let (s, c) = (p.walk_ph.sin(), p.walk_ph.cos());
+    let mut t = Tg::default();
+    // legs: stride with knees that lift on the forward swing; tucked in the air
+    let stride = if p.sprinting { 0.95 } else { 0.75 };
+    t.leg_l = s * stride * amt; t.leg_r = -s * stride * amt;
+    t.kn_l = (-c).max(0.0) * 1.15 * amt + 0.06; t.kn_r = c.max(0.0) * 1.15 * amt + 0.06;
+    if !p.body.on_ground && p.leap.is_none() && p.dash.is_none() { t.leg_l = -0.55; t.leg_r = 0.25; t.kn_l = 0.9; t.kn_r = 0.5; }
+    t.body_pos = Vec3::new(0.0, s.abs() * 0.06 * amt - 0.03 * amt + (p.idle_ph * 2.2).sin() * 0.012 * (1.0 - amt), 0.0);
+    t.body.y = if p.whirl > 0.0 { p.idle_ph * 22.0 } else { 0.0 };
     if p.whirl > 0.0 { p.whirl -= dt; }
-    let mut torso = Vec3::new(amt * 0.08 + if p.sprinting { 0.12 } else { 0.0 }, 0.0, 0.0);
-    let mut head = Vec3::ZERO;
-    // arms: weapon-specific stance plus swings
-    let walk_a = s * 0.6 * amt;
-    let mut al = Vec3::new(-walk_a, 0.0, 0.08);
-    let mut ar = Vec3::new(walk_a, 0.0, -0.08);
-    p.cast_kick = (p.cast_kick - dt * 5.0).max(0.0);
+    t.torso = Vec3::new(amt * 0.08 + if p.sprinting { 0.14 } else { 0.0 } - p.pitch * 0.12, s * 0.06 * amt, 0.0);
+    t.head = Vec3::new(-p.pitch * 0.45 - t.torso.x * 0.5, 0.0, 0.0);
+    // arms: the weapon stance with a walk swing layered on
     let id = p.weapon_id();
-    let sw = p.swing_t.min(1.0);
-    p.swing_t = (p.swing_t + dt / p.swing_dur).min(1.0);
-    match id {
-        "longbow" => {
-            al = Vec3::new(-std::f32::consts::FRAC_PI_2 + 0.05 - p.pitch * 0.6, 0.12, 0.0);
-            let c = if p.charging { p.charge } else { 0.0 };
-            ar = Vec3::new(-std::f32::consts::FRAC_PI_2 + 0.1 - p.pitch * 0.6, -0.5 - c * 0.35, 0.0);
-        }
-        "firestaff" | "frostwand" | "scepter" => {
-            if p.cast_kick > 0.0 || p.firing { ar = Vec3::new(-std::f32::consts::FRAC_PI_2 - p.pitch * 0.7 + p.cast_kick * 0.5, 0.0, 0.0); } else { ar = Vec3::new(-0.6 + walk_a * 0.3, 0.0, -0.1); }
-        }
-        _ => {
-            if sw < 1.0 {
-                let e = 1.0 - (1.0 - sw).powf(2.4);
-                match id {
-                    "daggers" => { let a = Vec3::new(-std::f32::consts::FRAC_PI_2 + lerp(-0.6, 0.5, e), p.swing_side * lerp(0.9, -0.9, e), 0.0); if p.swing_side > 0.0 { ar = a } else { al = a } }
-                    "greatsword" => { ar = Vec3::new(lerp(-2.8, -0.2, e), lerp(0.4, -0.6, e), 0.0); al = Vec3::new(lerp(-2.6, -0.3, e), lerp(0.8, -0.2, e), 0.0); torso.y = lerp(0.5, -0.5, e); }
-                    _ => { ar = Vec3::new(-std::f32::consts::FRAC_PI_2 + lerp(-1.1, 0.7, e) * 0.6, p.swing_side * lerp(1.2, -1.0, e), 0.0); torso.y = p.swing_side * lerp(0.35, -0.35, e); }
-                }
-            } else if id == "greatsword" { ar = Vec3::new(-0.5, 0.0, -0.1); al = Vec3::new(-0.6, 0.5, 0.1); } else { ar.x = -0.45 + walk_a * 0.4; }
-            if id == "swordshield" { al = Vec3::new(-0.9, 0.5, 0.0); }
-        }
+    let walk_a = s * 0.45 * amt;
+    let st = crate::anim::stance(id);
+    let mut pose = st;
+    p.cast_kick = (p.cast_kick - dt * 5.0).max(0.0);
+    p.swing_t = (p.swing_t + dt / p.swing_dur.max(0.05)).min(1.0);
+    let mut sw = p.swing_t;
+    if let Some(f) = freeze { sw = f.min(1.0); if id == "longbow" && p.swing_kind == 0 { p.charging = true; p.charge = f.min(1.0); } }
+    let attacking = sw < 1.0;
+    if id == "longbow" {
+        if p.charging { pose = crate::anim::bow_draw(p.charge, p.pitch); } else if attacking { pose = crate::anim::bow_release(sw, p.pitch); }
+    } else if attacking {
+        pose = crate::anim::attack(id, p.swing_kind, sw);
     }
+    let swinging_arms = attacking || p.charging;
+    t.arm_r = pose.ar + if swinging_arms { Vec3::ZERO } else { Vec3::new(walk_a * 0.6, 0.0, 0.0) };
+    t.arm_l = pose.al + if swinging_arms || id == "swordshield" || id == "greatsword" { Vec3::ZERO } else { Vec3::new(-walk_a, 0.0, 0.0) };
+    t.el_r = pose.er; t.el_l = pose.el; t.hand_r = pose.hr; t.hand_l = pose.hl;
+    t.torso += pose.torso;
+    t.body_pos.z += pose.step;
+    // casters raise the focus at the target while holding the attack
+    if !attacking && p.firing && !is_melee(id) && id != "longbow" { t.arm_r = Vec3::new(-1.45 - p.pitch * 0.7, 0.0, 0.05); t.el_r = -0.25; }
     // guard: forearms crossed in front of the face
-    if p.blocking > 0.0 { al = Vec3::new(-1.65, 0.55, 0.35); ar = Vec3::new(-1.55, -0.55, -0.35); torso.x = 0.12; }
-    set_rot(q, r.arm_l, al.x, al.y, al.z); set_rot(q, r.arm_r, ar.x, ar.y, ar.z);
+    if p.blocking > 0.0 { t.arm_l = Vec3::new(-1.3, 0.0, -0.45); t.el_l = -1.2; t.arm_r = Vec3::new(-1.25, 0.0, 0.45); t.el_r = -1.25; t.torso.x = 0.12; t.hand_r = Vec3::new(0.3, 0.0, 0.0); }
     // the bow string draws back with the charge, an arrow nocked
     if let Some(w) = p.weapons.first() { if let Some([s1, s2, arrow]) = w.string {
         let c = if p.charging { p.charge } else { 0.0 };
@@ -201,67 +210,80 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
         for (e, sg) in [(s1, 1.0), (s2, -1.0)] {
             let (dy, dz) = (w.tip_y - ny, sg * w.tip_z);
             let len = (dy * dy + dz * dz).sqrt();
-            if let Ok(mut t) = q.get_mut(e) { t.scale.z = len; t.translation = Vec3::new(0.0, (w.tip_y + ny) / 2.0, dz / 2.0); t.rotation = Quat::from_rotation_x((-dy).atan2(dz)); }
+            if let Ok(mut tr) = q.get_mut(e) { tr.scale.z = len; tr.translation = Vec3::new(0.0, (w.tip_y + ny) / 2.0, dz / 2.0); tr.rotation = Quat::from_rotation_x((-dy).atan2(dz)); }
         }
-        if let Ok(mut t) = q.get_mut(arrow) { t.translation.y = ny; t.scale = if c > 0.02 { Vec3::ONE } else { Vec3::ZERO }; }
+        if let Ok(mut tr) = q.get_mut(arrow) { tr.translation.y = ny; tr.scale = if c > 0.02 { Vec3::ONE } else { Vec3::ZERO }; }
     } }
-    // cast poses blend over everything above
-    if let Some((pose, t, d)) = p.anim.as_mut() {
-        *t += dt; let k = *t / *d; let w = (k / 0.12).min((1.0 - k) / 0.22).clamp(0.0, 1.0);
+    // ability poses blend over everything above
+    if let Some((pose, tt, d)) = p.anim.as_mut() {
+        *tt += dt; let k = *tt / *d; let w = (k / 0.12).min((1.0 - k) / 0.22).clamp(0.0, 1.0);
         let pose = *pose;
-        if k >= 1.0 { p.anim = None; } else { apply_pose(q, &r, pose, k, w, &mut torso, &mut head); }
+        if k >= 1.0 { p.anim = None; } else { apply_pose(&mut t, pose, k, w); }
     }
-    set_rot(q, r.torso, torso.x, torso.y, torso.z);
-    set_rot(q, r.head, head.x, head.y, head.z);
+    // blend every joint towards its target: quick enough to stay responsive, smooth enough never to pop
+    let k = if freeze.is_some() { 1.0 } else { 1.0 - (-dt * if attacking { 38.0 } else { 20.0 }).exp() };
+    let kl = if freeze.is_some() { 1.0 } else { 1.0 - (-dt * 26.0).exp() };
+    drive(q, r.leg_l, Vec3::new(t.leg_l, 0.0, 0.0), kl); drive(q, r.leg_r, Vec3::new(t.leg_r, 0.0, 0.0), kl);
+    drive(q, r.knee_l, Vec3::new(t.kn_l, 0.0, 0.0), kl); drive(q, r.knee_r, Vec3::new(t.kn_r, 0.0, 0.0), kl);
+    drive(q, r.arm_l, t.arm_l, k); drive(q, r.arm_r, t.arm_r, k);
+    drive(q, r.elbow_l, Vec3::new(t.el_l, 0.0, 0.0), k); drive(q, r.elbow_r, Vec3::new(t.el_r, 0.0, 0.0), k);
+    for (hand, v) in [(r.hand_l, t.hand_l), (r.hand_r, t.hand_r)] { drive(q, hand, v, k); }
+    drive(q, r.torso, t.torso, k); drive(q, r.head, t.head, k);
+    drive(q, r.body, t.body, if p.whirl > 0.0 { 1.0 } else { k });
+    if let Some(b) = r.body { if let Ok(mut tr) = q.get_mut(b) { tr.translation = tr.translation.lerp(t.body_pos, if freeze.is_some() { 1.0 } else { k }); } }
     if p.roll_t > 0.0 {
         p.roll_t -= dt;
-        let k = 1.0 - p.roll_t.max(0.0) / 0.3; let th = k * std::f32::consts::TAU;
+        let kk = 1.0 - p.roll_t.max(0.0) / 0.3; let th = kk * std::f32::consts::TAU;
         set_rot(q, r.body, th, 0.0, 0.0);
-        set_pos(q, r.body, Vec3::new(0.0, 0.85 - 0.85 * th.cos() - 0.3 * (k * std::f32::consts::PI).sin(), -0.85 * th.sin()));
-        set_rot(q, r.leg_l, -1.4, 0.0, 0.0); set_rot(q, r.leg_r, -1.4, 0.0, 0.0); set_rot(q, r.arm_l, -1.2, 0.0, 0.0); set_rot(q, r.arm_r, -1.2, 0.0, 0.0);
+        set_pos(q, r.body, Vec3::new(0.0, 0.85 - 0.85 * th.cos() - 0.3 * (kk * std::f32::consts::PI).sin(), -0.85 * th.sin()));
+        set_rot(q, r.leg_l, -1.4, 0.0, 0.0); set_rot(q, r.leg_r, -1.4, 0.0, 0.0); set_rot(q, r.knee_l, 1.6, 0.0, 0.0); set_rot(q, r.knee_r, 1.6, 0.0, 0.0);
+        set_rot(q, r.arm_l, -1.2, 0.0, 0.0); set_rot(q, r.arm_r, -1.2, 0.0, 0.0); set_rot(q, r.elbow_l, -1.2, 0.0, 0.0); set_rot(q, r.elbow_r, -1.2, 0.0, 0.0);
     }
     if let Some(l) = &p.leap {
-        let k = (l.t / l.dur).min(1.0);
-        set_rot(q, r.arm_l, -2.9 + k * 1.2, 0.0, 0.3); set_rot(q, r.arm_r, -2.9 + k * 1.2, 0.0, -0.3);
-        let lg = -0.9 * (k * std::f32::consts::PI).sin(); set_rot(q, r.leg_l, lg, 0.0, 0.0); set_rot(q, r.leg_r, lg, 0.0, 0.0);
-        set_rot(q, r.torso, -0.3 + k * 0.7, 0.0, 0.0);
+        let kk = (l.t / l.dur).min(1.0);
+        set_rot(q, r.arm_l, -2.9 + kk * 1.2, 0.0, 0.3); set_rot(q, r.arm_r, -2.9 + kk * 1.2, 0.0, -0.3);
+        let lg = -0.9 * (kk * std::f32::consts::PI).sin(); set_rot(q, r.leg_l, lg, 0.0, 0.0); set_rot(q, r.leg_r, lg, 0.0, 0.0);
+        set_rot(q, r.knee_l, -lg * 1.2, 0.0, 0.0); set_rot(q, r.knee_r, -lg * 1.2, 0.0, 0.0);
+        set_rot(q, r.torso, -0.3 + kk * 0.7, 0.0, 0.0);
     }
     if let Some(cape) = r.cape {
         let cur = get_rot(q, Some(cape)).x;
-        let target = 0.08 + amt * 0.7 + if p.body.on_ground { 0.0 } else { 0.5 } + (p.idle_ph * (3.0 + amt * 6.0)).sin() * (0.04 + amt * 0.06);
+        let target = 0.08 + amt * 0.7 + if p.body.on_ground { 0.0 } else { 0.5 } + (p.idle_ph * (3.0 + amt * 6.0)).sin() * (0.04 + amt * 0.06) + if attacking { 0.15 } else { 0.0 };
         set_rot(q, Some(cape), lerp(cur, target, (dt * 8.0).min(1.0)), 0.0, 0.0);
     }
 }
-fn apply_pose(q: &mut Query<&mut Transform>, r: &Rig, pose: Pose, k: f32, w: f32, torso: &mut Vec3, head: &mut Vec3) {
+fn apply_pose(t: &mut Tg, pose: Pose, k: f32, w: f32) {
     let v = Vec3::new;
     let lt = |a: &mut Vec3, b: Vec3| *a = a.lerp(b, w);
+    let lf = |a: &mut f32, b: f32| *a += (b - *a) * w;
     match pose {
-        Pose::Push => { let e = (k / 0.3).min(1.0); blend(q, r.arm_l, v(-1.2 - 0.4 * e, 0.25, 0.25), w); blend(q, r.arm_r, v(-1.2 - 0.4 * e, -0.25, -0.25), w); lt(torso, v(0.2 * e - 0.1, 0.0, 0.0)); }
-        Pose::Raise => { blend(q, r.arm_l, v(-2.95, 0.0, 0.4), w); blend(q, r.arm_r, v(-2.95, 0.0, -0.4), w); lt(head, v(-0.4, 0.0, 0.0)); lt(torso, v(-0.2, 0.0, 0.0)); }
-        Pose::Throw => { let f = if k < 0.35 { 0.0 } else { ((k - 0.35) / 0.25).min(1.0) }; blend(q, r.arm_r, v(lerp(-2.9, -0.8, f), 0.0, -0.2), w); blend(q, r.arm_l, v(-0.6, 0.0, 0.5), w); lt(torso, v(0.0, lerp(0.45, -0.35, f), 0.0)); }
-        Pose::Shout => { blend(q, r.arm_l, v(-0.5, 0.0, 1.35), w); blend(q, r.arm_r, v(-0.5, 0.0, -1.35), w); lt(head, v(-0.5, 0.0, 0.0)); lt(torso, v(-0.3, 0.0, 0.0)); }
-        Pose::Pray => { blend(q, r.arm_l, v(-2.0, 0.62, 0.0), w); blend(q, r.arm_r, v(-2.0, -0.62, 0.0), w); lt(head, v(-0.35 + 0.6 * (k * 2.0).min(1.0), 0.0, 0.0)); }
-        Pose::Point => { let f = if k < 0.4 { 0.0 } else { ((k - 0.4) / 0.15).min(1.0) }; blend(q, r.arm_r, v(lerp(-3.0, -1.3, f), 0.0, -0.15), w); blend(q, r.arm_l, v(-0.3, 0.0, 0.3), w); lt(torso, v(-0.15 + 0.35 * f, 0.0, 0.0)); }
-        Pose::Lunge => { lt(torso, v(0.55, 0.0, 0.0)); blend(q, r.arm_r, v(-1.5, 0.0, -0.1), w); blend(q, r.arm_l, v(-0.2, 0.0, 0.5), w); blend(q, r.leg_l, v(-0.9, 0.0, 0.0), w); blend(q, r.leg_r, v(0.7, 0.0, 0.0), w); }
-        Pose::BowUp => { blend(q, r.arm_l, v(-2.7, 0.0, 0.2), w); blend(q, r.arm_r, v(-2.4, -0.4, 0.0), w); lt(head, v(-0.55, 0.0, 0.0)); lt(torso, v(-0.25, 0.0, 0.0)); }
+        Pose::Push => { let e = (k / 0.3).min(1.0); lt(&mut t.arm_l, v(-1.2 - 0.4 * e, 0.0, -0.25)); lt(&mut t.arm_r, v(-1.2 - 0.4 * e, 0.0, 0.25)); lf(&mut t.el_l, -0.2); lf(&mut t.el_r, -0.2); lt(&mut t.torso, v(0.2 * e - 0.1, 0.0, 0.0)); }
+        Pose::Raise => { lt(&mut t.arm_l, v(-2.95, 0.0, 0.4)); lt(&mut t.arm_r, v(-2.95, 0.0, -0.4)); lf(&mut t.el_l, -0.3); lf(&mut t.el_r, -0.3); lt(&mut t.head, v(-0.4, 0.0, 0.0)); lt(&mut t.torso, v(-0.2, 0.0, 0.0)); }
+        Pose::Throw => { let f = if k < 0.35 { 0.0 } else { ((k - 0.35) / 0.25).min(1.0) }; lt(&mut t.arm_r, v(lerp(-2.9, -0.8, f), 0.0, -0.2)); lf(&mut t.el_r, lerp(-1.4, -0.1, f)); lt(&mut t.arm_l, v(-0.6, 0.0, 0.5)); lt(&mut t.torso, v(0.0, lerp(0.45, -0.35, f), 0.0)); }
+        Pose::Shout => { lt(&mut t.arm_l, v(-0.5, 0.0, 1.35)); lt(&mut t.arm_r, v(-0.5, 0.0, -1.35)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.5, 0.0, 0.0)); lt(&mut t.torso, v(-0.3, 0.0, 0.0)); }
+        Pose::Pray => { lt(&mut t.arm_l, v(-1.2, 0.0, -0.3)); lt(&mut t.arm_r, v(-1.2, 0.0, 0.3)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.35 + 0.6 * (k * 2.0).min(1.0), 0.0, 0.0)); }
+        Pose::Point => { let f = if k < 0.4 { 0.0 } else { ((k - 0.4) / 0.15).min(1.0) }; lt(&mut t.arm_r, v(lerp(-3.0, -1.4, f), 0.0, -0.15)); lf(&mut t.el_r, lerp(-0.8, 0.0, f)); lt(&mut t.arm_l, v(-0.3, 0.0, 0.3)); lt(&mut t.torso, v(-0.15 + 0.35 * f, 0.0, 0.0)); }
+        Pose::Lunge => { lt(&mut t.torso, v(0.55, 0.0, 0.0)); lt(&mut t.arm_r, v(-1.5, 0.0, -0.1)); lf(&mut t.el_r, -0.1); lt(&mut t.arm_l, v(-0.2, 0.0, 0.5)); lf(&mut t.leg_l, -0.9); lf(&mut t.leg_r, 0.7); lf(&mut t.kn_l, 0.9); lf(&mut t.kn_r, 0.3); }
+        Pose::BowUp => { lt(&mut t.arm_l, v(-2.7, 0.0, 0.2)); lf(&mut t.el_l, 0.0); lt(&mut t.hand_l, v(0.0, 0.0, 0.0)); lt(&mut t.arm_r, v(-2.4, 0.0, 0.3)); lf(&mut t.el_r, -1.6); lt(&mut t.head, v(-0.55, 0.0, 0.0)); lt(&mut t.torso, v(-0.25, 0.0, 0.0)); }
         Pose::Kneel => {
             let f = if k < 0.35 { 0.0 } else { 1.0 };
-            if let Some(b) = r.body { if let Ok(mut t) = q.get_mut(b) { t.translation.y -= 0.35 * w * (1.0 - f * 0.5); } }
-            blend(q, r.arm_l, v(if f > 0.0 { -1.0 } else { -0.2 }, 0.0, if f > 0.0 { 1.4 } else { 0.9 }), w); blend(q, r.arm_r, v(if f > 0.0 { -1.0 } else { -0.2 }, 0.0, if f > 0.0 { -1.4 } else { -0.9 }), w);
-            blend(q, r.leg_l, v(-1.0, 0.0, 0.0), w * (1.0 - f * 0.5)); blend(q, r.leg_r, v(0.6, 0.0, 0.0), w * (1.0 - f * 0.5)); lt(torso, v(0.3 - f * 0.4, 0.0, 0.0));
+            t.body_pos.y -= 0.35 * w * (1.0 - f * 0.5);
+            lt(&mut t.arm_l, v(if f > 0.0 { -1.0 } else { -0.2 }, 0.0, if f > 0.0 { 1.4 } else { 0.9 })); lt(&mut t.arm_r, v(if f > 0.0 { -1.0 } else { -0.2 }, 0.0, if f > 0.0 { -1.4 } else { -0.9 }));
+            let w2 = w * (1.0 - f * 0.5); t.leg_l += (-1.0 - t.leg_l) * w2; t.leg_r += (0.6 - t.leg_r) * w2; t.kn_l += (1.6 - t.kn_l) * w2; t.kn_r += (0.6 - t.kn_r) * w2;
+            lt(&mut t.torso, v(0.3 - f * 0.4, 0.0, 0.0));
         }
-        Pose::Slam => { let f = if k < 0.4 { 0.0 } else { ((k - 0.4) / 0.12).min(1.0) }; let a = lerp(-3.0, -0.6, f); blend(q, r.arm_l, v(a, 0.0, 0.25), w); blend(q, r.arm_r, v(a, 0.0, -0.25), w); lt(torso, v(lerp(-0.3, 0.5, f), 0.0, 0.0)); }
-        Pose::Stab => { let f = ((k - 0.2) / 0.2).clamp(0.0, 1.0); blend(q, r.arm_r, v(lerp(-1.0, -1.7, f), 0.0, 0.0), w); lt(torso, v(lerp(-0.1, 0.3, f), lerp(0.4, -0.2, f), 0.0)); }
+        Pose::Slam => { let f = if k < 0.4 { 0.0 } else { ((k - 0.4) / 0.12).min(1.0) }; let a = lerp(-3.0, -0.6, f); lt(&mut t.arm_l, v(a, 0.0, 0.25)); lt(&mut t.arm_r, v(a, 0.0, -0.25)); lf(&mut t.el_l, lerp(-1.0, -0.1, f)); lf(&mut t.el_r, lerp(-1.0, -0.1, f)); lt(&mut t.torso, v(lerp(-0.3, 0.5, f), 0.0, 0.0)); }
+        Pose::Stab => { let f = ((k - 0.2) / 0.2).clamp(0.0, 1.0); lt(&mut t.arm_r, v(lerp(-1.0, -1.7, f), 0.0, 0.0)); lf(&mut t.el_r, lerp(-1.6, 0.0, f)); lt(&mut t.torso, v(lerp(-0.1, 0.3, f), lerp(0.4, -0.2, f), 0.0)); }
     }
 }
 
 #[derive(Resource)]
-pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3, pub base_fov: f32, pub shake_mul: f32 }
-impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO, base_fov: 72.0, shake_mul: 1.0 } } }
+pub struct CamRig { pub d: f32, pub sh: f32, pub shake: f32, pub fov: f32, pub kick: Vec3, pub base_fov: f32, pub shake_mul: f32, pub orbit: f32, pub max_d: f32 }
+impl Default for CamRig { fn default() -> Self { CamRig { d: 6.6, sh: 0.75, shake: 0.0, fov: 72.0, kick: Vec3::ZERO, base_fov: 72.0, shake_mul: 1.0, orbit: 0.0, max_d: 6.6 } } }
 
 /// over-the-shoulder camera: pulls in fast when blocked, eases back out gently so turning past trees never pops
 pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transform, proj: &mut Projection, dt: f32, rng: &mut impl FnMut() -> f32) {
-    let f = p.look();
+    let f = Quat::from_rotation_y(cr.orbit) * p.look();
     let right = p.right();
     let mut tgt = Vec3::new(p.body.pos.x, p.vis_y + 1.78, p.body.pos.z);
     let mut sh = 0.75;
@@ -269,7 +291,7 @@ pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transfor
     cr.sh = if sh < cr.sh { lerp(cr.sh, sh, (dt * 20.0).min(1.0)) } else { lerp(cr.sh, sh, (dt * 4.0).min(1.0)) };
     tgt += right * cr.sh;
     let back = -f;
-    let mut dist: f32 = 6.6;
+    let mut dist: f32 = cr.max_d;
     for oy in [0.0, 0.35, -0.35] { if let Some((_, t, _)) = voxel_ray(w, tgt + Vec3::Y * oy, back, dist) { dist = (t - 0.3).max(0.5); } }
     let hard = dist;
     cr.d = if dt <= 0.0 { dist } else if dist < cr.d { lerp(cr.d, dist, (dt * 22.0).min(1.0)) } else { lerp(cr.d, dist, (dt * 3.5).min(1.0)) };
@@ -284,3 +306,51 @@ pub fn update_camera(w: &Voxels, p: &Player, cr: &mut CamRig, cam: &mut Transfor
 }
 
 pub fn _unused(_: Query<&Transform, With<MainCam>>) {}
+
+/// ribbon trails swept by the blade (or a caster's focus) during the strike of an attack
+#[derive(Default)]
+pub struct TrailState { e: Option<Entity>, mesh: Option<Handle<Mesh>>, pts: Vec<(Vec3, Vec3, f32, usize)> }
+pub fn weapon_trails(mut st: Local<TrailState>, p: Res<Player>, gt: Query<&GlobalTransform>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, mut c: Commands, time: Res<Time>) {
+    use bevy::render::mesh::{Indices, PrimitiveTopology};
+    const LIFE: f32 = 0.17;
+    let st = &mut *st;
+    if st.mesh.is_none() {
+        let m = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, bevy::render::render_asset::RenderAssetUsages::default()));
+        let mat = mats.add(StandardMaterial { base_color: Color::WHITE, unlit: true, alpha_mode: AlphaMode::Add, cull_mode: None, double_sided: true, fog_enabled: false, ..default() });
+        st.e = Some(c.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat), Transform::default(), bevy::render::view::NoFrustumCulling, bevy::pbr::NotShadowCaster)).id());
+        st.mesh = Some(m);
+    }
+    let dt = time.delta_secs().min(0.05);
+    for q in st.pts.iter_mut() { q.2 += dt; }
+    st.pts.retain(|q| q.2 < LIFE);
+    let id = p.weapon_id();
+    let sw = frozen().unwrap_or(p.swing_t);
+    let active = p.spawned && !p.dead && sw > 0.1 && sw < 0.66 && id != "longbow";
+    let (col, from) = match id { "greatsword" => (Vec3::new(0.85, 0.92, 1.0) * 1.8, 0.3), "swordshield" => (Vec3::new(1.0, 0.96, 0.9) * 1.6, 0.3), "daggers" => (Vec3::new(0.75, 0.55, 1.0) * 2.0, 0.25),
+        "mace" => (Vec3::new(1.0, 0.82, 0.4) * 1.8, 0.7), "firestaff" => (Vec3::new(1.0, 0.45, 0.12) * 3.0, 0.88), "frostwand" => (Vec3::new(0.5, 0.85, 1.0) * 3.0, 0.8), _ => (Vec3::new(1.0, 0.9, 0.5) * 3.0, 0.85) };
+    if active {
+        for (wi, w) in p.weapons.iter().enumerate() {
+            if id == "swordshield" && wi > 0 { break; }
+            if id == "daggers" && ((p.swing_kind == 0 && wi == 1) || (p.swing_kind == 1 && wi == 0)) { continue; }
+            if let (Ok(a), Ok(b)) = (gt.get(w.root), gt.get(w.tip)) { let (a, b) = (a.translation(), b.translation()); st.pts.push((a.lerp(b, from), b, 0.0, wi)); }
+        }
+    }
+    let (mut pos, mut cols, mut nrm, mut idx) = (vec![], vec![], vec![], vec![]);
+    for wi in 0..2 {
+        let mut pts: Vec<&(Vec3, Vec3, f32, usize)> = st.pts.iter().filter(|q| q.3 == wi).collect();
+        pts.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        if pts.len() < 2 { continue; }
+        let base = pos.len() as u32;
+        for q in &pts {
+            let a = (1.0 - q.2 / LIFE).max(0.0).powf(1.5);
+            pos.push(q.0.to_array()); pos.push(q.1.to_array());
+            cols.push([col.x, col.y, col.z, a * 0.1]); cols.push([col.x, col.y, col.z, a * 0.85]);
+            nrm.push([0.0, 1.0, 0.0]); nrm.push([0.0, 1.0, 0.0]);
+        }
+        for i in 0..pts.len() as u32 - 1 { let b = base + i * 2; idx.extend_from_slice(&[b, b + 1, b + 3, b, b + 3, b + 2]); }
+    }
+    if idx.is_empty() { pos = vec![[0.0; 3]; 3]; cols = vec![[0.0; 4]; 3]; nrm = vec![[0.0, 1.0, 0.0]; 3]; idx = vec![0, 1, 2]; }
+    if let Some(m) = st.mesh.as_ref().and_then(|h| meshes.get_mut(h)) {
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos); m.insert_attribute(Mesh::ATTRIBUTE_COLOR, cols); m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm); m.insert_indices(Indices::U32(idx));
+    }
+}

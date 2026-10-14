@@ -59,17 +59,18 @@ pub const EMBERS: [&str; 11] = [
     "Ember 10: everything above, and the Ember King has a fourth phase of fury",
 ];
 
+pub fn data_dir() -> PathBuf { dir() }
 fn dir() -> PathBuf {
     let base = std::env::var("APPDATA").map(PathBuf::from).or_else(|_| std::env::var("XDG_DATA_HOME").map(PathBuf::from)).or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join(".local/share"))).unwrap_or_else(|_| PathBuf::from("."));
     base.join("Emberwild")
 }
 impl Save {
     pub fn load() -> Self {
-        if std::env::var("EW_TEST").is_ok() { return Save::default(); }
+        if std::env::var("EW_TEST").is_ok() || crate::bot::active() { return Save::default(); }
         std::fs::read_to_string(dir().join("save.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
     pub fn write(&self) {
-        if std::env::var("EW_TEST").is_ok() { return; }
+        if std::env::var("EW_TEST").is_ok() || crate::bot::active() { return; }
         let d = dir(); let _ = std::fs::create_dir_all(&d);
         if let Ok(s) = serde_json::to_string_pretty(self) { let tmp = d.join("save.json.tmp"); if std::fs::write(&tmp, s).is_ok() { let _ = std::fs::rename(tmp, d.join("save.json")); } }
     }
