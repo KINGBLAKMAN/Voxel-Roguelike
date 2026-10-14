@@ -7,7 +7,9 @@ use crate::GameCfg;
 use bevy::asset::load_internal_asset;
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::pbr::{MaterialPipeline, MaterialPipelineKey, CascadeShadowConfigBuilder, ExtendedMaterial, MaterialExtension, NotShadowCaster, NotShadowReceiver};
+use bevy::core_pipeline::smaa::Smaa;
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey, CascadeShadowConfigBuilder, ExtendedMaterial, MaterialExtension, NotShadowCaster, NotShadowReceiver, FogVolume, VolumetricLight, ShadowFilteringMethod};
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use bevy::prelude::*;
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::*;
@@ -44,8 +46,8 @@ impl Material for WaterMaterial {
     }
 }
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
-pub struct WindExt { #[uniform(100)] pub strength: f32 }
-impl MaterialExtension for WindExt { fn vertex_shader() -> ShaderRef { WIND_SHADER.into() } }
+pub struct WindExt { #[uniform(100)] pub wind: Vec4 }
+impl MaterialExtension for WindExt { fn vertex_shader() -> ShaderRef { WIND_SHADER.into() } fn prepass_vertex_shader() -> ShaderRef { WIND_SHADER.into() } }
 pub type FoliageMaterial = ExtendedMaterial<StandardMaterial, WindExt>;
 
 #[derive(Resource)]
@@ -54,7 +56,7 @@ pub struct SceneHandles { pub chunk_mat: Handle<StandardMaterial>, pub glow_mat:
 #[derive(Component)] pub struct Sun;
 #[derive(Component)] pub struct SkyDome;
 #[derive(Component)] pub struct WaterPlane;
-#[derive(Component)] pub struct Cloud { pub x: f32, pub z: f32, pub ox: f32, pub oz: f32, pub y: f32 }
+#[derive(Component)] pub struct Haze;
 #[derive(Component)] pub struct ChunkMesh;
 
 /// time of day and the derived lighting, readable by gameplay (night spawns, music) and the HUD
@@ -69,45 +71,37 @@ impl Plugin for ScenePlugin {
         load_internal_asset!(app, SKY_SHADER, "shaders/sky.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, WATER_SHADER, "shaders/water.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, WIND_SHADER, "shaders/wind.wgsl", Shader::from_wgsl);
-        app.add_plugins((MaterialPlugin::<SkyMaterial>::default(), MaterialPlugin::<WaterMaterial>::default(), MaterialPlugin::<FoliageMaterial>::default()))
+        app.add_plugins((MaterialPlugin::<SkyMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<WaterMaterial> { prepass_enabled: false, shadows_enabled: false, ..default() }, MaterialPlugin::<FoliageMaterial>::default()))
             .insert_resource(ClearColor(Color::srgb(0.6, 0.8, 0.95)))
             .insert_resource(AmbientLight { color: Color::WHITE, brightness: 300.0 })
             .init_resource::<DayCycle>()
             .add_systems(Startup, setup_scene)
-            .add_systems(Update, (update_day, stream_chunks, follow_sky_water, drift_clouds));
+            .add_systems(Update, (update_day, stream_chunks, follow_sky_water));
     }
 }
 
 fn setup_scene(mut c: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, mut sky_m: ResMut<Assets<SkyMaterial>>,
     mut water_m: ResMut<Assets<WaterMaterial>>, mut fol_m: ResMut<Assets<FoliageMaterial>>) {
-    c.spawn((Camera3d::default(), Camera { hdr: true, ..default() }, Tonemapping::AcesFitted, Bloom { intensity: 0.12, ..Bloom::NATURAL },
+    // anti-aliasing is SMAA (MSAA is incompatible with screen-space AO); AO and god rays are added by the graphics setting
+    c.spawn((Camera3d::default(), Camera { hdr: true, ..default() }, Tonemapping::TonyMcMapface, Bloom { intensity: 0.14, ..Bloom::NATURAL },
         Projection::Perspective(PerspectiveProjection { fov: 72f32.to_radians(), near: 0.1, far: 1400.0, ..default() }),
-        DistanceFog { color: Color::srgb(0.7, 0.82, 0.95), falloff: FogFalloff::Linear { start: 60.0, end: 170.0 }, ..default() },
-        Msaa::Sample4, Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::new(10.0, 30.0, 10.0), Vec3::Y), MainCam));
-    c.spawn((DirectionalLight { illuminance: 9000.0, shadows_enabled: true, color: Color::srgb(1.0, 0.95, 0.85), ..default() },
+        DistanceFog { color: Color::srgb(0.7, 0.82, 0.95), directional_light_color: Color::srgba(1.0, 0.82, 0.55, 0.6), directional_light_exponent: 18.0, falloff: FogFalloff::Linear { start: 60.0, end: 170.0 } },
+        Msaa::Off, Smaa::default(), ShadowFilteringMethod::Gaussian,
+        ColorGrading { global: ColorGradingGlobal { post_saturation: 1.04, ..default() }, shadows: ColorGradingSection { saturation: 1.05, contrast: 1.0, gamma: 1.0, gain: 1.0, lift: 0.0 },
+            midtones: ColorGradingSection { saturation: 1.08, contrast: 1.06, gamma: 1.0, gain: 1.0, lift: 0.0 }, highlights: ColorGradingSection { saturation: 1.0, contrast: 1.0, gamma: 1.0, gain: 1.0, lift: 0.0 } },
+        Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::new(10.0, 30.0, 10.0), Vec3::Y), MainCam));
+    c.spawn((DirectionalLight { illuminance: 9000.0, shadows_enabled: true, color: Color::srgb(1.0, 0.95, 0.85), ..default() }, VolumetricLight,
         CascadeShadowConfigBuilder { num_cascades: 3, minimum_distance: 0.5, first_cascade_far_bound: 18.0, maximum_distance: 110.0, overlap_proportion: 0.25 }.build(),
         Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::new(10.0, 0.0, 5.0), Vec3::Y), Sun));
+    // a thin band of haze around the camera: lit by the sun through the canopy, it turns into god rays
+    c.spawn((FogVolume { density_factor: 0.018, absorption: 0.25, scattering: 0.35, scattering_asymmetry: 0.75, ..default() }, Transform::from_scale(Vec3::new(220.0, 70.0, 220.0)), Haze));
     let chunk_mat = mats.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.92, reflectance: 0.12, ..default() });
     let glow_mat = mats.add(StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() });
-    let fol_mat = fol_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, double_sided: false, cull_mode: None, ..default() }, extension: WindExt { strength: 1.0 } });
+    let fol_mat = fol_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, double_sided: false, cull_mode: None, ..default() }, extension: WindExt { wind: Vec4::new(1.0, 0.0, 0.0, 0.0) } });
     let sky = sky_m.add(SkyMaterial { u: SkyU::default() });
     let water = water_m.add(WaterMaterial { u: WaterU::default() });
     c.spawn((Mesh3d(meshes.add(Sphere::new(900.0).mesh().uv(48, 24))), MeshMaterial3d(sky.clone()), Transform::default(), NotShadowCaster, NotShadowReceiver, SkyDome));
     c.spawn((Mesh3d(meshes.add(Plane3d::default().mesh().size(420.0, 420.0).subdivisions(120))), MeshMaterial3d(water.clone()), Transform::from_xyz(0.0, WATER_Y, 0.0), NotShadowCaster, NotShadowReceiver, WaterPlane));
-    // puffy clouds: clusters of flattened boxes drifting with the wind
-    let cloud_mat = mats.add(StandardMaterial { base_color: Color::srgba(1.0, 1.0, 1.0, 0.86), alpha_mode: AlphaMode::Blend, unlit: false, perceptual_roughness: 1.0, ..default() });
-    let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let mut rng = crate::noise::mulberry32(77);
-    for _ in 0..46 {
-        let (cx, cz, cy, w) = (rng() * 600.0 - 300.0, rng() * 600.0 - 300.0, 95.0 + rng() * 20.0, 14.0 + rng() * 18.0);
-        let parts = 2 + (rng() * 3.0) as usize;
-        for k in 0..parts {
-            let (ox, oz) = if k == 0 { (0.0, 0.0) } else { ((rng() - 0.5) * w * 0.9, (rng() - 0.5) * w * 0.6) };
-            let sc = if k == 0 { Vec3::new(w, 2.4 + rng(), w * (0.5 + rng() * 0.3)) } else { Vec3::new(w * (0.35 + rng() * 0.25), 2.0 + rng() * 1.5, w * (0.3 + rng() * 0.2)) };
-            c.spawn((Mesh3d(cube.clone()), MeshMaterial3d(cloud_mat.clone()), Transform::from_scale(sc), NotShadowCaster, NotShadowReceiver,
-                Cloud { x: cx, z: cz, ox, oz, y: cy + if k > 0 { rng() * 2.0 } else { 0.0 } }));
-        }
-    }
     c.insert_resource(SceneHandles { chunk_mat, glow_mat, fol_mat, sky, water });
 }
 
@@ -117,8 +111,9 @@ fn smooth(a: f32, b: f32, x: f32) -> f32 { crate::noise::smooth(a, b, x) }
 
 fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: Option<Res<SceneHandles>>, mut sky_m: ResMut<Assets<SkyMaterial>>, mut water_m: ResMut<Assets<WaterMaterial>>,
     mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>, mut fog: Query<(&mut DistanceFog, &Transform), (With<MainCam>, Without<Sun>)>,
-    mut amb: ResMut<AmbientLight>, mut clear: ResMut<ClearColor>) {
+    mut amb: ResMut<AmbientLight>, mut clear: ResMut<ClearColor>, mut fol_m: ResMut<Assets<FoliageMaterial>>) {
     let Some(h) = h else { return };
+    if let Some(m) = fol_m.get_mut(&h.fol_mat) { m.extension.wind.y = time.elapsed_secs_wrapped(); }
     if cfg.time_runs { dc.time += time.delta_secs() * dc.speed / DAY_LEN; }
     let t = dc.time.fract();
     let ang = t * std::f32::consts::TAU;
@@ -141,7 +136,7 @@ fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: O
         let sc = if day > 0.01 { Vec3::new(1.0, 0.85 + day * 0.1, 0.6 + day * 0.3) } else { Vec3::ZERO };
         m.u.sun_col = sc.extend(1.0);
         m.u.moon_col = (if dc.blood { rgb(0xff5a4a) } else { rgb(0xdfe8ff) }).extend(1.0);
-        m.u.params = Vec4::new(1.0 - day, 0.0, 0.0, 0.0);
+        m.u.params = Vec4::new(1.0 - day, 0.5 + 0.09 * (dc.time * 2.3).sin() + 0.05 * (dc.time * 7.1).sin(), 0.0, 0.0);
     }
     let (fog_start, fog_end) = (cfg.view as f32 * 16.0 * 0.4, cfg.view as f32 * 16.0 - 8.0);
     if let Ok((mut f, _)) = fog.get_single_mut() {
@@ -169,24 +164,13 @@ fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: O
     amb.brightness = 260.0 + 160.0 * day;
 }
 
-fn follow_sky_water(cam: Query<&Transform, With<MainCam>>, mut q: ParamSet<(Query<&mut Transform, (With<SkyDome>, Without<MainCam>)>, Query<&mut Transform, (With<WaterPlane>, Without<MainCam>)>)>) {
+fn follow_sky_water(cam: Query<&Transform, With<MainCam>>, mut q: ParamSet<(Query<&mut Transform, (With<SkyDome>, Without<MainCam>)>, Query<&mut Transform, (With<WaterPlane>, Without<MainCam>)>, Query<&mut Transform, (With<Haze>, Without<MainCam>)>)>) {
     let Ok(ct) = cam.get_single() else { return };
     let p = ct.translation;
     for mut t in q.p0().iter_mut() { t.translation = p; }
+    for mut t in q.p2().iter_mut() { t.translation = Vec3::new(p.x, p.y + 10.0, p.z); }
     for mut t in q.p1().iter_mut() { t.translation.x = (p.x / 8.0).round() * 8.0; t.translation.z = (p.z / 8.0).round() * 8.0; }
 }
-fn drift_clouds(time: Res<Time>, dc: Res<DayCycle>, cam: Query<&Transform, With<MainCam>>, mut q: Query<(&mut Cloud, &mut Transform), Without<MainCam>>) {
-    let Ok(ct) = cam.get_single() else { return };
-    let p = ct.translation;
-    let _ = dc;
-    for (mut cl, mut t) in q.iter_mut() {
-        cl.x += time.delta_secs() * 1.6;
-        let rx = ((cl.x - p.x + 300.0).rem_euclid(600.0)) - 300.0;
-        let rz = ((cl.z - p.z + 300.0).rem_euclid(600.0)) - 300.0;
-        t.translation = Vec3::new(p.x + rx + cl.ox, cl.y, p.z + rz + cl.oz);
-    }
-}
-
 /// generate and mesh chunks nearest the camera first, a few per frame, and drop far ones
 pub fn stream_chunks(mut c: Commands, world: Option<ResMut<Voxels>>, cfg: Res<GameCfg>, cam: Query<&Transform, With<MainCam>>, h: Option<Res<SceneHandles>>, mut meshes: ResMut<Assets<Mesh>>) {
     let (Some(mut world), Some(h)) = (world, h) else { return };

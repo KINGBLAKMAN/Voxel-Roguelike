@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
-pub struct Settings { pub sens: f32, pub volume: f32, pub music: f32, pub view: i32, pub shadows: bool, pub fullscreen: bool, pub fov: f32, pub shake: f32, pub damage_numbers: bool, pub invert_y: bool }
-impl Default for Settings { fn default() -> Self { Settings { sens: 1.0, volume: 0.7, music: 0.6, view: 8, shadows: true, fullscreen: true, fov: 72.0, shake: 1.0, damage_numbers: true, invert_y: false } } }
+pub struct Settings { pub sens: f32, pub volume: f32, pub music: f32, pub view: i32, pub shadows: bool, pub fullscreen: bool, pub fov: f32, pub shake: f32, pub damage_numbers: bool, pub invert_y: bool, pub quality: u8 }
+impl Default for Settings { fn default() -> Self { Settings { sens: 1.0, volume: 0.7, music: 0.6, view: 8, shadows: true, fullscreen: true, fov: 72.0, shake: 1.0, damage_numbers: true, invert_y: false, quality: 2 } } }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RunRecord { pub class: String, pub time: f32, pub kills: u32, pub level: u32, pub won: bool, pub ember: u32, pub gold: u32, pub bosses: u32 }

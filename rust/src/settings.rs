@@ -8,18 +8,19 @@ use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowMode};
 
-pub const ROWS: [&str; 10] = ["Mouse sensitivity", "Invert look", "Sound volume", "Music volume", "Field of view", "View distance", "Shadows", "Screen shake", "Damage numbers", "Fullscreen"];
+pub const ROWS: [&str; 11] = ["Mouse sensitivity", "Invert look", "Sound volume", "Music volume", "Field of view", "View distance", "Graphics quality", "Shadows", "Screen shake", "Damage numbers", "Fullscreen"];
+pub const QUALITY: [&str; 4] = ["Low", "Medium", "High", "Ultra"];
 fn value(s: &Settings, i: usize) -> String {
     let onoff = |b: bool| if b { "On".to_string() } else { "Off".to_string() };
     match i { 0 => format!("{:.1}", s.sens), 1 => onoff(s.invert_y), 2 => format!("{:.0}%", s.volume * 100.0), 3 => format!("{:.0}%", s.music * 100.0), 4 => format!("{:.0}", s.fov), 5 => format!("{} chunks", s.view),
-        6 => onoff(s.shadows), 7 => format!("{:.0}%", s.shake * 100.0), 8 => onoff(s.damage_numbers), _ => onoff(s.fullscreen) }
+        6 => QUALITY[s.quality.min(3) as usize].to_string(), 7 => onoff(s.shadows), 8 => format!("{:.0}%", s.shake * 100.0), 9 => onoff(s.damage_numbers), _ => onoff(s.fullscreen) }
 }
 pub fn change(s: &mut Settings, i: usize, up: bool) {
     let d = if up { 1.0 } else { -1.0 };
     match i {
         0 => s.sens = (s.sens + 0.1 * d).clamp(0.2, 3.0), 1 => s.invert_y = !s.invert_y, 2 => s.volume = (s.volume + 0.1 * d).clamp(0.0, 1.0), 3 => s.music = (s.music + 0.1 * d).clamp(0.0, 1.0),
-        4 => s.fov = (s.fov + 5.0 * d).clamp(55.0, 105.0), 5 => s.view = (s.view + d as i32).clamp(4, 14), 6 => s.shadows = !s.shadows, 7 => s.shake = (s.shake + 0.25 * d).clamp(0.0, 1.5),
-        8 => s.damage_numbers = !s.damage_numbers, _ => s.fullscreen = !s.fullscreen,
+        4 => s.fov = (s.fov + 5.0 * d).clamp(55.0, 105.0), 5 => s.view = (s.view + d as i32).clamp(4, 14), 6 => s.quality = if up { (s.quality + 1).min(3) } else { s.quality.saturating_sub(1) },
+        7 => s.shadows = !s.shadows, 8 => s.shake = (s.shake + 0.25 * d).clamp(0.0, 1.5), 9 => s.damage_numbers = !s.damage_numbers, _ => s.fullscreen = !s.fullscreen,
     }
 }
 
@@ -60,14 +61,32 @@ pub fn update_settings_ui(ui: Res<UiState>, save: Res<Save>, r: Res<SettingsRefs
 /// push the saved settings into the systems that use them whenever they change
 #[allow(clippy::too_many_arguments)]
 pub fn apply_settings(save: Res<Save>, mut ctl: ResMut<Controls>, mut cr: ResMut<CamRig>, mut sfx: ResMut<crate::audio::Sfx>, mut cfg: ResMut<crate::GameCfg>,
-    mut sun: Query<&mut DirectionalLight, With<crate::scene::Sun>>, mut win: Query<&mut Window, With<PrimaryWindow>>, test: Option<Res<crate::testkit::TestCfg>>) {
+    mut sun: Query<(Entity, &mut DirectionalLight), With<crate::scene::Sun>>, mut win: Query<&mut Window, With<PrimaryWindow>>, test: Option<Res<crate::testkit::TestCfg>>,
+    mut c: Commands, cam: Query<Entity, With<crate::scene::MainCam>>, mut smap: ResMut<bevy::pbr::DirectionalLightShadowMap>, mut last_q: Local<Option<u8>>) {
     if !save.is_changed() { return; }
+    // graphics quality: ambient occlusion, god rays, anti-aliasing and shadow resolution
+    let q = save.settings.quality.min(3);
+    if *last_q != Some(q) {
+        *last_q = Some(q);
+        use bevy::core_pipeline::smaa::{Smaa, SmaaPreset};
+        use bevy::pbr::{ScreenSpaceAmbientOcclusion as Ssao, ScreenSpaceAmbientOcclusionQualityLevel as Sq, VolumetricFog, CascadeShadowConfigBuilder};
+        if let Ok(e) = cam.get_single() {
+            let mut ec = c.entity(e);
+            ec.insert(Smaa { preset: [SmaaPreset::Low, SmaaPreset::Medium, SmaaPreset::High, SmaaPreset::Ultra][q as usize] });
+            if q >= 1 { ec.insert(Ssao { quality_level: [Sq::Low, Sq::Low, Sq::Medium, Sq::High][q as usize], constant_object_thickness: 0.3 }); } else { ec.remove::<Ssao>(); }
+            if q >= 2 { ec.insert(VolumetricFog { ambient_intensity: 0.0, jitter: 0.5, step_count: if q >= 3 { 48 } else { 24 }, ..default() }); } else { ec.remove::<VolumetricFog>(); }
+        }
+        smap.size = [1024, 2048, 2048, 4096][q as usize];
+        if let Ok((e, _)) = sun.get_single() {
+            c.entity(e).insert(CascadeShadowConfigBuilder { num_cascades: if q >= 3 { 4 } else if q == 0 { 2 } else { 3 }, minimum_distance: 0.5, first_cascade_far_bound: 18.0, maximum_distance: if q == 0 { 70.0 } else { 120.0 }, overlap_proportion: 0.25 }.build());
+        }
+    }
     let s = &save.settings;
     ctl.look_scale = s.sens; ctl.invert_y = s.invert_y;
     sfx.master = s.volume; sfx.music = s.music;
     cr.base_fov = s.fov; cr.shake_mul = s.shake;
     cfg.view = s.view; cfg.damage_numbers = s.damage_numbers;
-    for mut l in sun.iter_mut() { l.shadows_enabled = s.shadows; }
+    for (_, mut l) in sun.iter_mut() { l.shadows_enabled = s.shadows; }
     if test.is_none() && std::env::var("EMBERWILD_WINDOWED").is_err() {
         if let Ok(mut w) = win.get_single_mut() { let want = if s.fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Primary) } else { WindowMode::Windowed }; if w.mode != want { w.mode = want; } }
     }
