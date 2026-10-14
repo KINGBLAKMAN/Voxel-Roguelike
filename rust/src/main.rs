@@ -10,11 +10,13 @@ mod director;
 mod enemies;
 mod fx;
 mod game;
+mod hud;
 mod mesher;
 mod models;
 mod noise;
 mod physics;
 mod player;
+mod progression;
 mod relics;
 mod scene;
 mod testkit;
@@ -56,22 +58,75 @@ fn main() {
     .init_resource::<Paused>()
     .init_resource::<Game>()
     .init_resource::<audio::Sfx>()
+    .init_resource::<hud::UiState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
-    .add_systems(Startup, (start_world, audio::setup_audio))
-    .add_systems(Update, (cursor_lock, mouse_look, game_tick, audio::play_sfx).chain());
+    .add_systems(Startup, (start_world, audio::setup_audio, hud::setup_hud))
+    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, hud::menu_camera, audio::play_sfx).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }
 
-fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>, mut p: ResMut<Player>, mut ctl: ResMut<Controls>, test: Option<Res<testkit::TestCfg>>) {
+fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>, mut p: ResMut<Player>, mut ctl: ResMut<Controls>, mut ui: ResMut<hud::UiState>, test: Option<Res<testkit::TestCfg>>) {
     let seed = test.as_ref().map(|t| t.seed).unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
     let mut w = world::Voxels::new(seed);
     let sp = w.spawn_point();
-    p.cls = test.as_ref().map(|t| t.class).unwrap_or(Class::Warrior);
     p.body.pos = sp; p.vis_y = sp.y;
-    build_player(&mut c, &mut pal, &mut mats, &mut p);
-    ctl.want_lock = true;
+    // scripted tests skip the title screen
+    if let Some(t) = test.as_ref() { if !t.menu { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
     c.insert_resource(w);
+}
+fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0) } }
+fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardMaterial>, p: &mut Player, cls: Class) {
+    let pos = p.body.pos;
+    let old = p.rig.root.take();
+    if let Some(r) = old { c.entity(r).despawn_recursive(); }
+    *p = Player::default();
+    p.cls = cls; p.body.pos = pos; p.vis_y = pos.y;
+    let (hp, _) = class_stats(cls); p.hp = hp; p.max_hp = hp; p.ghost_hp = hp;
+    build_player(c, pal, mats, p);
+}
+
+/// starting a run from the menu, and tearing one down to start again
+#[allow(clippy::too_many_arguments)]
+fn run_control(mut c: Commands, mut ui: ResMut<hud::UiState>, mut g: ResMut<Game>, mut p: ResMut<Player>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>,
+    mut fx: ResMut<fx::Fx>, w: Option<ResMut<world::Voxels>>, mut dc: ResMut<DayCycle>, mut ctl: ResMut<Controls>, mut sfx: ResMut<audio::Sfx>) {
+    if let Some(cls) = ui.start.take() {
+        begin_player(&mut c, &mut pal, &mut mats, &mut p, cls);
+        ui.screen = hud::Screen::Playing; ui.dead_t = 0.0; ui.ghost_hp = 1.0;
+        ctl.want_lock = true; ctl.relock = true;
+        sfx.play("horn");
+    }
+    if !ui.restart { return; }
+    ui.restart = false;
+    let g = &mut *g;
+    // everything the run spawned into the world goes away
+    let mut ents: Vec<Entity> = vec![];
+    for e in g.enemies.drain(..) { ents.extend(e.rig.root); ents.extend(e.ice); }
+    ents.extend(g.corpses.drain(..).map(|x| x.root));
+    ents.extend(g.pickups.drain(..).map(|x| x.e));
+    for pr in g.projs.drain(..) { ents.extend(pr.e); }
+    for z in g.zones.iter_mut() { ents.append(&mut z.ents); }
+    ents.extend(g.traps.drain(..).map(|t| t.root));
+    ents.extend(g.dir.chests.drain(..).map(|c| c.root));
+    for l in g.rel.objs.values() { ents.extend(l.iter().copied()); }
+    ents.extend(g.rel.decoys.drain(..).map(|d| d.e));
+    ents.extend(g.rel.stuck.drain(..).map(|s| s.e));
+    if let Some(ch) = g.ab.charge.take() { ents.push(ch.wedge()); }
+    for t in fx.tweens.drain(..) { ents.push(t.e); }
+    let fx = &mut *fx;
+    for d in fx.debris.drain(..) { c.entity(d.e).insert(Visibility::Hidden); fx.debris_free.push(d.e); }
+    fx.add.clear(); fx.blend.clear();
+    for e in ents { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } }
+    *g = Game::default();
+    if let Some(r) = p.rig.root.take() { c.entity(r).despawn_recursive(); }
+    // a fresh world
+    if let Some(w) = w { for ch in w.chunks.values() { for e in [ch.entity, ch.fol_entity].into_iter().flatten() { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } } } }
+    let mut nw = world::Voxels::new(rand::random::<u32>() % 1_000_000_000);
+    let sp = nw.spawn_point();
+    *p = Player::default(); p.body.pos = sp; p.vis_y = sp.y;
+    c.insert_resource(nw);
+    *dc = DayCycle::default();
+    ui.screen = hud::Screen::Menu; ui.dead_t = 0.0; ui.toast = None;
 }
 
 #[derive(SystemParam)]
@@ -106,7 +161,14 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     cx.p.firing = lmb;
     // the player
     let st = cx.g.st;
-    move_player(cx.w, cx.p, &keys, dt, st.speed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, 1.0, st.stam_max);
+    let cspeed = class_stats(cx.p.cls).1;
+    move_player(cx.w, cx.p, &keys, dt, st.speed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
+    // hunger: food keeps you going; starving bleeds health
+    if !cx.p.dead {
+        cx.p.hunger = (cx.p.hunger - dt * 100.0 / 330.0).max(0.0);
+        if cx.p.hunger <= 0.0 { let a = cx.g.flags.entry("starve").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; cx.p.hp -= 1.0; if cx.p.hp <= 0.0 { cx.kill_player(); } } }
+    }
+    if keys.just_pressed(KeyCode::KeyF) { eat(&mut cx); }
     cx.p.invuln = (cx.p.invuln - dt).max(0.0);
     cx.p.hit_t = (cx.p.hit_t - dt).max(0.0);
     cx.p.cast_kick = (cx.p.cast_kick - dt * 4.0).max(0.0);
@@ -131,10 +193,9 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     director::update_pois(&mut cx);
     relics::update_relics(&mut cx);
     augments::update_augments(&mut cx);
-    if keys.just_pressed(KeyCode::KeyE) { if let Some((_, it)) = director::find_interact(&mut cx) { director::interact(&mut cx, it); } }
-    // until the HUD drains them, keep the transient UI queues bounded
-    cx.g.popups.clear();
-    if cx.g.toasts.len() > 6 { cx.g.toasts.remove(0); }
+    let it = director::find_interact(&mut cx);
+    cx.g.flags.insert("interact", match &it { Some((_, director::Interact::Chest(_))) => 0.0, Some((_, director::Interact::Shrine(_))) => 1.0, Some((_, director::Interact::Altar(_))) => 2.0, None => -1.0 });
+    if keys.just_pressed(KeyCode::KeyE) { if let Some((_, it)) = it { director::interact(&mut cx, it); } }
     animate_player(cx.p, cx.q, dt);
     let mut ct = *cx.q.get(ce).unwrap();
     let mut rng = noise::mulberry32((time.elapsed_secs() * 1000.0) as u32);
@@ -162,6 +223,17 @@ fn update_aim(cx: &mut Ctx, ce: Entity) {
     cx.p.aim_pt = o + d * cx.p.aim_dist;
 }
 
+fn eat(cx: &mut Ctx) {
+    if cx.p.dead { return; }
+    let meat = cx.g.food_meat > 0;
+    if !meat && cx.g.food_berries == 0 { cx.toast("No food", "Hunt animals or open chests for food", 1.6); return; }
+    if cx.p.hunger >= 99.0 && cx.p.hp >= cx.p.max_hp { cx.toast("Not hungry", "", 1.0); return; }
+    let f = cx.g.st.food;
+    if meat { cx.g.food_meat -= 1; cx.p.hunger = (cx.p.hunger + 38.0 * f).min(100.0); cx.heal(12.0 * f, false); } else { cx.g.food_berries -= 1; cx.p.hunger = (cx.p.hunger + 16.0 * f).min(100.0); cx.heal(4.0 * f, false); }
+    cx.play("eat");
+    let p = cx.p.body.pos + Vec3::Y * 1.6; cx.fx.burst(p, if meat { 0xd06a6a } else { 0xd23a4e }, 10, 2.0, 0.4, 0.2, 0.0, 8.0);
+}
+
 fn test_act(cx: &mut Ctx, a: &str) {
     let (k, v) = a.split_once('=').unwrap_or((a, ""));
     match k {
@@ -179,6 +251,7 @@ fn test_act(cx: &mut Ctx, a: &str) {
         }
         "pitch" => { cx.p.pitch = v.parse().unwrap_or(0.0); }
         "yaw" => { cx.p.yaw = v.parse().unwrap_or(0.0); }
+        "lvl" => { let n = cx.g.xp_need(); cx.gain_xp(n); }
         "mod" => { *cx.g.mods.entry(v.to_string()).or_insert(0) += 1; }
         "minutes" => { cx.g.run_t = v.parse::<f32>().unwrap_or(5.0) * 60.0; }
         "weapon" => { cx.p.widx = v.parse().unwrap_or(0); attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }

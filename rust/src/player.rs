@@ -66,11 +66,12 @@ pub fn attach_weapon(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<Stan
 }
 
 #[derive(Resource, Default)]
-pub struct Controls { pub locked: bool, pub lock_t: f32, pub want_lock: bool, pub look_scale: f32 }
+pub struct Controls { pub locked: bool, pub lock_t: f32, pub want_lock: bool, pub look_scale: f32, pub relock: bool }
 
 pub fn cursor_lock(mut win: Query<&mut Window, With<PrimaryWindow>>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<ButtonInput<KeyCode>>, mut ctl: ResMut<Controls>, time: Res<Time>) {
     let Ok(mut w) = win.get_single_mut() else { return };
-    if ctl.want_lock && mouse.just_pressed(MouseButton::Left) && !ctl.locked {
+    if ctl.want_lock && (mouse.just_pressed(MouseButton::Left) || ctl.relock) && !ctl.locked {
+        ctl.relock = false;
         w.cursor_options.grab_mode = CursorGrabMode::Locked; w.cursor_options.visible = false; ctl.locked = true; ctl.lock_t = time.elapsed_secs();
     }
     if (keys.just_pressed(KeyCode::Escape) || !ctl.want_lock) && ctl.locked {

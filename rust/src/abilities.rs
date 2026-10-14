@@ -70,6 +70,7 @@ pub const WMODS: [(&str, &str, &str, &str, u32); 24] = [
 #[derive(Default)]
 pub struct AbState { pub charge: Option<ChargeSt>, pub roll: Option<RollSt>, pub slam: Option<SlamSt> }
 pub struct ChargeSt { hit: Vec<u32>, drop: f32, ruin: bool, wave: bool, wedge: Entity, dust: f32 }
+impl ChargeSt { pub fn wedge(&self) -> Entity { self.wedge } }
 pub struct RollSt { hit: Vec<u32>, dance: bool }
 #[derive(Clone, Copy)]
 pub struct SlamSt { to: Vec3, r: f32, stun: f32, after: u32, fis: bool }

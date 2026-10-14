@@ -7,12 +7,12 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 #[derive(Resource, Clone)]
-pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32 }
+pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool }
 
 impl TestCfg {
     pub fn from_env() -> Option<Self> {
         let s = std::env::var("EW_TEST").ok()?;
-        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0 };
+        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false };
         for kv in s.split(';') {
             let Some((k, v)) = kv.split_once('=') else { continue };
             match k {
@@ -24,6 +24,7 @@ impl TestCfg {
                 "shot" => if let Some((f, p)) = v.split_once(':') { t.shots.push((f.parse().unwrap_or(60), p.to_string())) },
                 "act" => if let Some((f, a)) = v.split_once(':') { t.acts.push((f.parse().unwrap_or(10), a.to_string())) },
                 "exit" => t.exit = v.parse().unwrap_or(200),
+                "menu" => t.menu = true,
                 _ => {}
             }
         }
