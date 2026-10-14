@@ -149,7 +149,7 @@ fn crack_tex(images: &mut Assets<Image>) -> Handle<Image> {
 
 pub struct FxPlugin;
 impl Plugin for FxPlugin {
-    fn build(&self, app: &mut App) { app.add_systems(Startup, setup_fx).add_systems(PostUpdate, (update_fx, face_camera, render_particles).chain().before(bevy::transform::TransformSystem::TransformPropagate)); }
+    fn build(&self, app: &mut App) { app.add_systems(Startup, setup_fx).add_systems(Update, ambient).add_systems(PostUpdate, (update_fx, face_camera, render_particles).chain().before(bevy::transform::TransformSystem::TransformPropagate)); }
 }
 
 fn open_cyl(seg: usize) -> Mesh {
@@ -418,4 +418,36 @@ pub fn face_camera(cam: Query<&Transform, (With<crate::scene::MainCam>, Without<
     // quads are XZ planes: tip their normal (+Y) toward the camera
     let r = Quat::from_rotation_arc(Vec3::Y, -ct.forward().as_vec3());
     for mut t in q.iter_mut() { t.rotation = r; }
+}
+
+/// life in the air around the camera: fireflies over grass at night, sunlit pollen by day, leaves drifting down in forests
+fn ambient(time: Res<Time>, mut fx: ResMut<Fx>, w: Option<Res<Voxels>>, dc: Res<crate::scene::DayCycle>, cam: Query<&Transform, With<crate::scene::MainCam>>, mut acc: Local<f32>, paused: Option<Res<crate::Paused>>) {
+    if paused.map(|p| p.0).unwrap_or(false) { return; }
+    let (Some(w), Ok(ct)) = (w, cam.get_single()) else { return };
+    let fx = &mut *fx;
+    *acc += time.delta_secs().min(0.1);
+    let cp = ct.translation;
+    while *acc > 0.05 {
+        *acc -= 0.05;
+        let (x, z) = (cp.x + fx.rr(-22.0, 22.0), cp.z + fx.rr(-22.0, 22.0));
+        let col = w.column(x.floor() as i32, z.floor() as i32);
+        if col.h <= crate::world::SEA { continue; }
+        let gy = col.h as f32 + 1.0;
+        let green = matches!(col.b, crate::world::Bio::Plains | crate::world::Bio::Forest);
+        if dc.daylight < 0.35 {
+            if green && fx.r() < 0.8 {
+                let c = Vec3::new(0.75, 1.0, 0.3) * fx.rr(4.0, 8.0);
+                let v = Vec3::new(fx.rr(-0.4, 0.4), fx.rr(-0.1, 0.25), fx.rr(-0.4, 0.4));
+                fx.emit(true, Vec3::new(x, gy + fx.rr(0.3, 2.2), z), v, fx.rr(2.5, 5.0), 0.1, 0.05, c, -0.04, 0.3, 1.0);
+            }
+        } else {
+            let (mx, mz) = (cp.x + fx.rr(-9.0, 9.0), cp.z + fx.rr(-9.0, 9.0));
+            let c = Vec3::new(1.0, 0.92, 0.7) * 1.4 * dc.daylight;
+            fx.emit(true, Vec3::new(mx, cp.y + fx.rr(-3.0, 2.0), mz), Vec3::new(fx.rr(0.1, 0.4), fx.rr(-0.05, 0.08), fx.rr(-0.1, 0.2)), fx.rr(3.0, 6.0), 0.035, 0.03, c, 0.0, 0.1, 0.8);
+        }
+        if col.b == crate::world::Bio::Forest && fx.r() < 0.45 {
+            let leaf = [0x4a8a30, 0x6aa840, 0xd4772a, 0xe8b04a][(fx.r() * 4.0) as usize % 4];
+            fx.emit(false, Vec3::new(x, gy + fx.rr(4.0, 8.0), z), Vec3::new(fx.rr(0.3, 0.9), fx.rr(-0.8, -0.4), fx.rr(-0.3, 0.3)), fx.rr(5.0, 8.0), 0.13, 0.11, hexc(leaf), 0.15, 0.6, 1.0);
+        }
+    }
 }

@@ -47,8 +47,11 @@ impl Material for WaterMaterial {
     }
 }
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
-pub struct WindExt { #[uniform(100)] pub wind: Vec4 }
-impl MaterialExtension for WindExt { fn vertex_shader() -> ShaderRef { WIND_SHADER.into() } fn prepass_vertex_shader() -> ShaderRef { WIND_SHADER.into() } }
+pub struct WindExt { #[uniform(100)] pub wind: Vec4, #[texture(101, dimension = "2d_array")] #[sampler(102)] pub cards: Handle<Image> }
+impl MaterialExtension for WindExt {
+    fn vertex_shader() -> ShaderRef { WIND_SHADER.into() } fn prepass_vertex_shader() -> ShaderRef { WIND_SHADER.into() }
+    fn fragment_shader() -> ShaderRef { WIND_SHADER.into() } fn prepass_fragment_shader() -> ShaderRef { WIND_SHADER.into() }
+}
 pub type FoliageMaterial = ExtendedMaterial<StandardMaterial, WindExt>;
 /// block faces: albedo and normal/roughness texture arrays indexed by the face's layer
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
@@ -108,7 +111,9 @@ fn setup_scene(mut c: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResM
     let (albedo, normal) = crate::textures::build(&mut images);
     let chunk_mat = ter_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.92, reflectance: 0.12, ..default() }, extension: TerrainExt { albedo: albedo.clone(), normal: normal.clone() } });
     let glow_mat = ter_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() }, extension: TerrainExt { albedo, normal } });
-    let fol_mat = fol_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, double_sided: false, cull_mode: None, ..default() }, extension: WindExt { wind: Vec4::new(1.0, 0.0, 0.0, 0.0) } });
+    let cards = crate::textures::build_foliage(&mut images);
+    let fol_mat = fol_m.add(ExtendedMaterial { base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.8, double_sided: true, cull_mode: None, alpha_mode: AlphaMode::Mask(0.5), diffuse_transmission: 0.12, ..default() },
+        extension: WindExt { wind: Vec4::new(1.0, 0.0, 0.0, 0.0), cards } });
     let sky = sky_m.add(SkyMaterial { u: SkyU::default() });
     let water = water_m.add(WaterMaterial { u: WaterU::default() });
     c.spawn((Mesh3d(meshes.add(Sphere::new(900.0).mesh().uv(48, 24))), MeshMaterial3d(sky.clone()), Transform::default(), NotShadowCaster, NotShadowReceiver, SkyDome));
@@ -207,7 +212,7 @@ pub fn stream_chunks(mut c: Commands, world: Option<ResMut<Voxels>>, cfg: Res<Ga
         let root = c.spawn((Transform::default(), Visibility::default(), ChunkMesh)).id();
         if !m.solid.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.solid.into_mesh())), MeshMaterial3d(h.chunk_mat.clone()), Transform::default())).id(); c.entity(root).add_child(e); }
         if !m.glow.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.glow.into_mesh())), MeshMaterial3d(h.glow_mat.clone()), Transform::default(), NotShadowCaster)).id(); c.entity(root).add_child(e); }
-        if !m.foliage.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.foliage.into_mesh())), MeshMaterial3d(h.fol_mat.clone()), Transform::default(), NotShadowCaster)).id(); c.entity(root).add_child(e); }
+        if !m.foliage.is_empty() { let e = c.spawn((Mesh3d(meshes.add(m.foliage.into_mesh())), MeshMaterial3d(h.fol_mat.clone()), Transform::default())).id(); c.entity(root).add_child(e); }
         ch.entity = Some(root);
         ch.dirty = false;
     }

@@ -130,8 +130,8 @@ fn stone(pal: &[u32], s: u32, cracks: f32) -> Tex {
         let n = fbm(x as f32, y as f32, 3, 3, s) * 0.8 + h(x, y, s + 1) * 0.2;
         *c = pick(pal, n); *hh = 0.5 + n * 0.4;
         let (f1, f2, _) = cells.at(x as f32 + 0.5, y as f32 + 0.5);
-        let show = vn(x as f32, y as f32, 2, 2, s + 9) > 0.42;
-        if show && f2 - f1 < cracks * 0.6 { *c *= 0.7; *hh = 0.15; } else if show && f2 - f1 < cracks * 0.6 + 1.0 { *c *= 1.04; *hh = 0.7; }
+        let show = vn(x as f32, y as f32, 2, 2, s + 9) > 0.56;
+        if show && f2 - f1 < cracks * 0.5 { *c *= 0.78; *hh = 0.2; } else if show && f2 - f1 < cracks * 0.6 + 1.0 { *c *= 1.04; *hh = 0.7; }
     });
     t
 }
@@ -390,4 +390,169 @@ pub fn build(images: &mut Assets<Image>) -> (Handle<Image>, Handle<Image>) {
         img
     };
     (images.add(mk(alb, TextureFormat::Rgba8UnormSrgb)), images.add(mk(nrm, TextureFormat::Rgba8Unorm)))
+}
+
+// ---------------- foliage cards: 64px with alpha ----------------
+pub const FN: usize = 64;
+const FF: f32 = FN as f32;
+/// foliage card layers
+pub mod fl {
+    pub const GRASS: u32 = 0; pub const REEDS: u32 = 1; pub const PETALS: u32 = 2; pub const FERN: u32 = 3; pub const LEAVES: u32 = 4;
+    pub const NEEDLES: u32 = 5; pub const LILY: u32 = 6; pub const SOLID: u32 = 7; pub const BERRIES: u32 = 8; pub const AUTUMN: u32 = 9;
+    pub const COUNT: u32 = 10;
+}
+struct Card { c: Vec<Vec4> }
+impl Card {
+    fn new() -> Self { Card { c: vec![Vec4::ZERO; FN * FN] } }
+    fn put(&mut self, x: i32, y: i32, c: Vec3) { if x >= 0 && y >= 0 && (x as usize) < FN && (y as usize) < FN { self.c[y as usize * FN + x as usize] = c.extend(1.0); } }
+    /// a filled ellipse with its long axis along `a`; `f` colours each pixel from (along, across, edge) in -1..1
+    fn leaf(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, a: f32, f: &dyn Fn(f32, f32, f32) -> Vec3) {
+        let (ca, sa) = (a.cos(), a.sin()); let r = rx.max(ry).ceil() as i32 + 1;
+        for dy in -r..=r { for dx in -r..=r {
+            let (px, py) = (cx.floor() as i32 + dx, cy.floor() as i32 + dy);
+            let (ox, oy) = (px as f32 + 0.5 - cx, py as f32 + 0.5 - cy);
+            let (u, v) = ((ox * ca + oy * sa) / rx, (-ox * sa + oy * ca) / ry);
+            // pointed at both ends
+            let w = 1.0 - u.abs().powf(1.6);
+            if u.abs() > 1.0 || v.abs() > w { continue; }
+            self.put(px, py, f(u, v, (v.abs() / w.max(0.01)).min(1.0)));
+        } }
+    }
+    fn line(&mut self, a: Vec2, b: Vec2, w0: f32, w1: f32, c: &dyn Fn(f32) -> Vec3) {
+        let steps = ((b - a).length() * 2.0).ceil() as i32;
+        for i in 0..=steps { let t = i as f32 / steps.max(1) as f32; let p = a.lerp(b, t); let w = w0 + (w1 - w0) * t;
+            let r = w.ceil() as i32; for dy in -r..=r { for dx in -r..=r { if ((dx * dx + dy * dy) as f32).sqrt() <= w * 0.5 + 0.35 { self.put(p.x as i32 + dx, p.y as i32 + dy, c(t)); } } } }
+    }
+}
+fn blades(n: usize, tall: f32, wide: f32, s: u32) -> Card {
+    let mut c = Card::new();
+    let mut rng = crate::noise::mulberry32(s);
+    for k in 0..n {
+        let bx = 6.0 + rng() * (FF - 12.0); let hgt = FF * (tall * (0.55 + rng() * 0.45)); let lean = (rng() - 0.5) * 0.9; let w = wide * (0.8 + rng() * 0.5);
+        let shade = 0.75 + rng() * 0.25;
+        let rows = hgt as i32;
+        for r in 0..rows {
+            let t = r as f32 / hgt; let x = bx + lean * t * t * hgt * 0.6; let half = (w * (1.0 - t).powf(0.8)).max(0.35);
+            for px in (x - half).floor() as i32..=(x + half).ceil() as i32 {
+                let e = ((px as f32 + 0.5 - x) / half).abs(); if e > 1.0 { continue; }
+                let lum = shade * (0.8 + 0.2 * t) * (1.0 - e * 0.2) * if k % 3 == 0 { 0.92 } else { 1.0 };
+                c.put(px, FN as i32 - 1 - r, Vec3::splat(lum));
+            }
+        }
+    }
+    c
+}
+fn leaf_cluster(pal: &[u32], n: usize, s: u32, berries: bool) -> Card {
+    let mut c = Card::new();
+    let mut rng = crate::noise::mulberry32(s);
+    // a few twigs underneath
+    for _ in 0..4 { let a = rng() * std::f32::consts::TAU; let p = Vec2::new(32.0, 32.0); c.line(p, p + Vec2::new(a.cos(), a.sin()) * 22.0, 2.0, 0.8, &|_| hx(0x4a3020)); }
+    for _ in 0..n {
+        let ang = rng() * std::f32::consts::TAU; let rad = rng().sqrt() * 26.0;
+        let (cx, cy) = (32.0 + ang.cos() * rad, 32.0 + ang.sin() * rad);
+        let a = ang + (rng() - 0.5) * 1.2; let (rx, ry) = (4.5 + rng() * 3.0, 2.2 + rng() * 1.2);
+        let base = pick(pal, 0.2 + rng() * 0.6); let lit = (0.55 - (cx + cy - 64.0) / 90.0).clamp(0.0, 1.0);
+        c.leaf(cx, cy, rx, ry, a, &|u, v, e| { let mut col = base * (0.78 + 0.4 * lit) * (1.0 - e * 0.18); if v.abs() < 0.12 && u.abs() < 0.85 { col *= 0.8; } col });
+    }
+    if berries {
+        for _ in 0..8 {
+            let ang = rng() * std::f32::consts::TAU; let rad = rng().sqrt() * 22.0;
+            let (cx, cy) = (32.0 + ang.cos() * rad, 32.0 + ang.sin() * rad);
+            for (ox, oy) in [(0.0, 0.0), (3.5, 1.5), (1.0, 3.5)] {
+                c.leaf(cx + ox, cy + oy, 1.9, 1.9, 0.0, &|u, v, _| if u < -0.2 && v < -0.2 { hx(0xffb0b8) } else { hx(0xc81c34) * (1.0 - 0.3 * (u + v).max(0.0)) });
+            }
+        }
+    }
+    c
+}
+fn fern(s: u32) -> Card {
+    let mut c = Card::new();
+    let mut rng = crate::noise::mulberry32(s);
+    let pts: Vec<Vec2> = (0..=20).map(|i| { let t = i as f32 / 20.0; Vec2::new(32.0 + (t * t) * 10.0, 63.0 - t * 60.0) }).collect();
+    for i in 0..20 { c.line(pts[i], pts[i + 1], 2.2, 1.6, &|_| hx(0x3a6a22)); }
+    for i in 2..20 {
+        let t = i as f32 / 20.0; let p = pts[i]; let len = 13.0 * (1.0 - t * 0.75);
+        for side in [-1.0f32, 1.0] {
+            let a = if side < 0.0 { std::f32::consts::PI + 0.35 } else { -0.35 } - t * 0.3 * side;
+            let ctr = p + Vec2::new(a.cos(), a.sin()) * len * 0.5;
+            let shade = 0.85 + rng() * 0.25;
+            c.leaf(ctr.x, ctr.y, len * 0.55, 2.4, a, &|_, _, e| pick(&[0x2e5e20, 0x4a8a30, 0x6aa840], 0.3 + 0.5 * (1.0 - e)) * shade);
+        }
+    }
+    c
+}
+fn needle_branch(s: u32) -> Card {
+    let mut c = Card::new();
+    let mut rng = crate::noise::mulberry32(s);
+    for b in 0..5 {
+        let a0 = Vec2::new(8.0 + rng() * 48.0, 8.0 + rng() * 48.0); let dir = Vec2::new(rng() - 0.5, rng() - 0.5).normalize_or_zero(); let a1 = a0 + dir * (18.0 + rng() * 12.0);
+        c.line(a0, a1, 1.6, 0.8, &|_| hx(0x3a2a1a));
+        for i in 0..14 {
+            let p = a0.lerp(a1, i as f32 / 14.0); let n = Vec2::new(-dir.y, dir.x);
+            for side in [-1.0f32, 1.0] { let tip = p + (n * side + dir * 0.6).normalize() * (6.0 + rng() * 4.0); let col = pick(&[0x14321e, 0x2b5d36, 0x4a8a58], rng()); c.line(p, tip, 1.2, 0.6, &|_| col); }
+        }
+        let _ = b;
+    }
+    c
+}
+fn lily(s: u32) -> Card {
+    let mut c = Card::new();
+    for y in 0..FN as i32 { for x in 0..FN as i32 {
+        let d = Vec2::new(x as f32 + 0.5 - 32.0, y as f32 + 0.5 - 32.0); let a = d.y.atan2(d.x);
+        if d.length() > 30.0 || (a > 1.3 && a < 1.75) { continue; }
+        let vein = ((a * 7.0).sin().abs() < 0.08) as i32 as f32;
+        c.put(x, y, pick(&[0x2e6a2a, 0x4a9a3a, 0x6ab84a], 0.4 + d.length() / 80.0 + hash2(x, y, s) * 0.1) * (1.0 - vein * 0.2));
+    } }
+    c
+}
+fn petals(s: u32) -> Card {
+    let mut c = Card::new();
+    let mut rng = crate::noise::mulberry32(s);
+    for i in 0..6 { let a = i as f32 / 6.0 * std::f32::consts::TAU + rng() * 0.2; let ctr = Vec2::new(32.0, 30.0) + Vec2::new(a.cos(), a.sin()) * 11.0;
+        c.leaf(ctr.x, ctr.y, 12.0, 7.0, a, &|u, _, e| Vec3::splat(0.82 + 0.18 * (1.0 - e)) * (0.9 + 0.1 * u)); }
+    c.leaf(32.0, 30.0, 5.0, 5.0, 0.0, &|_, _, _| hx(0xffe070));
+    c
+}
+
+/// the foliage card texture array (sRGB albedo with an alpha cut-out)
+pub fn build_foliage(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut cards = vec![];
+    for i in 0..fl::COUNT {
+        let s = 5000 + i * 131;
+        cards.push(match i {
+            fl::GRASS => blades(16, 0.95, 2.6, s), fl::REEDS => blades(7, 1.0, 1.8, s), fl::PETALS => petals(s), fl::FERN => fern(s),
+            fl::LEAVES => leaf_cluster(&[0x1e4a1a, 0x2e6a26, 0x3f8a2f, 0x5aa83c, 0x7cc050], 75, s, false),
+            fl::BERRIES => leaf_cluster(&[0x1e4a1a, 0x2a6224, 0x3a7a2c, 0x52983a, 0x6ab048], 70, s, true),
+            fl::AUTUMN => leaf_cluster(&[0x7a2a12, 0xa84a1a, 0xd4772a, 0xe89a3a, 0xf4c25a], 75, s, false),
+            fl::NEEDLES => needle_branch(s), fl::LILY => lily(s),
+            _ => { let mut c = Card::new(); for p in c.c.iter_mut() { *p = Vec4::ONE; } c }
+        });
+    }
+    let mips = 7;
+    let mut data = vec![];
+    for card in &cards {
+        let mut v = card.c.clone(); let mut size = FN;
+        for m in 0..mips {
+            // keep cut-out coverage in the distance by lifting alpha on smaller mips
+            let boost = 1.0 + m as f32 * 0.35;
+            for p in &v {
+                let rgb = if p.w > 0.0 { p.truncate() / p.w.max(1e-4) } else { Vec3::ZERO };
+                data.extend_from_slice(&[(rgb.x.clamp(0.0, 1.0) * 255.0) as u8, (rgb.y.clamp(0.0, 1.0) * 255.0) as u8, (rgb.z.clamp(0.0, 1.0) * 255.0) as u8, ((p.w * boost).clamp(0.0, 1.0) * 255.0) as u8]);
+            }
+            if m + 1 == mips { break; }
+            let half = size / 2;
+            // premultiplied average so transparent texels don't darken the edges
+            let pm: Vec<Vec4> = v.iter().map(|p| (p.truncate() * p.w).extend(p.w)).collect();
+            v = (0..half * half).map(|i| { let (x, y) = (i % half * 2, i / half * 2); (pm[y * size + x] + pm[y * size + x + 1] + pm[(y + 1) * size + x] + pm[(y + 1) * size + x + 1]) * 0.25 }).collect();
+            size = half;
+        }
+    }
+    let mut img = Image::new(Extent3d { width: FN as u32, height: FN as u32, depth_or_array_layers: fl::COUNT }, TextureDimension::D2, vec![0; FN * FN * 4 * fl::COUNT as usize], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    img.data = data;
+    img.texture_descriptor.mip_level_count = mips as u32;
+    img.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
+    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: ImageAddressMode::ClampToEdge, address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear, min_filter: ImageFilterMode::Linear, mipmap_filter: ImageFilterMode::Linear, ..default() });
+    let _ = FF;
+    images.add(img)
 }
