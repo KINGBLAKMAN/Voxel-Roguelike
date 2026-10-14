@@ -36,14 +36,14 @@ pub struct Game {
     pub next_id: u32, pub run_t: f32, pub kills: u32, pub hitstop: f32, pub st: Stats, pub mods: HashMap<String, u32>, pub perks: Vec<String>,
     pub lvl: u32, pub xp: f32, pub cds: [f32; 4], pub atk_t: f32, pub buffs: HashMap<&'static str, f32>, pub food_meat: u32, pub food_berries: u32,
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
-    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>,
+    pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>, pub ev: crate::events::EventState, pub prompt: String,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![] }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new() }
     }
 }
 impl Game {
@@ -123,6 +123,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         let e = &mut self.g.enemies[i];
         if e.dead || e.ai.hidden { return; }
         e.hp -= a; e.flash = 0.1; e.hit_p = 0.14; e.alert = true;
+        let goblin = e.kind == Kind::Goblin; let gp = e.body.pos + Vec3::Y;
         if e.t.passive { e.flee = 4.0; }
         if let Some(src) = o.src { if o.kb > 0.0 && !e.elite && !e.t.prop {
             let kr = e.t.kb_res;
@@ -132,7 +133,9 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
             e.body.vel.x += d.x; e.body.vel.z += d.z;
             e.body.vel.y = e.body.vel.y.max(if o.up > 0.0 { o.up * (1.0 - kr) } else { (o.kb * 0.6).min(5.0) * (1.0 - kr) });
         } }
-        if e.hp <= 0.0 { kill_enemy(self, i, false, false); }
+        let dead = e.hp <= 0.0;
+        if goblin && !dead && self.r() < 0.35 { self.drop_pick(gp, PickKind::Gold, 1.0); }
+        if dead { kill_enemy(self, i, false, false); }
     }
     pub fn status(&mut self, i: usize, s: Status) {
         if i >= self.g.enemies.len() { return; }

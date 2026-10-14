@@ -15,7 +15,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp }
+pub enum Screen { Menu, Playing, LevelUp, Paused, Dead, Victory, Camp, Shop }
 
 #[derive(Resource)]
 pub struct UiState {
@@ -29,7 +29,7 @@ impl Default for UiState {
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize) }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -239,7 +239,8 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
             if clicked == Some(UiBtn::EmberDown) && save.ember > 0 { save.ember -= 1; save.write(); sfx.play("pick"); }
         }
         Screen::Playing => {
-            if keys.just_pressed(KeyCode::Escape) && !g.over { ui.screen = Screen::Paused; sfx.play("pick"); }
+            if g.flags.remove("open_shop").is_some() { ui.screen = Screen::Shop; sfx.play("chest"); }
+            else if keys.just_pressed(KeyCode::Escape) && !g.over { ui.screen = Screen::Paused; sfx.play("pick"); }
             else if (g.level_pending > 0 || g.chest_pending > 0) && !g.over && !p.dead {
                 ui.relic_only = g.level_pending == 0 && g.flags.remove("relic_chest").is_some();
                 ui.screen = Screen::LevelUp; ui.cards_dirty = true; p.charging = false; sfx.play("level");
@@ -269,6 +270,14 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
             if clicked == Some(UiBtn::Quit) { exit.send(AppExit::Success); }
         }
         Screen::Dead => { if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; } }
+        Screen::Shop => {
+            if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyE) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Playing; ctl.relock = true; }
+            let mut pick = None;
+            for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { pick = Some(i); } }
+            if let Some(UiBtn::ShopBuy(i)) = clicked { pick = Some(i); }
+            if let Some(i) = pick { let (gg, pp) = (&mut *g, &mut *p); sfx.play(if crate::events::buy(gg, pp, i) { "chest" } else { "hurt" }); }
+            if (g.level_pending > 0 || g.chest_pending > 0) && ui.screen == Screen::Shop { ui.relic_only = g.level_pending == 0 && g.flags.remove("relic_chest").is_some(); ui.screen = Screen::LevelUp; ui.cards_dirty = true; }
+        }
         Screen::Camp => {
             if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Menu; }
             if let Some(UiBtn::Buy(i)) = clicked { sfx.play(if save.buy(i) { "relic" } else { "hurt" }); }
@@ -307,6 +316,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_vis(&mut q, r.menu, scr == Screen::Menu);
     set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp));
     set_vis(&mut q, r.level, scr == Screen::LevelUp);
+    set_vis(&mut q, r.hud, !matches!(scr, Screen::Menu | Screen::Camp | Screen::Shop));
     set_vis(&mut q, r.pause, scr == Screen::Paused);
     set_vis(&mut q, r.dead, scr == Screen::Dead);
     set_vis(&mut q, r.victory, scr == Screen::Victory);
@@ -357,6 +367,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     let mut bl = vec![];
     for (k, n) in [("cry", "Battle Cry"), ("shield", "Divine Shield"), ("shrine", "Blessed"), ("hot", "Renewing"), ("haste", "Haste")] { let v = g.buff(k); if v > 0.0 { bl.push(format!("{}  {:.0}s", n, v.ceil())); } }
     if g.dir.trial.is_some() { bl.push(format!("Altar trial  {:.0}s", g.dir.trial.as_ref().unwrap().t.max(0.0))); }
+    bl.extend(crate::events::status(&g));
     if p.hunger <= 0.0 { bl.push("Starving".into()); } else if p.hunger > 75.0 { bl.push("Well fed".into()); }
     set_text(&mut q, r.buffs, &bl.join("\n"));
     let rl: Vec<String> = crate::relics::RELICS.iter().filter_map(|x| { let k = crate::relics::rk(&g, x.id); if crate::relics::ev(&g, x.id) { crate::relics::EVOS.iter().find(|e| e.0 == x.id).map(|e| format!("{}  *", e.3)) } else if k > 0 { Some(format!("{}  {}", x.name, "I".repeat(k as usize))) } else { None } }).collect();
@@ -370,8 +381,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_bg(&mut q, r.flash, col(0xfff0c0, (g.flash * 2.0).min(0.5)));
     set_border(&mut q, r.hurt, col(0xb01020, (p.hit_t * 1.6).min(0.5) + if hp < 0.25 && !p.dead { 0.25 + 0.1 * (time.elapsed_secs() * 4.0).sin() } else { 0.0 }));
     // interact prompt
-    let it = g.flags.get("interact").copied().unwrap_or(-1.0);
-    set_text(&mut q, r.interact, match it as i32 { 0 => "[E]  Open chest", 1 => "[E]  Pray at the shrine", 2 => "[E]  Awaken the altar: survive its trial for a relic", _ => "" });
+    let prompt = g.prompt.clone(); set_text(&mut q, r.interact, &prompt);
     // damage numbers rise and fade over the world
     if let Ok((camera, ct)) = cam.get_single() {
         for pu in g.popups.drain(..) {

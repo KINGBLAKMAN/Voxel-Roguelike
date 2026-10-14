@@ -10,7 +10,7 @@ use std::f32::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind { Zombie, Skeleton, Slime, Spider, Cultist, Golem, Bat, Bloater, Brute, Urn, Pig, Sheep, Chicken,
-    Spiderling, Gorehorn, Shieldbearer, Shaman, Imp, Necromancer, Wurm, FrostGiant, Colossus, Broodmother, EmberKing }
+    Spiderling, Gorehorn, Shieldbearer, Shaman, Imp, Necromancer, Wurm, FrostGiant, Colossus, Broodmother, EmberKing, Goblin }
 pub struct EType { pub name: &'static str, pub hp: f32, pub dmg: f32, pub speed: f32, pub reach: f32, pub cd: f32, pub wind: f32, pub xp: f32, pub w: f32, pub h: f32,
     pub ranged: bool, pub range: f32, pub passive: bool, pub prop: bool, pub fly: bool, pub kb_res: f32, pub elite: bool, pub blood: &'static [u32] }
 pub const fn et(name: &'static str, hp: f32, dmg: f32, speed: f32, xp: f32, w: f32, h: f32, blood: &'static [u32]) -> EType {
@@ -191,8 +191,9 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let mut sc = if k == Kind::Brute { 1.55 } else { crate::horde::scale(k) };
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
+    let curse = if cx.g.flags.contains_key("curse") { 1.4 } else { 1.0 };
     let boss_hp = (1.0 + mi * 0.05) * cx.g.mods_hp() * if cx.g.ember() >= 5 { 1.4 } else { 1.0 } * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
-    let mut hp = t.hp * if quiet { 1.0 } else if o.boss { boss_hp } else { diff } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
+    let mut hp = t.hp * if quiet { 1.0 } else if o.boss { boss_hp } else { diff * curse } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
     let mut dmg = t.dmg * (0.75 + mi * 0.07) * 1.02f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.05) * cx.g.mods_dmg();
     let mut speed_mul = if quiet { 1.0 } else { (1.0 + (mi * 0.02).min(0.3)) * if cx.g.ember() >= 9 { 1.15 } else { 1.0 } };
     if let Some(a) = o.affix { hp *= 2.6; dmg *= 1.3; if a == Affix::Swift { speed_mul *= 1.5; } if a == Affix::Brute { hp *= 1.5; } let s = if a == Affix::Brute { 1.4 } else { 1.2 }; sc *= s; w *= s; h *= s; }

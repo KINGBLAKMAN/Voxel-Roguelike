@@ -24,13 +24,14 @@ pub static WURM: EType = EType { kb_res: 1.0, reach: 2.4, ..et("Sand Wurm", 170.
 pub static FROST_GIANT: EType = EType { kb_res: 0.85, reach: 3.2, cd: 2.6, wind: 1.0, ..et("Frost Giant", 340.0, 24.0, 2.7, 24.0, 0.8, 3.6, &[0x8ab8d8, 0xbff4ff]) };
 pub static COLOSSUS: EType = EType { kb_res: 1.0, elite: true, ..et("Bone Colossus", 2600.0, 18.0, 2.5, 160.0, 1.2, 5.6, &[0xe8e4d8, 0xc8c2b0, 0x9a5aff]) };
 pub static BROOD: EType = EType { kb_res: 1.0, elite: true, reach: 3.0, cd: 1.3, ..et("Broodmother", 3600.0, 20.0, 3.7, 200.0, 1.5, 2.2, &[0x2a1a24, 0xff3a3a, 0x6a2a2a]) };
+pub static GOBLIN: EType = EType { passive: true, ..et("Treasure Goblin", 220.0, 0.0, 3.6, 0.0, 0.35, 1.1, &[0xffd35a, 0x6a9a3a]) };
 pub static KING: EType = EType { kb_res: 1.0, elite: true, reach: 5.0, ..et("The Ember King", 9000.0, 30.0, 3.1, 400.0, 1.2, 5.0, &[0x2a1a14, 0xffa040, 0xff5a1a]) };
 
 pub fn etype(k: Kind) -> Option<&'static EType> {
     Some(match k { Kind::Spiderling => &SPIDERLING, Kind::Gorehorn => &GOREHORN, Kind::Shieldbearer => &SHIELDBEARER, Kind::Shaman => &SHAMAN, Kind::Imp => &IMP,
-        Kind::Necromancer => &NECRO, Kind::Wurm => &WURM, Kind::FrostGiant => &FROST_GIANT, Kind::Colossus => &COLOSSUS, Kind::Broodmother => &BROOD, Kind::EmberKing => &KING, _ => return None })
+        Kind::Necromancer => &NECRO, Kind::Wurm => &WURM, Kind::FrostGiant => &FROST_GIANT, Kind::Colossus => &COLOSSUS, Kind::Broodmother => &BROOD, Kind::EmberKing => &KING, Kind::Goblin => &GOBLIN, _ => return None })
 }
-pub fn scale(k: Kind) -> f32 { match k { Kind::Spiderling => 0.5, Kind::Shaman => 0.85, Kind::FrostGiant => 1.9, Kind::Colossus => 3.0, Kind::Broodmother => 2.6, Kind::EmberKing => 2.7, Kind::Shieldbearer => 1.08, _ => 1.0 } }
+pub fn scale(k: Kind) -> f32 { match k { Kind::Spiderling => 0.5, Kind::Goblin => 0.65, Kind::Shaman => 0.85, Kind::FrostGiant => 1.9, Kind::Colossus => 3.0, Kind::Broodmother => 2.6, Kind::EmberKing => 2.7, Kind::Shieldbearer => 1.08, _ => 1.0 } }
 pub fn flies(k: Kind) -> bool { k == Kind::Imp }
 pub fn kind_by_name(s: &str) -> Option<Kind> {
     Some(match s { "zombie" => Kind::Zombie, "skeleton" => Kind::Skeleton, "spider" => Kind::Spider, "golem" => Kind::Golem, "spiderling" => Kind::Spiderling, "gorehorn" => Kind::Gorehorn,
@@ -154,6 +155,16 @@ pub fn model(b: &mut Builder, k: Kind, pos: Vec3, rng: &mut impl FnMut() -> f32)
             let sw = b.pivot(hr, v(0.0, -0.05, 0.0)); b.rot(sw, PI / 2.0, 0.0, 0.0);
             b.bx(sw, v(0.1, 0.1, 0.5), 0x2a1a14, v(0.0, 0.0, 0.0)); b.bx(sw, v(0.6, 0.1, 0.12), 0xe0b84a, v(0.0, 0.0, 0.25));
             b.bx(sw, v(0.08, 0.32, 2.0), 0x2a2020, v(0.0, 0.0, 1.3)); b.glow(sw, v(0.1, 0.12, 2.0), 0xff7a2a, v(0.0, 0.17, 1.3)); b.glow(sw, v(0.1, 0.12, 2.0), 0xff7a2a, v(0.0, -0.17, 1.3));
+            r
+        }
+        Kind::Goblin => {
+            let r = humanoid(b, pos, &Look { skin: 0x6a9a3a, shirt: 0x6a4a2a, pants: 0x4a3a2a, eye_glow: Some(0xffe04a), ..default() });
+            let (h, t) = (r.head.unwrap(), r.torso.unwrap());
+            for s in [-1.0f32, 1.0] { let ear = b.bx(h, v(0.3, 0.12, 0.06), 0x6a9a3a, v(s * 0.32, 0.3, 0.0)); b.rot(ear, 0.0, 0.0, s * 0.4); }
+            b.bx(h, v(0.12, 0.14, 0.12), 0x5a8a2a, v(0.0, 0.18, 0.26));
+            // the sack of loot on its back
+            b.bx(t, v(0.9, 0.9, 0.7), 0x9a7a4a, v(0.0, 0.55, -0.55)); b.bx(t, v(0.3, 0.2, 0.3), 0x7a5a3a, v(0.0, 1.05, -0.55));
+            for (x, y) in [(-0.2, 0.95), (0.15, 1.0), (0.0, 1.08)] { b.glow(t, v(0.18, 0.06, 0.18), 0xffd35a, v(x, y, -0.4)); }
             r
         }
         _ => enemy_model(b, Kind::Zombie, pos, 0, 1.0, rng),
@@ -400,6 +411,7 @@ pub fn ai(cx: &mut Ctx, i: usize, tp: Vec3, dist: f32, tdx: f32, tdz: f32, dy: f
 pub fn on_death(cx: &mut Ctx, kind: Kind, pos: Vec3) {
     match kind {
         Kind::Broodmother => { for _ in 0..8 { let p = pos + Vec3::new(cx.rr(-2.0, 2.0), 0.4, cx.rr(-2.0, 2.0)); if let Some(j) = spawn_enemy(cx, Kind::Spiderling, p, SpawnOpts { no_rise: true, force: true, ..default() }) { cx.g.enemies[j].body.vel = Vec3::new(cx.rr(-6.0, 6.0), 6.0, cx.rr(-6.0, 6.0)); } } }
+        Kind::Goblin => { for _ in 0..8 { let g = (6.0 + cx.g.minutes()).round(); cx.drop_pick(pos + Vec3::Y, PickKind::Gold, g); } crate::director::drop_chest(cx, pos, false); cx.toast("Caught the goblin!", "Its hoard is yours", 2.5); }
         Kind::EmberKing => { cx.g.flags.insert("victory", cx.g.run_t); cx.toast("The Ember King has fallen", "The wild is yours", 4.0); cx.play("relic"); cx.g.flash = 0.4;
             let mut g = cx.gfx(); g.pillar(pos, 0xffd35a, 3.0, 40.0, 3.0); g.shock(pos, 0xffd35a, 0.5, 20.0, 1.0, 4.0); }
         _ => {}

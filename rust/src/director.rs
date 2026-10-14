@@ -36,6 +36,7 @@ fn horde_target(cx: &Ctx) -> f32 {
     if cx.dc.blood { n *= 1.4; }
     if cx.g.dir.trial.is_some() { n += 10.0; }
     if cx.g.ember() >= 6 { n *= 1.25; }
+    if cx.g.flags.contains_key("curse") { n *= 1.6; }
     n.min(150.0)
 }
 

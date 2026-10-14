@@ -57,6 +57,37 @@ pub fn setup_camp(mut c: Commands, r: Res<HudRefs>) {
     let back = button(&mut c, UiBtn::Back, 220.0); let t = c.spawn((txt("Back  (Esc)", 18.0, 0xfff3d8), Node { align_self: AlignSelf::Center, ..default() })).id(); c.entity(back).add_child(t);
     c.entity(root).add_children(&[title, gold, cols, back]);
     c.insert_resource(CampRefs { root, gold, ups, unl, info, ember, ember_desc, history });
+
+    // the wandering merchant's wares
+    let shop = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(8.0), ..default() },
+        BackgroundColor(col(0x0a0806, 0.7)), Visibility::Hidden)).id();
+    let st = c.spawn(txt("WANDERING MERCHANT", 40.0, 0xffc060)).id();
+    let sg = c.spawn(txt("", 18.0, 0xffc83a)).id();
+    c.entity(shop).add_children(&[st, sg]);
+    let mut offers = vec![];
+    for i in 0..4 {
+        let b = button(&mut c, UiBtn::ShopBuy(i), 460.0);
+        let a = c.spawn(txt("", 18.0, 0xfff3d8)).id(); let s = c.spawn(txt("", 14.0, 0xb8aca0)).id();
+        c.entity(b).add_children(&[a, s]); c.entity(shop).add_child(b); offers.push((b, a, s));
+    }
+    let back = button(&mut c, UiBtn::Back, 220.0); let t = c.spawn((txt("Leave  (Esc)", 18.0, 0xfff3d8), Node { align_self: AlignSelf::Center, ..default() })).id(); c.entity(back).add_child(t);
+    c.entity(shop).add_child(back);
+    c.insert_resource(ShopRefs { root: shop, gold: sg, offers });
+}
+#[derive(Resource)]
+pub struct ShopRefs { root: Entity, gold: Entity, offers: Vec<(Entity, Entity, Entity)> }
+pub fn update_shop(ui: Res<UiState>, g: Res<crate::game::Game>, r: Res<ShopRefs>, mut q: Q, mut bv: Query<&mut Visibility, With<UiBtn>>) {
+    if let Ok((_, _, Some(mut v))) = q.get_mut(r.root) { *v = if ui.screen == Screen::Shop { Visibility::Inherited } else { Visibility::Hidden }; }
+    if ui.screen != Screen::Shop { return; }
+    set_text(&mut q, r.gold, &format!("You carry {} gold  (spending it lowers what you take home)", g.gold));
+    for (i, (b, a, s)) in r.offers.iter().enumerate() {
+        let o = g.ev.shop.get(i);
+        if let Ok(mut v) = bv.get_mut(*b) { *v = if o.is_some() { Visibility::Inherited } else { Visibility::Hidden }; }
+        let Some(o) = o else { continue };
+        set_text(&mut q, *a, &format!("{}.  {}", i + 1, o.name));
+        set_text(&mut q, *s, &if o.sold { "Sold".to_string() } else { format!("{}  |  {} gold", o.desc, o.cost) });
+        set_col(&mut q, *a, if o.sold { 0x6a5a4a } else if g.gold >= o.cost { 0xfff3d8 } else { 0x8a7a6a });
+    }
 }
 
 type Q<'w, 's> = Query<'w, 's, (Option<&'static mut Text>, Option<&'static mut TextColor>, Option<&'static mut Visibility>), Without<UiBtn>>;

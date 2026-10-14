@@ -9,6 +9,7 @@ mod augments;
 mod combat;
 mod director;
 mod enemies;
+mod events;
 mod fx;
 mod game;
 mod horde;
@@ -65,7 +66,7 @@ fn main() {
     .insert_resource(meta::Save::load())
     .add_plugins((ScenePlugin, fx::FxPlugin))
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp).chain()))
-    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Update, (hud::ui_flow, run_control, cursor_lock, mouse_look, game_tick, hud::update_hud, hud::button_hover, camp::update_camp, camp::update_shop, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     app.run();
 }
@@ -204,11 +205,16 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mouse
     run_timers(&mut cx);
     director::update_director(&mut cx);
     director::update_pois(&mut cx);
+    events::update(&mut cx);
     relics::update_relics(&mut cx);
     augments::update_augments(&mut cx);
     let it = director::find_interact(&mut cx);
-    cx.g.flags.insert("interact", match &it { Some((_, director::Interact::Chest(_))) => 0.0, Some((_, director::Interact::Shrine(_))) => 1.0, Some((_, director::Interact::Altar(_))) => 2.0, None => -1.0 });
-    if keys.just_pressed(KeyCode::KeyE) { if let Some((_, it)) = it { director::interact(&mut cx, it); } }
+    let evp = events::interact_prompt(cx.g, cx.p.body.pos);
+    cx.g.prompt = match (&it, &evp) { (Some((l, _)), _) => format!("[E]  {}", l), (None, Some((_, l))) => l.clone(), _ => String::new() };
+    if keys.just_pressed(KeyCode::KeyE) {
+        if let Some((_, it)) = it { director::interact(&mut cx, it); }
+        else if let Some((i, _)) = evp { if events::use_event(&mut cx, i) { cx.g.flags.insert("open_shop", 1.0); } }
+    }
     animate_player(cx.p, cx.q, dt);
     let mut ct = *cx.q.get(ce).unwrap();
     let mut rng = noise::mulberry32((time.elapsed_secs() * 1000.0) as u32);
@@ -282,6 +288,8 @@ fn test_act(cx: &mut Ctx, a: &str) {
                 if let Some(s) = cx.w.surface_spot(p.x, p.z) { let boss = horde::is_boss_kind(k); if let Some(i) = enemies::spawn_enemy(cx, k, s, enemies::SpawnOpts { force: true, boss, no_rise: true, ..default() }) { if boss { cx.g.boss = Some(cx.g.enemies[i].id); } } }
             }
         }
+        "event" => events::debug_start(cx, v.parse().unwrap_or(0)),
+        "useev" => { if let Some((i, _)) = events::interact_prompt(cx.g, cx.p.body.pos) { if events::use_event(cx, i) { cx.g.flags.insert("open_shop", 1.0); } } else if let Some(i) = (0..cx.g.ev.list.len()).next() { let p = cx.g.ev.list[i].pos; cx.p.body.pos = p + Vec3::new(2.5, 0.5, 0.0); } }
         "pitch" => { cx.p.pitch = v.parse().unwrap_or(0.0); }
         "yaw" => { cx.p.yaw = v.parse().unwrap_or(0.0); }
         "lvl" => { let n = cx.g.xp_need(); cx.gain_xp(n); }
