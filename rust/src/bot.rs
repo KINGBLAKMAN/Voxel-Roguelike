@@ -26,7 +26,7 @@ pub fn from_env() -> Option<BotCfg> {
     let args: Vec<String> = std::env::args().collect();
     let spec = if let Some(i) = args.iter().position(|a| a == "--bot") { Some(args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()) } else { std::env::var("EW_BOT").ok() }?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut c = BotCfg { runs: 3, classes: vec![Class::Ranger, Class::Mage, Class::Warrior, Class::Priest], minutes: 20.0, turbo: 6, ember: 0, seed: (stamp % 100_000) as u32, out: format!("balance-{}", stamp) };
+    let mut c = BotCfg { runs: 3, classes: crate::models::CLASSES.to_vec(), minutes: 20.0, turbo: 6, ember: 0, seed: (stamp % 100_000) as u32, out: format!("balance-{}", stamp) };
     for kv in spec.split(';') {
         let Some((k, v)) = kv.split_once('=') else { continue };
         match k.trim() {
@@ -36,7 +36,7 @@ pub fn from_env() -> Option<BotCfg> {
             "ember" => c.ember = v.parse().unwrap_or(0).min(10),
             "seed" => c.seed = v.parse().unwrap_or(c.seed),
             "out" => c.out = v.to_string(),
-            "classes" => { let l: Vec<Class> = v.split(',').filter_map(|n| match n.trim() { "ranger" => Some(Class::Ranger), "mage" => Some(Class::Mage), "warrior" => Some(Class::Warrior), "priest" => Some(Class::Priest), _ => None }).collect(); if !l.is_empty() { c.classes = l; } }
+            "classes" => { let l: Vec<Class> = v.split(',').filter_map(|n| match n.trim() { "ranger" => Some(Class::Ranger), "mage" => Some(Class::Mage), "warrior" => Some(Class::Warrior), "priest" => Some(Class::Priest), "necromancer" => Some(Class::Necromancer), "gunslinger" => Some(Class::Gunslinger), _ => None }).collect(); if !l.is_empty() { c.classes = l; } }
             _ => {}
         }
     }
@@ -53,7 +53,7 @@ pub struct BotState {
 impl BotState { fn r(&mut self) -> f32 { let mut x = self.rng.max(1); x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 fn class_name(c: Class) -> &'static str { crate::progression::class_name(c) }
-fn preferred_range(id: &str) -> f32 { match id { "longbow" => 13.0, "firestaff" | "frostwand" | "scepter" => 9.0, "daggers" => 1.6, _ => 2.2 } }
+fn preferred_range(id: &str) -> f32 { match id { "longbow" => 13.0, "firestaff" | "frostwand" | "scepter" | "skullstaff" => 9.0, "revolvers" | "rifle" => 11.0, "daggers" => 1.6, _ => 2.2 } }
 
 /// drive the menus and the player; runs before the game tick each frame
 #[allow(clippy::too_many_arguments)]

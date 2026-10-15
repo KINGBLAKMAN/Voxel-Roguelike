@@ -84,7 +84,7 @@ impl Save {
     pub fn up(&self, id: &str) -> u32 { *self.upgrades.get(id).unwrap_or(&0) }
     pub fn has(&self, id: &str) -> bool { self.unlocks.iter().any(|u| u == id) }
     pub fn cost(&self, i: usize) -> u32 { let u = UPGRADES[i]; u.4 * (self.up(u.0) + 1) }
-    pub fn class_open(&self, c: Class) -> bool { match c { Class::Mage => self.has("class.mage"), Class::Priest => self.has("class.priest"), _ => true } }
+    pub fn class_open(&self, _c: Class) -> bool { true }
     pub fn buy(&mut self, i: usize) -> bool {
         let u = UPGRADES[i]; let c = self.cost(i);
         if self.up(u.0) >= u.3 || self.gold < c { return false; }

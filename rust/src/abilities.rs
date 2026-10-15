@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 pub struct AbInfo { pub id: &'static str, pub name: &'static str, pub cd: f32, pub color: u32, pub desc: &'static str }
-pub const ABIL: [AbInfo; 16] = [
+pub const ABIL: [AbInfo; 24] = [
     AbInfo { id: "volley", name: "Volley", cd: 5.0, color: 0x9be07a, desc: "Fan of 9 piercing arrows." },
     AbInfo { id: "roll", name: "Evasive Roll", cd: 3.0, color: 0xc9e6b0, desc: "Dash and dodge all damage briefly." },
     AbInfo { id: "snare", name: "Snare Trap", cd: 8.0, color: 0xd9b46a, desc: "Throw a steel bear trap that snaps shut on the first foe." },
@@ -30,13 +30,21 @@ pub const ABIL: [AbInfo; 16] = [
     AbInfo { id: "smite", name: "Smite", cd: 4.5, color: 0xffe48a, desc: "Drive a giant sword of light into your target. Stuns." },
     AbInfo { id: "shield", name: "Divine Shield", cd: 16.0, color: 0xfff3b8, desc: "Six holy shields orbit you: invulnerable for 3s." },
     AbInfo { id: "consecrate", name: "Consecration", cd: 11.0, color: 0xffd35a, desc: "Raise a ring of holy obelisks: burns foes, heals you." },
+    AbInfo { id: "raise", name: "Raise Dead", cd: 12.0, color: 0x7affb0, desc: "Three skeleton warriors claw out of the ground and fight for you for 15s." },
+    AbInfo { id: "bonespear", name: "Bone Spear", cd: 5.0, color: 0xe8e2d0, desc: "A line of bone spikes erupts toward your aim, impaling everything on it." },
+    AbInfo { id: "corpse", name: "Corpse Explosion", cd: 7.0, color: 0x9aff6a, desc: "The corpses near your aim burst in gore and green fire." },
+    AbInfo { id: "drain", name: "Soul Drain", cd: 10.0, color: 0x6adf9a, desc: "Tether three enemies and drain their life into yours for 2.5s." },
+    AbInfo { id: "fan", name: "Fan the Hammer", cd: 5.0, color: 0xffb05a, desc: "Fan six shots across a cone in a heartbeat." },
+    AbInfo { id: "smoke", name: "Smoke Roll", cd: 4.0, color: 0xc8c0b0, desc: "Roll away and leave a smoke cloud that blinds and scatters enemies." },
+    AbInfo { id: "dynamite", name: "Dynamite", cd: 7.0, color: 0xff6a3a, desc: "Throw a lit bundle of dynamite. Big boom." },
+    AbInfo { id: "deadeye", name: "Deadeye", cd: 14.0, color: 0xff4a3a, desc: "Time slows: mark up to 6 enemies, then shoot every one for a guaranteed crit." },
 ];
 pub fn ab_info(id: &str) -> &'static AbInfo { ABIL.iter().find(|a| a.id == id).unwrap_or(&ABIL[0]) }
 pub fn class_abilities(c: Class) -> [&'static str; 4] {
-    match c { Class::Ranger => ["volley", "roll", "snare", "storm"], Class::Mage => ["blink", "nova", "orb", "meteor"], Class::Warrior => ["charge", "whirl", "slam", "cry"], Class::Priest => ["mend", "smite", "shield", "consecrate"] }
+    match c { Class::Ranger => ["volley", "roll", "snare", "storm"], Class::Mage => ["blink", "nova", "orb", "meteor"], Class::Warrior => ["charge", "whirl", "slam", "cry"], Class::Priest => ["mend", "smite", "shield", "consecrate"], Class::Necromancer => ["raise", "bonespear", "corpse", "drain"], Class::Gunslinger => ["fan", "smoke", "dynamite", "deadeye"] }
 }
 /// (ability, key, name, description, max rank, mastery)
-pub const MODS: [(&str, &str, &str, &str, u32, bool); 64] = [
+pub const MODS: [(&str, &str, &str, &str, u32, bool); 96] = [
     ("volley", "more", "Splinter Volley", "+3 arrows per volley.", 3, false), ("volley", "split", "Splitting Arrows", "Every volley arrow splits into 3 when it hits.", 1, false), ("volley", "fire", "Incendiary Volley", "Volley arrows set enemies ablaze.", 1, false), ("volley", "hail", "Hail of Arrows", "Mastery: every Volley fires two more waves.", 1, true),
     ("roll", "cd", "Nimble", "Roll recharges 22% faster.", 2, false), ("roll", "shot", "Parting Shot", "Fire a ring of 10 arrows as you roll.", 1, false), ("roll", "decoy", "Decoy", "Leave a straw decoy that draws enemies for 4s.", 1, false), ("roll", "dance", "Blade Dance", "Mastery: rolling through enemies slashes them, and each hit refunds 0.4s of cooldown.", 1, true),
     ("snare", "twin", "Twin Snares", "Throw +1 trap at once.", 2, false), ("snare", "boom", "Explosive Snare", "Traps explode, hitting everything nearby.", 1, false), ("snare", "spiked", "Serrated Jaws", "+60% trap damage and +1s root.", 2, false), ("snare", "field", "Minefield", "Mastery: sprung traps scatter 4 mines around them.", 1, true),
@@ -53,9 +61,17 @@ pub const MODS: [(&str, &str, &str, &str, u32, bool); 64] = [
     ("smite", "chain", "Chain Smite", "+2 swords strike nearby enemies.", 2, false), ("smite", "wrath", "Wrath", "+40% smite damage.", 2, false), ("smite", "cd", "Swift Judgment", "Smite recharges 22% faster.", 2, false), ("smite", "judg", "Judgment", "Mastery: two more swords fall on the same spot.", 1, true),
     ("shield", "aegis", "Aegis", "The orbiting shields bash enemies they touch.", 1, false), ("shield", "retri", "Retribution", "The shields burst outward when it ends.", 1, false), ("shield", "long", "Lasting Grace", "Shield lasts 1.5s longer.", 2, false), ("shield", "thorns", "Thorns of Light", "Mastery: while shielded, you scorch every enemy within 4.5m.", 1, true),
     ("consecrate", "wide", "Hallowed Ground", "+25% radius.", 2, false), ("consecrate", "purge", "Purge", "+50% damage.", 2, false), ("consecrate", "sanct", "Sanctuary", "Doubles the healing.", 1, false), ("consecrate", "march", "Holy March", "Mastery: Consecration follows you and lasts 3s longer.", 1, true),
+    ("raise", "more", "Bone Legion", "+1 skeleton per cast.", 2, false), ("raise", "archer", "Skeletal Archers", "Two skeleton archers rise as well.", 1, false), ("raise", "long", "Undying", "Skeletons last 6s longer.", 2, false), ("raise", "legion", "Army of the Dead", "Mastery: skeletons burst when they fall, and each kill they make can raise another.", 1, true),
+    ("bonespear", "long", "Impale", "+50% spear length.", 2, false), ("bonespear", "twin", "Twin Spears", "Fire two spears in a V.", 1, false), ("bonespear", "wall", "Ossuary Wall", "Spikes stay for 3s, slowing whatever touches them.", 1, false), ("bonespear", "shards", "Marrow Burst", "Mastery: every spike bursts into bone shards.", 1, true),
+    ("corpse", "wide", "Gore Blast", "+30% blast radius.", 2, false), ("corpse", "plague", "Plague", "Blasts leave poison clouds.", 1, false), ("corpse", "more", "Mass Grave", "+2 corpses explode, and one more is made if none lie there.", 2, false), ("corpse", "cascade", "Cascade", "Mastery: anything a blast kills explodes too.", 1, true),
+    ("drain", "more", "Many Souls", "+2 tethers.", 2, false), ("drain", "long", "Long Night", "Drain lasts 1.5s longer.", 1, false), ("drain", "feast", "Feast", "Drain heals 50% more.", 2, false), ("drain", "harvest", "Soul Harvest", "Mastery: drained enemies that die rise as skeletons.", 1, true),
+    ("fan", "more", "Six More", "+3 shots.", 2, false), ("fan", "fire", "Dragon's Breath", "Fan shots set enemies ablaze.", 1, false), ("fan", "cd", "Quick Draw", "Fan recharges 22% faster.", 2, false), ("fan", "hellfire", "Hellfire", "Mastery: fan the hammer twice, the second time all the way round.", 1, true),
+    ("smoke", "cd", "Light Feet", "Smoke Roll recharges 22% faster.", 2, false), ("smoke", "flash", "Flashbang", "The cloud stuns enemies caught in it for 1.2s.", 1, false), ("smoke", "caltrops", "Caltrops", "Leave caltrops that cut and slow.", 1, false), ("smoke", "ghost", "Ghost", "Mastery: vanish for 2s after rolling; your shots crit while hidden.", 1, true),
+    ("dynamite", "cluster", "Cluster Charges", "Two extra sticks scatter and blow.", 2, false), ("dynamite", "big", "More Powder", "+30% blast radius and damage.", 2, false), ("dynamite", "sticky", "Sticky Bomb", "The bundle sticks to the first enemy it hits.", 1, false), ("dynamite", "keg", "Powder Keg", "Mastery: the blast leaves a burning crater and an aftershock.", 1, true),
+    ("deadeye", "more", "Many Marks", "+3 marks.", 2, false), ("deadeye", "exec", "Executioner", "Marked targets below 30% health die outright.", 1, false), ("deadeye", "cd", "Steady Breath", "Deadeye recharges 22% faster.", 2, false), ("deadeye", "noon", "High Noon", "Mastery: marks every enemy in sight.", 1, true),
 ];
 /// (weapon, key, name, description, max rank)
-pub const WMODS: [(&str, &str, &str, &str, u32); 24] = [
+pub const WMODS: [(&str, &str, &str, &str, u32); 36] = [
     ("longbow", "multi", "Multishot", "Fire 2 extra arrows at half damage.", 2), ("longbow", "split", "Splinter Tips", "Fully drawn arrows split into 3 on hit.", 1), ("longbow", "blast", "Hunter's Mark", "Fully drawn arrows explode where they land.", 1),
     ("daggers", "venom", "Venom", "Hits poison enemies.", 1), ("daggers", "flurry", "Flurry", "Attack 20% faster.", 2), ("daggers", "shadow", "Shadow Strikes", "Every third strike also hurls a spectral dagger.", 1),
     ("firestaff", "cluster", "Cluster Fire", "Explosions scatter 3 bomblets (+2 per rank).", 2), ("firestaff", "big", "Conflagration", "+30% explosion radius.", 2), ("firestaff", "trail", "Phoenix Fire", "Fireballs leave burning ground.", 1),
@@ -64,6 +80,10 @@ pub const WMODS: [(&str, &str, &str, &str, u32); 24] = [
     ("swordshield", "bash", "Shield Bash", "Every 3rd swing stuns.", 1), ("swordshield", "bulwark", "Bulwark", "The shield blocks 10% more damage.", 2), ("swordshield", "riposte", "Riposte", "Taking a hit blasts enemies around you (every 2s).", 1),
     ("mace", "nova", "Holy Nova", "Every 4th hit bursts with light and heals you.", 1), ("mace", "heavy", "Heavy Blows", "+25% mace damage.", 2), ("mace", "thunder", "Thunder Mace", "Every third hit calls lightning on the target.", 1),
     ("scepter", "split", "Splitting Light", "Bolts split into 3 seekers on hit.", 1), ("scepter", "twin", "Twin Bolts", "Fire +1 bolt.", 2), ("scepter", "nova", "Radiant Bolts", "Bolts burst in holy light on impact.", 1),
+    ("scythe", "reach", "Long Reap", "+30% reach and a wider arc.", 1), ("scythe", "leech", "Soul Reaper", "Each hit heals 1 (2 at rank 2).", 2), ("scythe", "wave", "Spectral Scythe", "Every third swing hurls a spinning spectral scythe.", 1),
+    ("skullstaff", "twin", "Twin Skulls", "Fire +1 skull.", 2), ("skullstaff", "plague", "Plague Skulls", "Skulls poison what they hit.", 1), ("skullstaff", "burst", "Bone Burst", "Skulls burst into bone shards.", 1),
+    ("revolvers", "quick", "Quick Hands", "Reload 40% faster and fire 15% faster.", 2), ("revolvers", "rico", "Ricochet", "Bullets bounce to another enemy.", 1), ("revolvers", "hollow", "Hollow Points", "+35% bullet damage.", 2),
+    ("rifle", "big", "Big Iron", "+40% rifle damage.", 2), ("rifle", "explo", "Explosive Rounds", "Rifle shots explode on impact.", 1), ("rifle", "lever", "Lever Action", "Fire 30% faster.", 2),
 ];
 
 /// state for abilities that run across frames
@@ -96,7 +116,8 @@ fn cast(cx: &mut Ctx, id: &str) -> bool {
         "volley" => volley(cx), "roll" => roll(cx), "snare" => snare(cx), "storm" => storm(cx),
         "blink" => blink(cx), "nova" => nova(cx), "orb" => orb(cx), "meteor" => meteor(cx),
         "charge" => charge(cx), "whirl" => whirl(cx), "slam" => slam(cx), "cry" => cry(cx),
-        "mend" => mend(cx), "smite" => smite(cx), "shield" => shield(cx), _ => consecrate(cx),
+        "mend" => mend(cx), "smite" => smite(cx), "shield" => shield(cx), "consecrate" => consecrate(cx),
+        id => crate::abilities2::cast(cx, id),
     }
 }
 

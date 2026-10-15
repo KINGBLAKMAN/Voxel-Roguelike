@@ -163,13 +163,16 @@ pub fn humanoid(b: &mut Builder, pos: Vec3, o: &Look) -> Rig {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum Class { Ranger, Mage, Warrior, Priest }
+pub enum Class { Ranger, Mage, Warrior, Priest, Necromancer, Gunslinger }
+pub const CLASSES: [Class; 6] = [Class::Ranger, Class::Mage, Class::Warrior, Class::Priest, Class::Necromancer, Class::Gunslinger];
 pub fn class_look(c: Class) -> Look {
     match c {
         Class::Ranger => Look { skin: 0xe0b08a, shirt: 0x4b7a3c, pants: 0x5a4632, boots: Some(0x3a2a1c), belt: Some(0x6a4528), ..default() },
         Class::Mage => Look { skin: 0xe8c09a, shirt: 0x4b3a8f, pants: 0x2d2550, robe: Some(0x3f3180), belt: Some(0xf0c95a), sleeve: Some(0x4b3a8f), ..default() },
         Class::Warrior => Look { skin: 0xd9a47a, shirt: 0x8d959e, pants: 0x4a4038, boots: Some(0x2a221c), belt: Some(0x5a3a22), sleeve: Some(0x6d757e), ..default() },
         Class::Priest => Look { skin: 0xe6bd98, shirt: 0xece6d8, pants: 0xb9ae98, robe: Some(0xe4dccb), belt: Some(0xe0b84a), sleeve: Some(0xece6d8), ..default() },
+        Class::Necromancer => Look { skin: 0xb8b4a8, shirt: 0x2a2632, pants: 0x1c1a22, robe: Some(0x24202c), belt: Some(0x6adf9a), sleeve: Some(0x2a2632), eye_glow: Some(0x7affb0), ..default() },
+        Class::Gunslinger => Look { skin: 0xd8a47a, shirt: 0xc8b48a, pants: 0x4a3a2c, boots: Some(0x3a261a), belt: Some(0x2a1e16), sleeve: Some(0x7a5434), ..default() },
     }
 }
 pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
@@ -207,9 +210,37 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
             let torus = b.pal.torus.clone();
             b.mesh(head, torus, 0xffe48a, Mk::Glow, Transform::from_xyz(0.0, 0.66, -0.06).with_scale(Vec3::new(0.27, 0.06, 0.27)));
         }
+        Class::Necromancer => {
+            // a deep hood over a bone mask with glowing eyes, bone pauldrons and a skull at the belt
+            let (hd, bone) = (0x1c1824, 0xe8e2d0);
+            b.bx(head, v(0.56, 0.16, 0.56), hd, v(0.0, 0.48, -0.02)); b.bx(head, v(0.56, 0.5, 0.12), hd, v(0.0, 0.24, -0.27));
+            b.bx(head, v(0.1, 0.5, 0.46), hd, v(-0.28, 0.24, -0.02)); b.bx(head, v(0.1, 0.5, 0.46), hd, v(0.28, 0.24, -0.02));
+            b.bx(head, v(0.18, 0.16, 0.16), hd, v(0.0, 0.62, -0.2));
+            b.bx(head, v(0.38, 0.3, 0.04), bone, v(0.0, 0.2, 0.24)); b.bx(head, v(0.26, 0.06, 0.05), 0x2a2622, v(0.0, 0.08, 0.25));
+            for x in [-0.1, 0.1] { b.glow(head, v(0.08, 0.05, 0.02), 0x7affb0, v(x, 0.24, 0.265)); }
+            for (arm, sx) in [(r.arm_l.unwrap(), -1.0f32), (r.arm_r.unwrap(), 1.0)] {
+                b.bx(arm, v(0.3, 0.12, 0.32), bone, v(0.0, 0.04, 0.0));
+                for k in 0..3 { let sp = b.bx(arm, v(0.06, 0.2, 0.06), bone, v(sx * 0.08 - sx * k as f32 * 0.08, 0.16, -0.04 + k as f32 * 0.04)); b.rot(sp, 0.0, 0.0, -sx * 0.4); }
+            }
+            b.bx(torso, v(0.16, 0.14, 0.14), bone, v(0.18, 0.02, 0.17)); b.glow(torso, v(0.06, 0.04, 0.02), 0x7affb0, v(0.18, 0.04, 0.245));
+            b.bx(torso, v(0.06, 0.6, 0.02), 0x6adf9a, v(0.0, 0.32, 0.16));
+        }
+        Class::Gunslinger => {
+            // a wide-brimmed hat, a long duster, a red bandana and a bandolier
+            let (hat, band) = (0x3a2a1e, 0x8a2a1e);
+            b.bx(head, v(0.86, 0.05, 0.86), hat, v(0.0, 0.46, 0.0)); b.bx(head, v(0.5, 0.22, 0.5), hat, v(0.0, 0.58, 0.0));
+            b.bx(head, v(0.52, 0.05, 0.52), 0xb88a4a, v(0.0, 0.5, 0.0)); b.bx(head, v(0.16, 0.06, 0.5), hat, v(0.0, 0.7, 0.0));
+            b.bx(head, v(0.5, 0.14, 0.06), band, v(0.0, 0.0, 0.24)); b.bx(head, v(0.14, 0.18, 0.04), band, v(0.0, -0.1, 0.26));
+            b.bx(torso, v(0.5, 0.08, 0.36), 0x5a3a24, v(0.0, 0.3, 0.0));
+            let bd = b.bx(torso, v(0.08, 0.72, 0.04), 0x3a2618, v(0.0, 0.34, 0.16)); b.rot(bd, 0.0, 0.0, 0.6);
+            for k in 0..5 { b.bx(torso, v(0.05, 0.08, 0.04), 0xd8b04a, v(-0.16 + k as f32 * 0.08, 0.2 + k as f32 * 0.07, 0.18)); }
+            // the duster's tails, left and right of the legs
+            for x in [-0.17, 0.17] { b.bx(torso, v(0.24, 0.62, 0.36), 0x7a5434, v(x, -0.25, -0.02)); }
+            b.bx(r.arm_l.unwrap(), v(0.26, 0.1, 0.28), 0x7a5434, v(0.0, 0.02, 0.0)); b.bx(r.arm_r.unwrap(), v(0.26, 0.1, 0.28), 0x7a5434, v(0.0, 0.02, 0.0));
+        }
     }
     // capes hang from the shoulders and stream out behind when running
-    let cape_c = match cls { Class::Warrior => Some((0x9a2a22, 0xd8b04a)), Class::Mage => Some((0x2c2266, 0xf0c95a)), Class::Priest => Some((0xf2eee4, 0xe0b84a)), _ => None };
+    let cape_c = match cls { Class::Warrior => Some((0x9a2a22, 0xd8b04a)), Class::Mage => Some((0x2c2266, 0xf0c95a)), Class::Priest => Some((0xf2eee4, 0xe0b84a)), Class::Necromancer => Some((0x1c1824, 0x6adf9a)), _ => None };
     if let Some((a, c2)) = cape_c {
         let cape = b.pivot(torso, v(0.0, 0.66, -0.17));
         b.bx(cape, v(0.5, 0.86, 0.04), a, v(0.0, -0.43, 0.0)); b.bx(cape, v(0.52, 0.06, 0.05), c2, v(0.0, -0.85, 0.0)); b.bx(cape, v(0.56, 0.08, 0.08), a, v(0.0, 0.0, 0.02));
@@ -275,6 +306,38 @@ pub fn weapon_model(b: &mut Builder, parent: Entity, id: &str) -> Weapon {
         "scepter" => {
             b.bx(root, v(0.05, 0.05, 0.85), 0xe0b84a, v(0.0, 0.0, 0.3)); b.bx(root, v(0.2, 0.04, 0.04), 0xe0b84a, v(0.0, 0.0, 0.72)); b.bx(root, v(0.04, 0.2, 0.04), 0xe0b84a, v(0.0, 0.0, 0.72));
             let g = b.glow(root, v(0.13, 0.13, 0.13), 0xfff0a0, v(0.0, 0.0, 0.82)); b.rot(g, 0.7, 0.7, 0.0); w.tip = b.pivot(root, v(0.0, 0.0, 0.86));
+        }
+        // a long haft with a hooked blade at the top, curving forward
+        "scythe" => {
+            b.bx(root, v(0.07, 0.07, 1.7), 0x2a2026, v(0.0, 0.0, 0.45)); b.bx(root, v(0.1, 0.1, 0.08), 0x6adf9a, v(0.0, 0.0, 0.1));
+            b.bx(root, v(0.1, 0.1, 0.12), 0x8a8478, v(0.0, 0.0, 1.28));
+            let blade = b.pivot(root, v(0.0, 0.0, 1.28));
+            for k in 0..6 { let t = k as f32 / 5.0; let a = -0.25 - t * 0.9; let e = b.bx(blade, v(0.03, 0.2 - t * 0.1, 0.24), if k % 2 == 0 { 0xc8ccd4 } else { 0xb8bcc4 }, v(0.0, -0.1 - (t * 1.25).sin() * 0.55, 0.04 - t * 0.28)); b.rot(e, a, 0.0, 0.0); }
+            b.glow(blade, v(0.035, 0.05, 0.9), 0x7affb0, v(0.0, -0.33, -0.08));
+            w.tip = b.pivot(root, v(0.0, -0.5, 1.2));
+        }
+        // a gnarled staff topped with a skull whose eyes burn green
+        "skullstaff" => {
+            b.bx(root, v(0.07, 0.07, 1.45), 0x3a2e26, v(0.0, 0.0, 0.32)); b.bx(root, v(0.09, 0.09, 0.06), 0x6adf9a, v(0.0, 0.0, 0.9));
+            b.bx(root, v(0.24, 0.22, 0.24), 0xe8e2d0, v(0.0, 0.0, 1.13)); b.bx(root, v(0.16, 0.08, 0.16), 0xd8d2c0, v(0.0, -0.08, 1.04));
+            for x in [-0.06, 0.06] { b.glow(root, v(0.06, 0.06, 0.02), 0x7affb0, v(x, 0.12, 1.15)); }
+            for (x, z) in [(-0.14, 1.0), (0.14, 1.0), (0.0, 0.95)] { b.bx(root, v(0.03, 0.03, 0.22), 0x3a2e26, v(x, 0.0, z)); }
+            w.tip = b.pivot(root, v(0.0, 0.2, 1.15));
+        }
+        // a six-shooter: grip down from the hand, barrel along +z
+        "revolver" => {
+            b.bx(root, v(0.07, 0.22, 0.1), 0x6a4228, v(0.0, -0.08, -0.02));
+            b.bx(root, v(0.08, 0.09, 0.14), 0x5a5e66, v(0.0, 0.05, 0.08)); b.bx(root, v(0.11, 0.11, 0.12), 0x7a7e86, v(0.0, 0.06, 0.18));
+            b.bx(root, v(0.05, 0.05, 0.3), 0x8a8e96, v(0.0, 0.08, 0.36)); b.bx(root, v(0.02, 0.03, 0.03), 0x2a2a2e, v(0.0, 0.12, 0.49));
+            b.bx(root, v(0.02, 0.06, 0.06), 0x2a2a2e, v(0.0, -0.02, 0.1));
+            w.tip = b.pivot(root, v(0.0, 0.08, 0.52));
+        }
+        // a lever-action rifle: stock against the shoulder, a long barrel forward
+        "rifle" => {
+            b.bx(root, v(0.08, 0.16, 0.42), 0x7a4a28, v(0.0, -0.04, -0.22)); b.bx(root, v(0.08, 0.1, 0.24), 0x5a5e66, v(0.0, 0.02, 0.08));
+            b.bx(root, v(0.06, 0.06, 0.8), 0x7a7e86, v(0.0, 0.05, 0.6)); b.bx(root, v(0.07, 0.06, 0.5), 0x7a4a28, v(0.0, -0.01, 0.42));
+            b.bx(root, v(0.02, 0.1, 0.12), 0x4a4e56, v(0.0, -0.08, 0.06)); b.bx(root, v(0.02, 0.03, 0.03), 0x2a2a2e, v(0.0, 0.1, 0.98));
+            w.tip = b.pivot(root, v(0.0, 0.05, 1.02));
         }
         _ => {}
     }

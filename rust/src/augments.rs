@@ -58,7 +58,7 @@ pub fn on_cast(cx: &mut Ctx, echoing: bool) -> bool {
     if ak(cx.g, "overload") > 0 {
         let k = cx.g.flags.entry("cast_n").or_insert(0.0); *k += 1.0;
         if (*k as i32) % 5 == 0 {
-            let c = cx.p.body.pos; let col = match cx.p.cls { Class::Ranger => 0x9be07a, Class::Mage => 0xb46aff, Class::Warrior => 0xff6a4a, Class::Priest => 0xffd35a };
+            let c = cx.p.body.pos; let col = match cx.p.cls { Class::Ranger => 0x9be07a, Class::Mage => 0xb46aff, Class::Warrior => 0xff6a4a, Class::Priest => 0xffd35a, Class::Necromancer => 0x7affb0, Class::Gunslinger => 0xffb05a };
             let r = 9.0 * cx.g.st.area;
             cx.play("bomb"); cx.shake(1.0);
             { let mut g = cx.gfx(); g.sphere(c + Vec3::Y, col, 0.5, r, 0.5); g.circle(c, col, r, 1.0, "arcane", 5.0, None, None); g.shock(c, col, 0.5, r, 0.5, 3.0); g.flare(c + Vec3::Y * 1.5, col, 12.0, 0.5, true); }

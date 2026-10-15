@@ -40,6 +40,7 @@ pub struct Game {
     pub dmg_taken: f32, pub healed: f32,
     /// the run is three stages on three maps: which one we're on, how long we've been here and where we're headed
     pub stage: u32, pub stage_t: f32, pub map: MapKind, pub route: MapKind, pub pending_stage: Option<(u32, MapKind, u32)>,
+    pub minions: Vec<crate::abilities2::Minion>,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -47,7 +48,7 @@ impl Default for Game {
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
             dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default(), dmg_taken: 0.0, healed: 0.0,
-            stage: 0, stage_t: 0.0, map: MapKind::Forest, route: MapKind::Swamp, pending_stage: None }
+            stage: 0, stage_t: 0.0, map: MapKind::Forest, route: MapKind::Swamp, pending_stage: None, minions: vec![] }
     }
 }
 impl Game {

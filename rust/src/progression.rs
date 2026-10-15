@@ -14,7 +14,7 @@ pub enum CardKind { Upgrade, Mastery, Relic, Chaos, Boon, Evolution }
 pub struct Card { pub kind: CardKind, pub key: String, pub name: String, pub desc: String, pub tag: String, pub color: u32, pub w: f32 }
 
 /// (id, name, description, class restriction, once)
-pub const PERKS: [(&str, &str, &str, Option<Class>, bool); 22] = [
+pub const PERKS: [(&str, &str, &str, Option<Class>, bool); 26] = [
     ("vit", "Vitality", "+25 max health and heal fully.", None, false),
     ("might", "Might", "+15% damage with everything.", None, false),
     ("haste", "Haste", "Abilities recharge 12% faster.", None, false),
@@ -35,11 +35,15 @@ pub const PERKS: [(&str, &str, &str, Option<Class>, bool); 22] = [
     ("w2", "Juggernaut", "+40 max health and take 8% less damage.", Some(Class::Warrior), false),
     ("p1", "Radiance", "Mend also blasts nearby enemies for 40.", Some(Class::Priest), true),
     ("r2", "Quickdraw", "Draw your bow 35% faster.", Some(Class::Ranger), false),
+    ("n1", "Grave Pact", "Your skeletons hit 30% harder and last 4s longer.", Some(Class::Necromancer), false),
+    ("n2", "Soul Siphon", "Every kill heals 1 health.", Some(Class::Necromancer), false),
+    ("g1", "Steady Hands", "+15% critical chance with guns.", Some(Class::Gunslinger), false),
+    ("g2", "Speed Loader", "Reload 30% faster.", Some(Class::Gunslinger), false),
     ("wis", "Wisdom", "Gain 20% more experience.", None, false),
     ("luck", "Fortune", "+2 rerolls on level-ups.", None, false),
 ];
-pub fn class_color(c: Class) -> u32 { match c { Class::Ranger => 0x74c454, Class::Mage => 0xa183ff, Class::Warrior => 0xe25b45, Class::Priest => 0xf2cf63 } }
-pub fn class_name(c: Class) -> &'static str { match c { Class::Ranger => "Ranger", Class::Mage => "Mage", Class::Warrior => "Warrior", Class::Priest => "Priest" } }
+pub fn class_color(c: Class) -> u32 { match c { Class::Ranger => 0x74c454, Class::Mage => 0xa183ff, Class::Warrior => 0xe25b45, Class::Priest => 0xf2cf63, Class::Necromancer => 0x6adf9a, Class::Gunslinger => 0xe0a85a } }
+pub fn class_name(c: Class) -> &'static str { match c { Class::Ranger => "Ranger", Class::Mage => "Mage", Class::Warrior => "Warrior", Class::Priest => "Priest", Class::Necromancer => "Necromancer", Class::Gunslinger => "Gunslinger" } }
 
 fn options(g: &Game, cls: Class) -> Vec<Card> {
     let mut out = vec![];
@@ -109,7 +113,7 @@ pub fn apply(g: &mut Game, p: &mut Player, c: &Card) {
                 "magnet" => s.magnet *= 1.8, "aoe" => s.area += 0.2, "stam" => { s.stam_max += 40.0; s.stam_regen += 0.3; }, "fury" => s.atk_spd += 0.15,
                 "m1" => s.fire_rad += 0.35, "m2" => s.shatter += 0.5, "w1" => s.ww_heal += 1.0,
                 "w2" => { p.max_hp += 40.0; p.hp += 40.0; s.armor = 1.0 - (1.0 - s.armor) * 0.92; }
-                "p1" => s.radiance = 1.0, "r2" => s.charge_mul += 0.35, "wis" => s.xp_mul += 0.2, "luck" => g.rerolls += 2,
+                "p1" => s.radiance = 1.0, "g1" => s.crit += 0.15, "r2" => s.charge_mul += 0.35, "wis" => s.xp_mul += 0.2, "luck" => g.rerolls += 2,
                 _ => {}
             }
         }

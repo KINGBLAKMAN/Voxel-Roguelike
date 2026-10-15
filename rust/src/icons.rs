@@ -74,18 +74,30 @@ fn glyph(name: &str, p: Vec2) -> f32 {
         "staff" => u(seg(p, v(-0.7, -0.85), v(0.35, 0.4), 0.13), u(ring(p, v(0.5, 0.58), 0.28, 0.1), circle(p, v(0.5, 0.58), 0.13))),
         "boot" => u(poly(p, &[v(-0.45, 0.85), v(0.1, 0.85), v(0.1, -0.2), v(0.85, -0.45), v(0.85, -0.8), v(-0.45, -0.8)]), u(seg(p, v(-0.95, 0.4), v(-0.65, 0.4), 0.09), seg(p, v(-0.95, 0.05), v(-0.6, 0.05), 0.09))),
         "dash" => u(poly(p, &[v(-0.2, 0.7), v(0.85, 0.0), v(-0.2, -0.7), v(0.15, 0.0)]), u(seg(p, v(-0.95, 0.35), v(-0.35, 0.35), 0.1), seg(p, v(-0.95, -0.35), v(-0.35, -0.35), 0.1))),
+        "scythe" => u(seg(p, v(-0.55, -0.9), v(0.25, 0.85), 0.13), { let mut d = 9.0f32; let mut prev = v(0.25, 0.85); for i in 1..14 { let t = i as f32 / 13.0; let q = v(0.25 - t * 0.95, 0.85 - (t * PI).sin() * 0.28 - t * 0.2); d = d.min(seg(p, prev, q, 0.2 - t * 0.15)); prev = q; } d }),
+        "gun" => u(u(poly(p, &[v(-0.85, 0.35), v(0.9, 0.35), v(0.9, 0.08), v(-0.85, 0.08)]), poly(p, &[v(-0.85, 0.35), v(-0.2, 0.35), v(-0.35, -0.85), v(-0.8, -0.8)])), u(circle(p, v(-0.1, 0.15), 0.26), ring(p, v(-0.05, -0.12), 0.2, 0.08).max(p.y + 0.0))),
+        "dynamite" => u(u(poly(p, &[v(-0.5, -0.8), v(-0.15, -0.8), v(-0.15, 0.4), v(-0.5, 0.4)]), u(poly(p, &[v(-0.12, -0.8), v(0.22, -0.8), v(0.22, 0.4), v(-0.12, 0.4)]), poly(p, &[v(0.25, -0.8), v(0.6, -0.8), v(0.6, 0.4), v(0.25, 0.4)]))), u(seg(p, v(0.05, 0.4), v(0.3, 0.75), 0.07), poly(p - v(0.4, 0.82), &star(5, 0.22, 0.08, 0.0)))),
+        "bone" => u(seg(p, v(-0.55, -0.55), v(0.55, 0.55), 0.22), u(u(circle(p, v(-0.72, -0.5), 0.18), circle(p, v(-0.5, -0.72), 0.18)), u(circle(p, v(0.72, 0.5), 0.18), circle(p, v(0.5, 0.72), 0.18)))),
         _ => poly(p, &star(5, 0.95, 0.4, 0.0)),
     }
 }
 
-pub const GLYPHS: [&str; 35] = ["dash", "sword", "daggers", "shield", "heart", "flame", "snow", "bolt", "arrow", "bow", "orb", "star", "burst", "sparkle", "skull", "eye", "wing", "clock", "drop", "magnet", "crown",
+pub const GLYPHS: [&str; 39] = ["scythe", "gun", "dynamite", "bone", "dash", "sword", "daggers", "shield", "heart", "flame", "snow", "bolt", "arrow", "bow", "orb", "star", "burst", "sparkle", "skull", "eye", "wing", "clock", "drop", "magnet", "crown",
     "leaf", "cross", "spiral", "mountain", "banner", "crosshair", "coin", "trap", "meteor", "cloud", "fist", "mace", "staff", "boot"];
 
 /// pick a glyph for an upgrade from its key, name and description
 pub fn glyph_for(key: &str, name: &str, desc: &str) -> &'static str {
     let s = format!("{} {} {}", key, name, desc).to_lowercase();
     let has = |w: &[&str]| w.iter().any(|x| s.contains(x));
-    if has(&["meteor", "armageddon", "cataclysm"]) { "meteor" }
+    if has(&["skeleton", "undying", "legion", "army of", "grave", "skull"]) { "skull" }
+    else if has(&["bone", "marrow", "ossuary", "impale"]) { "bone" }
+    else if has(&["dynamite", "powder", "keg", "charges", "sticky"]) { "dynamite" }
+    else if has(&["scythe", "reap"]) { "scythe" }
+    else if has(&["deadeye", "marks", "high noon", "executioner"]) { "eye" }
+    else if has(&["smoke", "caltrop", "flashbang", "ghost"]) { "cloud" }
+    else if has(&["bullet", "hammer", "rifle", "reload", "quick hands", "big iron", "lever", "ricochet", "hollow", "gun", "shots"]) { "gun" }
+    else if has(&["drain", "soul", "feast", "corpse", "gore", "plague"]) { "drop" }
+    else if has(&["meteor", "armageddon", "cataclysm"]) { "meteor" }
     else if has(&["fire", "flame", "burn", "inferno", "phoenix", "pyro", "ember", "sun"]) { "flame" }
     else if has(&["frost", "ice", "freeze", "nova", "shatter", "winter", "glacial", "brittle", "chill"]) { "snow" }
     else if has(&["lightning", "thunder", "storm throne", "bolt", "chain"]) { "bolt" }
@@ -122,6 +134,8 @@ pub fn glyph_for_id(id: &str) -> &'static str {
         "volley" => "arrow", "roll" => "dash", "snare" => "trap", "storm" => "cloud", "blink" => "sparkle", "nova" => "snow", "orb" => "orb", "meteor" => "meteor",
         "charge" => "dash", "whirl" => "spiral", "slam" => "mountain", "cry" => "banner", "mend" => "heart", "smite" => "sword", "shield" => "shield", "consecrate" => "cross",
         "longbow" => "bow", "daggers" => "daggers", "firestaff" => "staff", "frostwand" => "snow", "greatsword" => "sword", "swordshield" => "shield", "mace" => "mace", "scepter" => "cross",
+        "raise" => "skull", "bonespear" => "bone", "corpse" => "burst", "drain" => "drop", "fan" => "gun", "smoke" => "cloud", "dynamite" => "dynamite", "deadeye" => "eye",
+        "scythe" => "scythe", "skullstaff" => "skull", "revolvers" => "gun", "rifle" => "gun",
         _ => "star",
     }
 }

@@ -33,6 +33,13 @@ pub fn stance(id: &str) -> Pose {
         "scepter" => p(v(-0.35, 0.0, 0.12), -1.0, v(0.4, 0.0, 0.0), v(-0.15, 0.0, -0.12), -0.4, Vec3::ZERO, Vec3::ZERO, 0.0),
         // bow carried low in the left hand, limbs upright
         "longbow" => p(v(-0.12, 0.0, 0.1), -0.35, Vec3::ZERO, v(-0.3, 0.0, -0.18), -0.45, v(-1.4, 0.0, 0.0), Vec3::ZERO, 0.0),
+        // the scythe held across the body, blade high behind the shoulder
+        "scythe" => p(v(-0.55, 0.0, -0.2), -1.0, v(0.55, 0.0, 0.0), v(-0.75, 0.0, 0.4), -1.15, Vec3::ZERO, v(0.05, 0.0, 0.0), 0.0),
+        "skullstaff" => p(v(-0.3, 0.0, 0.14), -1.2, Vec3::ZERO, v(-0.15, 0.0, -0.12), -0.4, Vec3::ZERO, Vec3::ZERO, 0.0),
+        // guns ready at the hips, muzzles forward
+        "revolvers" => p(v(-0.45, 0.0, 0.1), -0.95, v(1.05, 0.0, 0.0), v(-0.45, 0.0, -0.1), -0.95, v(1.05, 0.0, 0.0), Vec3::ZERO, 0.0),
+        // the rifle at port arms across the chest
+        "rifle" => p(v(-0.75, 0.0, 0.3), -1.25, v(1.25, 0.0, -0.5), v(-0.95, 0.0, -0.35), -0.9, Vec3::ZERO, Vec3::ZERO, 0.0),
         _ => Pose::default(),
     }
 }
@@ -40,6 +47,8 @@ pub fn stance(id: &str) -> Pose {
 /// (time, pose) keys for one attack; the first and last keys are the stance
 fn track(id: &str, combo: u8) -> Vec<(f32, Pose)> {
     let s = stance(id);
+    // the skull staff casts like the fire staff
+    let id = if id == "skullstaff" { "firestaff" } else { id };
     let k = |t: f32, ar: Vec3, er: f32, hr: Vec3, al: Vec3, el: f32, hl: Vec3, to: Vec3, st: f32| (t, p(ar, er, hr, al, el, hl, to, st));
     let z = Vec3::ZERO;
     let mut keys = vec![(0.0, s)];
@@ -119,6 +128,35 @@ fn track(id: &str, combo: u8) -> Vec<(f32, Pose)> {
             k(0.18, v(-2.6, 0.0, 0.2), -0.5, v(0.3, 0.0, 0.0), v(-0.4, 0.0, -0.3), -0.6, z, v(-0.15, 0.1, 0.0), -0.03),
             k(0.3, v(-1.6, 0.0, 0.0), 0.0, v(0.2, 0.0, 0.0), v(-0.6, 0.0, -0.3), -0.8, z, v(0.1, -0.1, 0.0), 0.08),
             k(0.6, v(-1.4, 0.0, 0.05), -0.2, v(0.3, 0.0, 0.0), v(-0.4, 0.0, -0.25), -0.6, z, v(0.06, -0.05, 0.0), 0.05)]),
+        // scythe: a wide reaping sweep right to left, a backhand return, then a high spinning reap brought down
+        ("scythe", 0) => keys.extend([
+            k(0.2, v(-1.3, 0.0, 1.05), -0.5, v(1.3, 0.0, 0.0), v(-1.1, 0.0, 0.75), -0.7, z, v(-0.05, 0.75, 0.0), -0.05),
+            k(0.36, v(-1.4, 0.0, -0.95), -0.2, v(1.45, 0.0, 0.0), v(-1.3, 0.0, -0.45), -0.4, z, v(0.15, -0.85, 0.0), 0.22),
+            k(0.62, v(-1.0, 0.0, -1.1), -0.3, v(1.4, 0.0, 0.0), v(-0.9, 0.0, -0.6), -0.5, z, v(0.12, -0.95, 0.0), 0.15)]),
+        ("scythe", 1) => keys.extend([
+            k(0.2, v(-1.2, 0.0, -1.0), -0.4, v(1.4, 0.0, 0.0), v(-1.0, 0.0, -0.5), -0.6, z, v(0.05, -0.8, 0.0), 0.0),
+            k(0.36, v(-1.5, 0.0, 0.9), -0.2, v(1.4, 0.0, 0.0), v(-1.3, 0.0, 0.6), -0.4, z, v(0.1, 0.8, 0.0), 0.18),
+            k(0.62, v(-1.1, 0.0, 1.1), -0.3, v(1.3, 0.0, 0.0), v(-1.0, 0.0, 0.7), -0.5, z, v(0.05, 0.9, 0.0), 0.12)]),
+        ("scythe", _) => keys.extend([
+            k(0.24, v(-3.0, 0.0, 0.4), -0.6, v(0.9, 0.0, 0.0), v(-2.8, 0.0, -0.1), -0.8, z, v(-0.35, 0.4, 0.0), -0.08),
+            k(0.38, v(-0.9, 0.0, -0.3), -0.1, v(1.5, 0.0, 0.0), v(-0.9, 0.0, 0.2), -0.1, z, v(0.55, -0.3, 0.0), 0.28),
+            k(0.64, v(-0.7, 0.0, -0.3), -0.2, v(1.4, 0.0, 0.0), v(-0.7, 0.0, 0.2), -0.2, z, v(0.45, -0.25, 0.0), 0.22)]),
+        // revolvers: snap the gun up level, the recoil kicks the muzzle high, then settle; the other hand stays ready
+        ("revolvers", 0) => keys.extend([
+            k(0.06, v(-1.55, 0.0, 0.06), -0.05, v(1.55, 0.0, 0.0), v(-0.9, 0.0, -0.1), -0.7, v(1.3, 0.0, 0.0), v(0.0, -0.12, 0.0), 0.0),
+            k(0.2, v(-1.95, 0.0, 0.06), -0.45, v(1.85, 0.0, 0.0), v(-0.9, 0.0, -0.1), -0.7, v(1.3, 0.0, 0.0), v(-0.06, -0.12, 0.0), -0.04),
+            k(0.55, v(-1.5, 0.0, 0.06), -0.1, v(1.5, 0.0, 0.0), v(-0.9, 0.0, -0.1), -0.7, v(1.3, 0.0, 0.0), v(0.0, -0.08, 0.0), 0.0)]),
+        ("revolvers", 1) => keys.extend([
+            k(0.06, v(-0.9, 0.0, 0.1), -0.7, v(1.3, 0.0, 0.0), v(-1.55, 0.0, -0.06), -0.05, v(1.55, 0.0, 0.0), v(0.0, 0.12, 0.0), 0.0),
+            k(0.2, v(-0.9, 0.0, 0.1), -0.7, v(1.3, 0.0, 0.0), v(-1.95, 0.0, -0.06), -0.45, v(1.85, 0.0, 0.0), v(-0.06, 0.12, 0.0), -0.04),
+            k(0.55, v(-0.9, 0.0, 0.1), -0.7, v(1.3, 0.0, 0.0), v(-1.5, 0.0, -0.06), -0.1, v(1.5, 0.0, 0.0), v(0.0, 0.08, 0.0), 0.0)]),
+        // the rifle: shoulder it, the shot rocks the body back, the hand drops to work the lever, then back on target
+        ("rifle", _) => keys.extend([
+            k(0.06, v(-1.2, 0.0, 0.35), -0.6, v(1.8, 0.0, -0.2), v(-1.5, 0.0, -0.15), -0.3, z, v(0.0, -0.3, 0.0), 0.0),
+            k(0.16, v(-1.5, 0.0, 0.35), -0.6, v(1.75, 0.0, -0.2), v(-1.8, 0.0, -0.15), -0.35, z, v(-0.14, -0.3, 0.0), -0.08),
+            k(0.36, v(-1.0, 0.0, 0.4), -0.95, v(1.6, 0.0, -0.2), v(-1.5, 0.0, -0.15), -0.3, z, v(0.0, -0.3, 0.0), -0.04),
+            k(0.5, v(-1.2, 0.0, 0.35), -0.6, v(1.8, 0.0, -0.2), v(-1.5, 0.0, -0.15), -0.3, z, v(0.0, -0.3, 0.0), 0.0),
+            k(0.8, v(-1.2, 0.0, 0.35), -0.6, v(1.8, 0.0, -0.2), v(-1.5, 0.0, -0.15), -0.3, z, v(0.0, -0.3, 0.0), 0.0)]),
         _ => {}
     }
     keys.push((1.0, s));
@@ -129,8 +167,15 @@ fn ease(t: f32) -> f32 { t * t * t * (t * (t * 6.0 - 15.0) + 10.0) }
 
 /// the pose `t` (0..1) of the way through attack `combo` with weapon `id`
 pub fn attack(id: &str, combo: u8, t: f32) -> Pose {
-    let keys = track(id, combo);
     let t = t.clamp(0.0, 1.0);
+    // the reload: guns drop to the hips, the cylinders swing out, and both revolvers twirl back into the holsters' ready spot
+    if id == "revolvers" && combo == 2 {
+        let s = stance(id); let spin = ease(((t - 0.15) / 0.7).clamp(0.0, 1.0)) * std::f32::consts::TAU * 2.0;
+        let mut q = s; q.ar = v(-0.7, 0.0, 0.25); q.al = v(-0.7, 0.0, -0.25); q.er = -1.3; q.el = -1.3; q.hr = v(1.0 + spin, 0.0, 0.0); q.hl = v(1.0 + spin, 0.0, 0.0); q.torso = v(0.12, 0.0, 0.0);
+        let w = (t / 0.12).min(1.0).min((1.0 - t) / 0.15).clamp(0.0, 1.0);
+        return s.lerp(&q, w);
+    }
+    let keys = track(id, combo);
     for w in keys.windows(2) {
         let ((t0, a), (t1, b)) = (w[0], w[1]);
         if t <= t1 { return a.lerp(&b, ease(((t - t0) / (t1 - t0).max(1e-4)).clamp(0.0, 1.0))); }

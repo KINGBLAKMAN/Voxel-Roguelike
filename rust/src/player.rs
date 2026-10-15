@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Pose { Push, Raise, Throw, Shout, Pray, Point, Lunge, BowUp, Kneel, Slam, Stab, Fan }
+pub enum Pose { Push, Raise, Throw, Shout, Pray, Point, Lunge, BowUp, Kneel, Slam, Stab, Fan, FanHammer }
 
 #[derive(Clone)]
 pub struct Dash { pub dir: Vec3, pub speed: f32, pub t: f32, pub kind: u8 }
@@ -18,7 +18,7 @@ pub struct Dash { pub dir: Vec3, pub speed: f32, pub t: f32, pub kind: u8 }
 pub struct Leap { pub from: Vec3, pub to: Vec3, pub t: f32, pub dur: f32, pub height: f32 }
 
 pub fn class_weapons(c: Class) -> [&'static str; 2] {
-    match c { Class::Ranger => ["longbow", "daggers"], Class::Mage => ["firestaff", "frostwand"], Class::Warrior => ["greatsword", "swordshield"], Class::Priest => ["mace", "scepter"] }
+    match c { Class::Ranger => ["longbow", "daggers"], Class::Mage => ["firestaff", "frostwand"], Class::Warrior => ["greatsword", "swordshield"], Class::Priest => ["mace", "scepter"], Class::Necromancer => ["scythe", "skullstaff"], Class::Gunslinger => ["revolvers", "rifle"] }
 }
 
 #[derive(Resource)]
@@ -31,13 +31,15 @@ pub struct Player {
     pub land: f32, pub air_t: f32, pub prev_yaw: f32, pub lean: f32, pub hip: f32, pub swim_ph: f32,
     /// where the feet point (the aim can twist the upper body away from it) and the turn-in-place step cycle
     pub foot_yaw: f32, pub turn_ph: f32, pub turning: f32,
+    /// the Gunslinger's cylinder and reload timer
+    pub ammo: i32, pub reload: f32,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0, foot_yaw: 0.0, turn_ph: 0.0, turning: 0.0 }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0, foot_yaw: 0.0, turn_ph: 0.0, turning: 0.0, ammo: 12, reload: 0.0 }
     }
 }
 impl Player {
@@ -64,6 +66,7 @@ pub fn attach_weapon(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<Stan
         "longbow" => p.weapons.push(weapon_model(&mut b, hl, "longbow")),
         "daggers" => { p.weapons.push(weapon_model(&mut b, hr, "daggers")); p.weapons.push(weapon_model(&mut b, hl, "daggers")); }
         "swordshield" => { p.weapons.push(weapon_model(&mut b, hr, "sword")); p.weapons.push(weapon_model(&mut b, hl, "shield")); }
+        "revolvers" => { p.weapons.push(weapon_model(&mut b, hr, "revolver")); p.weapons.push(weapon_model(&mut b, hl, "revolver")); }
         id => p.weapons.push(weapon_model(&mut b, hr, id)),
     }
 }
@@ -154,7 +157,7 @@ struct Tg { body: Vec3, body_pos: Vec3, torso: Vec3, head: Vec3, arm_l: Vec3, ar
 fn drive(q: &mut Query<&mut Transform>, e: Option<Entity>, v: Vec3, k: f32) {
     if let Some(e) = e { if let Ok(mut t) = q.get_mut(e) { let target = Quat::from_euler(EulerRot::XYZ, v.x, v.y, v.z); t.rotation = if k >= 1.0 { target } else { t.rotation.slerp(target, k) }; } }
 }
-pub fn is_melee(id: &str) -> bool { matches!(id, "greatsword" | "swordshield" | "daggers" | "mace") }
+pub fn is_melee(id: &str) -> bool { matches!(id, "greatsword" | "swordshield" | "daggers" | "mace" | "scythe") }
 
 /// all the player's body animation for one frame
 pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
@@ -301,7 +304,15 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
         }
     }
     // casters raise the focus at the target while holding the attack
-    if !attacking && p.firing && !is_melee(id) && id != "longbow" { t.arm_r = Vec3::new(-1.45 - p.pitch * 0.7, 0.0, 0.05); t.el_r = -0.25; }
+    if !attacking && p.firing && !is_melee(id) && id != "longbow" {
+        let aim = -1.5 - p.pitch * 0.8;
+        match id {
+            // gunslingers keep both guns up on the target between shots
+            "revolvers" => if p.reload <= 0.0 { t.arm_r = Vec3::new(aim, 0.0, 0.06); t.arm_l = Vec3::new(aim, 0.0, -0.06); t.el_r = -0.05; t.el_l = -0.05; t.hand_r = Vec3::new(1.55, 0.0, 0.0); t.hand_l = Vec3::new(1.55, 0.0, 0.0); },
+            "rifle" => { t.arm_r = Vec3::new(aim + 0.3, 0.0, 0.35); t.el_r = -0.6; t.hand_r = Vec3::new(1.8, 0.0, -0.2); t.arm_l = Vec3::new(aim, 0.0, -0.15); t.el_l = -0.3; t.torso.y -= 0.3; }
+            _ => { t.arm_r = Vec3::new(-1.45 - p.pitch * 0.7, 0.0, 0.05); t.el_r = -0.25; }
+        }
+    }
     // guard: forearms crossed in front of the face
     if p.blocking > 0.0 { t.arm_l = Vec3::new(-1.3, 0.0, -0.45); t.el_l = -1.2; t.arm_r = Vec3::new(-1.25, 0.0, 0.45); t.el_r = -1.25; t.torso.x = 0.12; t.hand_r = Vec3::new(0.3, 0.0, 0.0); }
     // the bow string draws back with the charge, an arrow nocked
@@ -399,6 +410,13 @@ fn apply_pose(t: &mut Tg, pose: Pose, k: f32, w: f32) {
             lt(&mut t.arm_r, v(-1.5, lerp(-1.35 + d * 1.6, 0.9, rel), 1.57)); lf(&mut t.el_r, lerp(-0.25 - d * 2.3, -1.2, rel));
             lt(&mut t.torso, v(0.05, -0.35 + sweep, 0.0)); lt(&mut t.head, v(0.0, 0.35 - sweep * 0.5, 0.0));
             t.body_pos.y -= 0.06 * d * w; lf(&mut t.kn_l, 0.3 * d); lf(&mut t.kn_r, 0.3 * d); lf(&mut t.leg_l, -0.25 * d); lf(&mut t.leg_r, 0.15 * d);
+        }
+        // fanning the hammer: the gun hand low at the hip, the off hand slapping the hammer again and again
+        Pose::FanHammer => {
+            let slap = (k * 40.0).sin().max(0.0);
+            lt(&mut t.arm_r, v(-1.2, 0.0, 0.1)); lf(&mut t.el_r, -0.35); lt(&mut t.hand_r, v(1.35, 0.0, 0.0));
+            lt(&mut t.arm_l, v(-1.0 - slap * 0.25, 0.0, -0.45 + slap * 0.2)); lf(&mut t.el_l, -1.2 + slap * 0.4);
+            lt(&mut t.torso, v(0.1, 0.25, 0.0)); t.body_pos.y -= 0.1 * w; lf(&mut t.kn_l, 0.45); lf(&mut t.kn_r, 0.45); lf(&mut t.leg_l, -0.35); lf(&mut t.leg_r, 0.2);
         }
         Pose::Shout => { lt(&mut t.arm_l, v(-0.5, 0.0, 1.35)); lt(&mut t.arm_r, v(-0.5, 0.0, -1.35)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.5, 0.0, 0.0)); lt(&mut t.torso, v(-0.3, 0.0, 0.0)); t.body_pos.y -= 0.08 * w; lf(&mut t.kn_l, 0.5); lf(&mut t.kn_r, 0.5); lf(&mut t.leg_l, -0.3); lf(&mut t.leg_r, -0.3); }
         // a prayer: palms meet before the chest with the head bowed, then open outward to release the blessing

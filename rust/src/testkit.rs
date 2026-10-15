@@ -20,7 +20,7 @@ impl TestCfg {
             let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
             match k {
                 "seed" => t.seed = v.parse().unwrap_or(1),
-                "class" => t.class = match v { "ranger" => Class::Ranger, "mage" => Class::Mage, "priest" => Class::Priest, _ => Class::Warrior },
+                "class" => t.class = match v { "ranger" => Class::Ranger, "mage" => Class::Mage, "priest" => Class::Priest, "necromancer" | "necro" => Class::Necromancer, "gunslinger" | "gun" => Class::Gunslinger, _ => Class::Warrior },
                 "time" => t.time = v.parse().ok(),
                 "yaw" => t.yaw = v.parse().ok(),
                 "pitch" => t.pitch = v.parse().ok(),

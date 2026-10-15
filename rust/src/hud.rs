@@ -141,11 +141,12 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
     let menu = c.spawn((full(), BackgroundColor(col(0x08060c, 0.5)))).id();
     let title = c.spawn(txt("EMBERWILD", 92.0, EMBER)).id();
     let sub = c.spawn(txt("The horde never stops coming. Grow strong enough to outlast it.", 18.0, 0xe8dccc)).id();
-    let row = c.spawn(Node { column_gap: px(16.0), margin: UiRect::top(px(28.0)), ..default() }).id();
-    for (i, cls) in [Class::Ranger, Class::Mage, Class::Warrior, Class::Priest].into_iter().enumerate() {
-        let (role, hp) = match cls { Class::Ranger => ("Fast skirmisher who wins from range and never stands still.", 100), Class::Mage => ("Glass cannon. Fire for damage, frost for control.", 85), Class::Warrior => ("Armored brawler who closes in and refuses to fall.", 140), Class::Priest => ("Holy bruiser who heals through anything.", 110) };
+    let row = c.spawn(Node { column_gap: px(10.0), margin: UiRect::top(px(20.0)), ..default() }).id();
+    for (i, cls) in crate::models::CLASSES.into_iter().enumerate() {
+        let (role, hp) = match cls { Class::Ranger => ("Fast skirmisher who wins from range and never stands still.", 100), Class::Mage => ("Glass cannon. Fire for damage, frost for control.", 85), Class::Warrior => ("Armored brawler who closes in and refuses to fall.", 140), Class::Priest => ("Holy bruiser who heals through anything.", 110),
+            Class::Necromancer => ("Raises the dead to fight for him and reaps souls to survive.", 95), Class::Gunslinger => ("Fast hands, loud guns and a stick of dynamite for every problem.", 105) };
         let cc = class_color(cls);
-        let b = c.spawn((Button, UiBtn::Class(cls), Node { width: px(236.0), height: px(300.0), flex_direction: FlexDirection::Column, padding: UiRect::all(px(16.0)), row_gap: px(8.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.86)), BorderColor(col(cc, 0.5)), BorderRadius::all(px(10.0)))).id();
+        let b = c.spawn((Button, UiBtn::Class(cls), Node { width: px(196.0), height: px(290.0), flex_direction: FlexDirection::Column, padding: UiRect::all(px(12.0)), row_gap: px(8.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.86)), BorderColor(col(cc, 0.5)), BorderRadius::all(px(10.0)))).id();
         let band = c.spawn((Node { height: px(4.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(cc, 1.0)))).id();
         let n = c.spawn(txt(class_name(cls), 30.0, cc)).id();
         let r = c.spawn(txt(role, 14.0, 0xd8ccbc)).id();
@@ -234,7 +235,7 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
     match ui.screen {
         Screen::Menu => {
             let mut want = None;
-            for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() { if keys.just_pressed(k) { want = Some([Class::Ranger, Class::Mage, Class::Warrior, Class::Priest][i]); } }
+            for (i, k) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6].into_iter().enumerate() { if keys.just_pressed(k) { want = Some(crate::models::CLASSES[i]); } }
             if let Some(UiBtn::Class(c)) = clicked { want = Some(c); }
             if let Some(c) = want { if save.class_open(c) { ui.start = Some(c); ui.paid = 0; ui.recorded = false; } else { sfx.play("hurt"); } }
             if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Camp) { ui.screen = Screen::Camp; sfx.play("pick"); }
@@ -359,7 +360,7 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         set_bg(&mut q, *glow, col(info.color, if ready { 1.0 } else { 0.35 }));
     }
     let wid = p.weapon_id();
-    set_text(&mut q, r.weapon, weapon_info(wid).0);
+    set_text(&mut q, r.weapon, &if wid == "revolvers" { if p.reload > 0.0 { format!("{}\nreloading", weapon_info(wid).0) } else { format!("{}\n{} / {}", weapon_info(wid).0, p.ammo, crate::combat::CYLINDER) } } else { weapon_info(wid).0.to_string() });
     set_text(&mut q, r.food, &format!("{} meat  {} berry", g.food_meat, g.food_berries));
     // clock, threat, kills, day
     let m = g.minutes(); let (tn, tc) = threat(m);

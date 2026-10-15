@@ -119,8 +119,8 @@ impl Net {
     pub fn send(&mut self, m: Msg) { if self.on() { self.out.push((None, m)); } }
 }
 fn v3(a: [f32; 3]) -> Vec3 { Vec3::from_array(a) }
-pub fn cls_u8(c: Class) -> u8 { match c { Class::Ranger => 0, Class::Mage => 1, Class::Warrior => 2, Class::Priest => 3 } }
-pub fn u8_cls(c: u8) -> Class { [Class::Ranger, Class::Mage, Class::Warrior, Class::Priest][c as usize % 4] }
+pub fn cls_u8(c: Class) -> u8 { crate::models::CLASSES.iter().position(|&k| k == c).unwrap_or(0) as u8 }
+pub fn u8_cls(c: u8) -> Class { crate::models::CLASSES[c as usize % crate::models::CLASSES.len()] }
 pub fn kind_u8(k: Kind) -> u8 { ALL_KINDS.iter().position(|q| *q == k).unwrap_or(0) as u8 }
 
 /// alive teammates as (id, position)

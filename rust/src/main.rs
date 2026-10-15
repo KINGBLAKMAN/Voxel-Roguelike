@@ -3,6 +3,7 @@
 //! Emberwild: a voxel horde-survival roguelike.
 
 mod abilities;
+mod abilities2;
 mod anim;
 mod audio;
 mod camp;
@@ -119,7 +120,7 @@ fn start_world(mut c: Commands, mut g: ResMut<Game>, mut pal: ResMut<Palette>, m
     g.map = map; g.stage = match map { world::MapKind::Forest => 0, world::MapKind::Volcanic => 2, m => { g.route = m; 1 } };
     c.insert_resource(w);
 }
-fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0) } }
+fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0), Class::Necromancer => (95.0, 1.0), Class::Gunslinger => (105.0, 1.05) } }
 fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardMaterial>, p: &mut Player, cls: Class) {
     let pos = p.body.pos;
     let old = p.rig.root.take();
@@ -199,6 +200,7 @@ fn clear_run_world(c: &mut Commands, g: &mut Game, fx: &mut fx::Fx) {
     ents.extend(g.rel.decoys.drain(..).map(|d| d.e));
     ents.extend(g.rel.stuck.drain(..).map(|s| s.e));
     if let Some(ch) = g.ab.charge.take() { ents.push(ch.wedge()); }
+    ents.extend(g.minions.drain(..).filter_map(|m| m.rig.root));
     for t in fx.tweens.drain(..) { ents.push(t.e); }
     for d in fx.debris.drain(..) { c.entity(d.e).insert(Visibility::Hidden); fx.debris_free.push(d.e); }
     fx.add.clear(); fx.blend.clear();
@@ -249,6 +251,8 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     if paused.0 && link.is_none() { return; }
     let mut dt = raw;
     if s.g.hitstop > 0.0 { s.g.hitstop -= raw; dt = raw * 0.08; }
+    // Deadeye: the world crawls for a moment
+    if let Some(t) = s.g.flags.get("slowmo").copied() { if t > 0.0 { s.g.flags.insert("slowmo", t - raw); dt *= 0.3; } else { s.g.flags.remove("slowmo"); } }
     let mut cx = Ctx { c: &mut s.c, g: &mut s.g, w, p: &mut s.p, pal: &mut s.pal, mats: &mut s.mats, meshes: &mut s.meshes, fx: &mut s.fx, q: &mut s.q, cam: &mut s.cam, dc: &s.dc, sfx: &mut s.sfx, dt };
     let link = link.as_deref();
     if let Some(l) = link { net::process(&mut cx, l); }
@@ -307,6 +311,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     net::remotes(&mut cx);
     combat::update_projs(&mut cx);
     abilities::update_abilities(&mut cx);
+    abilities2::update_minions(&mut cx);
     combat::update_zones(&mut cx);
     abilities::update_traps(&mut cx);
     update_pickups(&mut cx);
