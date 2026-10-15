@@ -345,7 +345,7 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
         }
         Screen::Victory => {
             if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; }
-            if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Endless) { g.flags.insert("endless", 1.0); ui.screen = Screen::Playing; ctl.relock = true; g.toasts.push(("Endless".into(), "Bosses return every four minutes, stronger each time".into(), 3.0)); }
+            if keys.just_pressed(KeyCode::KeyC) || clicked == Some(UiBtn::Endless) { g.flags.insert("endless", 1.0); ui.screen = Screen::Playing; ctl.relock = true; g.toasts.push(("Endless".into(), "Bosses return every three minutes, stronger each time".into(), 3.0)); }
         }
     }
     if matches!(ui.screen, Screen::Dead | Screen::Victory) {
