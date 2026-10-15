@@ -6,7 +6,7 @@ A voxel horde-survival roguelike in the spirit of Vampire Survivors. Pick one of
 
 Emberwild is a native Windows game written in Rust on the [Bevy](https://bevyengine.org) engine. It opens fullscreen; set `EMBERWILD_WINDOWED=1` to run it in a window. The pause menu has **Quit to desktop**.
 
-**Download:** grab `Emberwild-<version>.exe` from the latest GitHub release. It is a single file with no installer. `Emberwild-<version>-dev.exe` is the same game plus the developer tools (the balance bot and the scripted test hooks). Every push also builds it: open the **Actions** tab, pick the latest **Build Windows exe** run, and download *Emberwild-windows* under *Artifacts*.
+**Download:** each release is a pair of zips: `Emberwild-<version>-windows.zip` holds the game (a single exe, no installer), and `Emberwild-<version>-windows-dev.zip` holds the same game plus the developer tools (the balance bot and the scripted test hooks). To build them yourself, run `rust/build-windows.sh`, which cross-compiles both exes and writes the zips to `rust/dist/`.
 
 **From source:** install Rust, then `cd rust && cargo run --release`. On Linux you need the usual Bevy packages (`libasound2-dev libudev-dev libxkbcommon-x11-0`).
 
@@ -156,5 +156,5 @@ Up to four players. The host runs the horde, the bosses, events and the clock; e
 | `rust/src/hud.rs`, `camp.rs`, `settings.rs`, `meta.rs` | Menus and HUD, the Camp, settings and gamepad, the save file |
 | `rust/src/net.rs` | Co-op |
 | `rust/src/bot.rs`, `testkit.rs` | The balance bot and the scripted screenshot tests |
-| `.github/workflows/windows-build.yml` | Builds the Windows exe and publishes releases |
+| `rust/build-windows.sh` | Builds the player and dev Windows exes and zips them |
 | `index.html`, `src/`, `desktop/` | The original browser version |
