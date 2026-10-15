@@ -30,9 +30,19 @@ pub fn setup_camp(mut c: Commands, r: Res<HudRefs>) {
     let host_b = button(&mut c, UiBtn::Host, 190.0); let t = c.spawn(txt("Host co-op  (H)", 18.0, 0x9fe0ff)).id(); c.entity(host_b).add_child(t);
     let join_b = button(&mut c, UiBtn::Join, 190.0); let t = c.spawn(txt("Join co-op  (J)", 18.0, 0x9fe0ff)).id(); c.entity(join_b).add_child(t);
     c.entity(row2).add_children(&[host_b, join_b]);
+    // the route: which map (and boss) the second stage is played on
+    let rrow = c.spawn(Node { column_gap: px(10.0), align_items: AlignItems::Center, margin: UiRect::top(px(8.0)), ..default() }).id();
+    let rl = c.spawn(txt("Route  (R):   Greenwood  >", 17.0, 0xd8ccbc)).id(); c.entity(rrow).add_child(rl);
+    for (k, label, sub) in [(1u8, "Drowned Fen", "Broodmother"), (2, "Bone Wastes", "Bone Colossus"), (0, "Random", "either")] {
+        let b = button(&mut c, UiBtn::Route(k), 150.0);
+        let t = c.spawn((txt(label, 16.0, [0xd8ccbc, 0x6fd4a0, 0xffc86a][k as usize]), Node { align_self: AlignSelf::Center, ..default() })).id();
+        let t2 = c.spawn((txt(sub, 12.0, 0x9a8a78), Node { align_self: AlignSelf::Center, ..default() })).id();
+        c.entity(b).add_children(&[t, t2]); c.entity(rrow).add_child(b);
+    }
+    let rr = c.spawn(txt(">   Ember Throne", 17.0, 0xff8a5a)).id(); c.entity(rrow).add_child(rr);
     let net = c.spawn(txt("", 14.0, 0x9fe0ff)).id();
     let info = c.spawn((txt("", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(6.0)), ..default() })).id();
-    c.entity(r.menu).add_children(&[row, ember_desc, row2, net, info]);
+    c.entity(r.menu).add_children(&[row, ember_desc, rrow, row2, net, info]);
 
     // the join screen: type the host's address
     let jroot = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(10.0), ..default() },

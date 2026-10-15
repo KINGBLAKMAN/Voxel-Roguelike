@@ -188,7 +188,8 @@ fn foliage(w: &Voxels, ch: &Chunk, m: &mut MeshData) {
         let (wx, wz) = (x0 + lx, z0 + lz);
         let r = hash2(wx, wz, s + 700);
         let ang = hash2(wx, wz, s + 711) * std::f32::consts::PI;
-        if ty < SEA && ty >= SEA - 2 && r < 0.09 && w.n_v.get(wx as f32 * 0.04, wz as f32 * 0.04) > -0.1 {
+        let swamp = w.kind == crate::world::MapKind::Swamp;
+        if !w.kind.lava() && ty < SEA && ty >= SEA - 2 && r < if swamp { 0.3 } else { 0.09 } && w.n_v.get(wx as f32 * 0.04, wz as f32 * 0.04) > if swamp { -0.6 } else { -0.1 } {
             let (x, z, y) = (wx as f32 + 0.5, wz as f32 + 0.5, WATER_Y + 0.02);
             flat(m, x, y, z, 0.42, ang * 2.0, fl::LILY, [1.0, 1.0, 1.0]);
             if hash2(wx, wz, s + 708) < 0.3 { cross(m, x + 0.08, y, z, 0.32, 0.22, ang, fl::PETALS, lin(0xf6c6dc), lin(0xffe0ee)); }
@@ -198,9 +199,9 @@ fn foliage(w: &Voxels, ch: &Chunk, m: &mut MeshData) {
         // nothing grows under a bush or a block
         if crate::world::is_foliage_block(tb) || is_bush(tb) { continue; }
         let is_g = tb == b::GRASS || tb == b::FGRASS;
-        let shore = ty <= SEA + 1 && (tb == b::SAND || is_g);
+        let shore = (ty <= SEA + 1 && (tb == b::SAND || is_g) && !w.kind.lava()) || tb == b::MUD;
         let meadow = tb == b::GRASS && w.n_v.get(wx as f32 * 0.03 + 5.0, wz as f32 * 0.03 - 9.0) > 0.22;
-        let dens = if shore { 0.45 } else if tb == b::GRASS { if meadow { 0.85 } else { 0.7 } } else if tb == b::FGRASS { 0.6 }
+        let dens = if tb == b::MUD { 0.3 } else if shore { 0.45 } else if tb == b::GRASS { if meadow { 0.85 } else { 0.7 } } else if tb == b::FGRASS { 0.6 }
             else if tb == b::SAND && ch.bio[i] == Bio::Desert { 0.04 } else if tb == b::SNOW { 0.06 } else { 0.0 };
         if r > dens { continue; }
         let (x, z, y) = (wx as f32 + hash2(wx, wz, s + 701) * 0.5 + 0.25, wz as f32 + hash2(wx, wz, s + 702) * 0.5 + 0.25, (ty + 1) as f32);

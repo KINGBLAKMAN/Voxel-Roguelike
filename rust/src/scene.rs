@@ -125,7 +125,7 @@ fn mix3(a: Vec3, b: Vec3, t: f32) -> Vec3 { a + (b - a) * t }
 fn rgb(hex: u32) -> Vec3 { let l = lin(hex); Vec3::new(l[0], l[1], l[2]) }
 fn smooth(a: f32, b: f32, x: f32) -> f32 { crate::noise::smooth(a, b, x) }
 
-fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: Option<Res<SceneHandles>>, mut sky_m: ResMut<Assets<SkyMaterial>>, mut water_m: ResMut<Assets<WaterMaterial>>,
+fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, world: Option<Res<Voxels>>, h: Option<Res<SceneHandles>>, mut sky_m: ResMut<Assets<SkyMaterial>>, mut water_m: ResMut<Assets<WaterMaterial>>,
     mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>, mut fog: Query<(&mut DistanceFog, &Transform), (With<MainCam>, Without<Sun>)>,
     mut amb: ResMut<AmbientLight>, mut clear: ResMut<ClearColor>, mut fol_m: ResMut<Assets<FoliageMaterial>>) {
     let Some(h) = h else { return };
@@ -146,6 +146,15 @@ fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: O
     let mut hor = mix3(nh, rgb(0xb4dcf5), day);
     hor = mix3(hor, rgb(0xf29a5a), dusk * 0.55 * smooth(-0.3, 0.1, sd.y));
     top = mix3(top, rgb(0x3a4a8a), dusk * 0.3);
+    // every map has its own air: green bog mist, bleached desert haze, the volcano's red pall
+    let kind = world.as_ref().map(|w| w.kind).unwrap_or_default();
+    let mut fog_k = 1.0;
+    match kind {
+        MapKind::Swamp => { hor = mix3(hor, rgb(0x8aa066) * (0.25 + 0.75 * day), 0.55); top = mix3(top, rgb(0x5a7a72) * (0.2 + 0.8 * day), 0.3); fog_k = 0.72; }
+        MapKind::Desert => { hor = mix3(hor, rgb(0xe8cc98) * (0.2 + 0.8 * day), 0.25); top = mix3(top, rgb(0x4a98e8) * (0.2 + 0.8 * day), 0.25); fog_k = 1.0; }
+        MapKind::Volcanic => { hor = mix3(hor, rgb(0xb0401a) * (0.45 + 0.55 * day), 0.7); top = mix3(top, rgb(0x2a0c08), 0.8); fog_k = 0.78; }
+        MapKind::Forest => {}
+    }
     let up = sd.y > 0.0;
     if let Some(m) = sky_m.get_mut(&h.sky) {
         m.u.top = top.extend(1.0); m.u.hor = hor.extend(1.0); m.u.sun_dir = sd.extend(0.0);
@@ -154,16 +163,17 @@ fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: O
         m.u.moon_col = (if dc.blood { rgb(0xff5a4a) } else { rgb(0xdfe8ff) }).extend(1.0);
         m.u.params = Vec4::new(1.0 - day, 0.5 + 0.09 * (dc.time * 2.3).sin() + 0.05 * (dc.time * 7.1).sin(), 0.0, 0.0);
     }
-    let (fog_start, fog_end) = (cfg.view as f32 * 16.0 * 0.4, cfg.view as f32 * 16.0 - 8.0);
+    let (fog_start, fog_end) = (cfg.view as f32 * 16.0 * 0.4 * fog_k, (cfg.view as f32 * 16.0 - 8.0) * fog_k.min(1.0));
     if let Ok((mut f, _)) = fog.get_single_mut() {
         f.color = Color::linear_rgb(hor.x, hor.y, hor.z);
         f.falloff = FogFalloff::Linear { start: fog_start, end: fog_end };
     }
     clear.0 = Color::linear_rgb(hor.x, hor.y, hor.z);
     if let Some(w) = water_m.get_mut(&h.water) {
-        w.u.deep = rgb(0x17557f).extend(1.0); w.u.shallow = rgb(0x36b0cf).extend(1.0);
+        let (deep, shallow) = match kind { MapKind::Swamp => (0x1e3a26, 0x5a7a3a), MapKind::Volcanic => (0x8a1a06, 0xff7a1a), MapKind::Desert => (0x12607a, 0x3ac8c8), MapKind::Forest => (0x17557f, 0x36b0cf) };
+        w.u.deep = rgb(deep).extend(1.0); w.u.shallow = rgb(shallow).extend(1.0);
         w.u.sky = mix3(hor, top, 0.3).extend(1.0); w.u.sun = sd.extend(0.0);
-        w.u.fog = hor.extend(fog_start); w.u.params = Vec4::new(0.3 + 0.7 * day, fog_end, 0.0, 0.0);
+        w.u.fog = hor.extend(fog_start); w.u.params = Vec4::new(0.3 + 0.7 * day, fog_end, if kind.lava() { 1.0 } else { 0.0 }, 0.0);
     }
     if let Ok((mut l, mut tr)) = sun.get_single_mut() {
         let ldir = if up { sd } else { -sd };
@@ -172,10 +182,13 @@ fn update_day(time: Res<Time>, mut dc: ResMut<DayCycle>, cfg: Res<GameCfg>, h: O
         l.illuminance = if up { 1800.0 + 7200.0 * day } else { 2200.0 * (1.0 - day) };
         let mut sc = if up { rgb(0xfff0d8) } else if dc.blood { rgb(0xff7a6a) } else { rgb(0x9ab0ff) };
         if up { sc = mix3(sc, rgb(0xffa060), dusk * 0.6); }
+        if kind == MapKind::Volcanic { sc = mix3(sc, rgb(0xff8a4a), 0.55); l.illuminance *= 0.75; }
+        if kind == MapKind::Swamp { sc = mix3(sc, rgb(0xd8f0b0), 0.3); l.illuminance *= 0.85; }
         l.color = Color::linear_rgb(sc.x, sc.y, sc.z);
     }
     // sky-tinted fill light: blue-white by day, cool moonlit blue at night (red under a blood moon)
     let fill = if dc.blood { Vec3::new(0.7, 0.35, 0.35) } else { mix3(Vec3::new(0.45, 0.55, 0.9), Vec3::new(lerp(top.x, 1.0, 0.5), lerp(top.y, 1.0, 0.5), lerp(top.z, 1.0, 0.5)), day) };
+    let fill = match kind { MapKind::Volcanic => mix3(fill, Vec3::new(1.0, 0.45, 0.25), 0.55), MapKind::Swamp => mix3(fill, Vec3::new(0.55, 0.75, 0.5), 0.35), _ => fill };
     amb.color = Color::linear_rgb(fill.x, fill.y, fill.z);
     amb.brightness = 260.0 + 160.0 * day;
 }
@@ -200,6 +213,8 @@ pub fn stream_chunks(mut c: Commands, world: Option<ResMut<Voxels>>, cfg: Res<Ga
         let dd = dx * dx + dz * dz;
         if dd > v * v + 1 { continue; }
         let k = (pcx + dx, pcz + dz);
+        // nothing exists past the cliffs that wall the map in
+        if (k.0 * CS).abs().max((k.1 * CS).abs()) > HALF + CS * 2 { continue; }
         let meshed = world.chunks.get(&k).map(|ch| !ch.dirty && ch.entity.is_some()).unwrap_or(false);
         if !meshed { need.push((dd, k)); }
     } }

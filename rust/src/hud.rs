@@ -22,14 +22,16 @@ pub struct UiState {
     pub screen: Screen, pub cards: Vec<Card>, pub relic_only: bool, pub dead_t: f32, pub toast: Option<(String, String, f32, f32)>,
     pub ghost_hp: f32, pub map_t: f32, pub menu_t: f32, pub start: Option<Class>, pub restart: bool, pub quit: bool, pub cards_dirty: bool,
     pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32, pub paid: u32, pub recorded: bool, pub last_gain: u32, pub settings_from: Option<Screen>, pub req_host: bool, pub req_join: Option<String>, pub join_text: String, pub net_msg: String,
+    /// the second stage picked on the title screen: 0 random, 1 swamp, 2 desert
+    pub route: u8,
 }
 impl Default for UiState {
-    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0, settings_from: None, req_host: false, req_join: None, join_text: String::new(), net_msg: String::new() } }
+    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0, settings_from: None, req_host: false, req_join: None, join_text: String::new(), net_msg: String::new(), route: 0 } }
 }
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize), Settings, Set(u8, bool), Host, Join }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize), Settings, Set(u8, bool), Host, Join, Route(u8) }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -239,6 +241,8 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
             if keys.just_pressed(KeyCode::KeyH) || clicked == Some(UiBtn::Host) { ui.req_host = true; sfx.play("pick"); }
             if keys.just_pressed(KeyCode::KeyJ) || clicked == Some(UiBtn::Join) { ui.screen = Screen::Join; sfx.play("pick"); }
             if keys.just_pressed(KeyCode::KeyS) || clicked == Some(UiBtn::Settings) { ui.settings_from = Some(Screen::Menu); ui.screen = Screen::Settings; sfx.play("pick"); }
+            if let Some(UiBtn::Route(k)) = clicked { ui.route = k; sfx.play("pick"); }
+            if keys.just_pressed(KeyCode::KeyR) { ui.route = (ui.route + 1) % 3; sfx.play("pick"); }
             if clicked == Some(UiBtn::EmberUp) && save.ember < save.max_ember { save.ember += 1; save.write(); sfx.play("pick"); }
             if clicked == Some(UiBtn::EmberDown) && save.ember > 0 { save.ember -= 1; save.write(); sfx.play("pick"); }
         }
@@ -314,8 +318,9 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
 /// hover highlight for every button
 pub fn button_hover(mut q: Query<(&Interaction, &UiBtn, &mut BorderColor, &mut BackgroundColor)>, ui: Res<UiState>) {
     for (i, b, mut bc, mut bg) in q.iter_mut() {
-        let base = match b { UiBtn::Class(c) => class_color(*c), UiBtn::Card(k) => ui.cards.get(*k).map(|c| c.color).unwrap_or(0xffffff), _ => EMBER };
-        let (a, l) = match i { Interaction::Hovered => (1.0, 0.95), Interaction::Pressed => (1.0, 1.0), _ => (0.55, 0.88) };
+        let base = match b { UiBtn::Class(c) => class_color(*c), UiBtn::Card(k) => ui.cards.get(*k).map(|c| c.color).unwrap_or(0xffffff), UiBtn::Route(k) => [0xd8ccbc, 0x6fd4a0, 0xffc86a][*k as usize % 3], _ => EMBER };
+        let picked = matches!(b, UiBtn::Route(k) if *k == ui.route);
+        let (a, l) = match i { Interaction::Hovered => (1.0, 0.95), Interaction::Pressed => (1.0, 1.0), _ if picked => (1.0, 0.95), _ => (0.4, 0.88) };
         bc.0 = col(base, a); bg.0 = col(0x100c14, l);
     }
 }
@@ -358,12 +363,12 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
     set_text(&mut q, r.food, &format!("{} meat  {} berry", g.food_meat, g.food_berries));
     // clock, threat, kills, day
     let m = g.minutes(); let (tn, tc) = threat(m);
-    set_text(&mut q, r.timer, &fmt_t(g.run_t));
+    set_text(&mut q, r.timer, &fmt_t(g.stage_t));
     set_text(&mut q, r.threat, tn); set_tcol(&mut q, r.threat, srgb(tc));
     let nb = crate::director::next_boss(&g).map(|(t, n)| if t > 0.0 { format!("  |  {} in {}", n, fmt_t(t)) } else { String::new() }).unwrap_or_default();
     set_text(&mut q, r.kills, &format!("{} slain  |  {} gold{}", g.kills, g.gold, nb));
     let tod = if dc.blood { "Blood moon" } else if dc.night { "Night" } else { "Day" };
-    set_text(&mut q, r.day, &format!("Day {}  |  {}", dc.day, tod));
+    set_text(&mut q, r.day, &format!("Stage {}/3  {}\nDay {}  |  {}", g.stage + 1, g.map.name(), dc.day, tod));
     // boss
     let boss = g.boss.and_then(|id| g.enemies.iter().find(|e| e.id == id && !e.dead));
     set_vis(&mut q, r.boss, boss.is_some());
@@ -449,7 +454,7 @@ fn draw_map(w: &Voxels, g: &Game, p: &Player, images: &mut Assets<Image>, h: &Ha
         let o = ((j * s + i) * 4) as usize;
         let c = match w.chunks.get(&(cx, cz)) {
             Some(ch) => { let k = (x.rem_euclid(CS) + z.rem_euclid(CS) * CS) as usize; let (t, b) = (ch.top[k] as i32, ch.top_b[k]);
-                if t <= crate::world::SEA { [40u8, 90, 150] } else { let d = block_def(b); let c = d.top.unwrap_or(d.c); let s = Color::linear_rgb(c[0], c[1], c[2]).to_srgba(); let sh = 0.75 + (t as f32 - 22.0) * 0.02; [(s.red * 255.0 * sh).min(255.0) as u8, (s.green * 255.0 * sh).min(255.0) as u8, (s.blue * 255.0 * sh).min(255.0) as u8] } }
+                if t <= crate::world::SEA { match w.kind { crate::world::MapKind::Volcanic => [230u8, 90, 20], crate::world::MapKind::Swamp => [50, 80, 50], _ => [40, 90, 150] } } else { let d = block_def(b); let c = d.top.unwrap_or(d.c); let s = Color::linear_rgb(c[0], c[1], c[2]).to_srgba(); let sh = 0.75 + (t as f32 - 22.0) * 0.02; [(s.red * 255.0 * sh).min(255.0) as u8, (s.green * 255.0 * sh).min(255.0) as u8, (s.blue * 255.0 * sh).min(255.0) as u8] } }
             None => [18, 20, 26],
         };
         data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;

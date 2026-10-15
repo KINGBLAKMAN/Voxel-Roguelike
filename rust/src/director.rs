@@ -4,7 +4,6 @@
 //! and runs the points of interest (chests, shrines, altar trials).
 use crate::enemies::*;
 use crate::game::*;
-use crate::models::*;
 use crate::world::*;
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -12,16 +11,19 @@ use std::f32::consts::TAU;
 
 pub struct Chest { pub root: Entity, pub lid: Entity, pub pos: Vec3, pub open: bool, pub t: f32, pub relic: bool, pub poi: Option<(i32, i32)> }
 pub struct Trial { pub poi: (i32, i32), pub c: Vec3, pub t: f32, pub spawn: f32 }
+/// the gate to the next map that opens when a stage's boss falls
+pub struct Portal { pub root: Entity, pub swirl: Entity, pub pos: Vec3, pub t: f32, pub col: u32 }
 
 pub struct Director {
     pub pack: f32, pub event: f32, pub boss: f32, pub urn: f32, pub animal: f32, pub ev_i: u32,
     pub guarded: HashSet<(i32, i32)>, pub cleared: HashSet<(i32, i32)>, pub used: HashSet<(i32, i32)>, pub chest_out: HashSet<(i32, i32)>,
     pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32, pub hazard: f32, pub next_boss: usize, pub warned: bool, pub endless_t: f32,
+    pub portal: Option<Portal>,
 }
 impl Default for Director {
     fn default() -> Self {
         Director { pack: 1.5, event: 70.0, boss: 300.0, urn: 2.0, animal: 3.0, ev_i: 0, guarded: HashSet::new(), cleared: HashSet::new(), used: HashSet::new(), chest_out: HashSet::new(),
-            chests: vec![], trial: None, heat: 0.0, hazard: 10.0, next_boss: 0, warned: false, endless_t: 120.0 }
+            chests: vec![], trial: None, heat: 0.0, hazard: 10.0, next_boss: 0, warned: false, endless_t: 120.0, portal: None }
     }
 }
 
@@ -54,24 +56,30 @@ pub fn ring_spot(cx: &mut Ctx, a: Vec3, yaw: f32, r0: f32, r1: f32) -> Option<Ve
     None
 }
 
-/// [kind, minute it joins the horde, weight]
-const ROSTER: &[(Kind, f32, f32)] = &[(Kind::Zombie, 0.0, 6.0), (Kind::Slime, 0.0, 4.0), (Kind::Bat, 1.5, 3.5), (Kind::Skeleton, 2.5, 2.4), (Kind::Spider, 3.5, 3.0), (Kind::Wurm, 3.0, 2.2),
-    (Kind::Gorehorn, 4.0, 1.5), (Kind::Bloater, 4.5, 2.2), (Kind::Shieldbearer, 5.0, 1.6), (Kind::Cultist, 6.0, 2.0), (Kind::Imp, 6.5, 1.4), (Kind::Shaman, 7.0, 1.0),
-    (Kind::FrostGiant, 7.0, 0.8), (Kind::Brute, 8.0, 1.4), (Kind::Necromancer, 9.0, 0.9)];
+const FO: u8 = 1; const SW: u8 = 2; const DE: u8 = 4; const VO: u8 = 8;
+fn map_bit(m: MapKind) -> u8 { match m { MapKind::Forest => FO, MapKind::Swamp => SW, MapKind::Desert => DE, MapKind::Volcanic => VO } }
+/// [kind, intensity minute it joins the horde, weight, the maps it hunts]
+const ROSTER: &[(Kind, f32, f32, u8)] = &[
+    (Kind::Zombie, 0.0, 6.0, FO | SW | DE | VO), (Kind::Slime, 0.0, 4.0, FO | SW | VO), (Kind::Bat, 1.5, 3.5, FO | SW | DE), (Kind::Skeleton, 2.5, 2.4, FO | DE | VO),
+    (Kind::Spider, 2.0, 3.0, FO | SW), (Kind::Wurm, 3.0, 2.6, DE), (Kind::Gorehorn, 4.0, 1.5, FO | DE | VO), (Kind::Bloater, 4.0, 2.2, SW | FO | VO),
+    (Kind::Shieldbearer, 5.0, 1.6, FO | DE | VO), (Kind::Cultist, 6.0, 2.0, SW | DE | VO), (Kind::Imp, 6.5, 2.4, VO), (Kind::Shaman, 6.0, 1.0, FO | SW | VO),
+    (Kind::Brute, 8.0, 1.4, SW | DE | VO), (Kind::Necromancer, 7.0, 1.0, SW | DE | VO)];
 fn pack_size(k: Kind) -> (u32, u32) { match k { Kind::Zombie => (2, 5), Kind::Slime => (2, 4), Kind::Bat => (4, 8), Kind::Skeleton => (1, 3), Kind::Spider => (2, 3), Kind::Bloater | Kind::Cultist | Kind::Gorehorn => (1, 2), Kind::Shieldbearer | Kind::Imp => (2, 3), _ => (1, 1) } }
-fn pick_kind(cx: &mut Ctx, b: Bio) -> Kind {
+fn pick_kind(cx: &mut Ctx, _b: Bio) -> Kind {
     let m = cx.g.minutes();
+    let map = cx.w.kind; let bit = map_bit(map);
     let mut opts = vec![]; let mut tot = 0.0;
-    for &(k, at, w) in ROSTER {
-        if m < at { continue; }
-        // biome natives: sand wurms only hunt the desert, frost giants only the snow
-        if k == Kind::Wurm && b != Bio::Desert { continue; }
-        if k == Kind::FrostGiant && !matches!(b, Bio::Snow | Bio::Peak) { continue; }
+    for &(k, at, w, maps) in ROSTER {
+        if m < at || maps & bit == 0 { continue; }
         let mut q = w * (0.35 + (m - at) * 0.4).min(1.0);
-        if k == Kind::Skeleton && b == Bio::Desert { q *= 2.0; }
-        if k == Kind::Spider && b == Bio::Forest { q *= 2.0; }
-        if k == Kind::Cultist && matches!(b, Bio::Snow | Bio::Peak) { q *= 1.8; }
-        if k == Kind::Slime && matches!(b, Bio::Plains | Bio::Forest) { q *= 1.4; }
+        // each map leans on its natives
+        match (map, k) {
+            (MapKind::Forest, Kind::Spider | Kind::Slime) => q *= 1.5,
+            (MapKind::Swamp, Kind::Spider | Kind::Bloater | Kind::Slime) => q *= 1.8,
+            (MapKind::Desert, Kind::Skeleton | Kind::Wurm) => q *= 1.8,
+            (MapKind::Volcanic, Kind::Imp | Kind::Cultist) => q *= 1.8,
+            _ => {}
+        }
         if cx.dc.night && matches!(k, Kind::Zombie | Kind::Skeleton | Kind::Bat | Kind::Necromancer) { q *= 1.5; }
         if cx.dc.blood && matches!(k, Kind::Shaman | Kind::Imp | Kind::Gorehorn) { q *= 1.8; }
         opts.push((k, q)); tot += q;
@@ -82,7 +90,7 @@ fn pick_kind(cx: &mut Ctx, b: Bio) -> Kind {
 }
 fn slime_opts(cx: &mut Ctx, b: Bio) -> SpawnOpts {
     let size = if cx.r() < 0.3 { 1.6 } else { 1.0 };
-    let color = match b { Bio::Desert => 0xe0b85a, Bio::Snow => 0x8fd8ff, _ => cx.pick(&[0x6fd46a, 0x6fd46a, 0xff7a9a]) };
+    let color = match (cx.w.kind, b) { (MapKind::Volcanic, _) => cx.pick(&[0xff6a2a, 0xff8a3a]), (MapKind::Swamp, _) => cx.pick(&[0x6a9a3a, 0x8aba4a]), (_, Bio::Desert) => 0xe0b85a, (_, Bio::Snow) => 0x8fd8ff, _ => cx.pick(&[0x6fd46a, 0x6fd46a, 0xff7a9a]) };
     SpawnOpts { size, color, ..default() }
 }
 pub struct PackOpts { pub at: Option<Vec3>, pub r0: f32, pub r1: f32, pub elite: bool, pub force: bool }
@@ -226,33 +234,108 @@ fn horde_event(cx: &mut Ctx, i: u32) {
         }
     }
 }
-/// the run's shape: a boss every five minutes, and the Ember King at twenty
-pub const BOSSES: [(f32, Kind, &str, &str); 4] = [
-    (300.0, Kind::Golem, "An Ancient Golem awakens", "Bring it down for a relic"),
-    (600.0, Kind::Colossus, "The Bone Colossus rises", "Its arrows blot out the sun"),
-    (900.0, Kind::Broodmother, "The Broodmother descends", "Her children are hungry"),
-    (1200.0, Kind::EmberKing, "THE EMBER KING", "Defeat him to win the run"),
-];
-pub const RUN_LEN: f32 = 1200.0;
+/// the run's shape: three five-minute stages, each ending in its map's boss
+pub const STAGE_LEN: f32 = 300.0;
+pub const STAGES: u32 = 3;
+pub fn stage_boss(m: MapKind) -> (Kind, &'static str, &'static str) {
+    match m {
+        MapKind::Forest => (Kind::Golem, "An Ancient Golem awakens", "Bring it down to open the way"),
+        MapKind::Desert => (Kind::Colossus, "The Bone Colossus rises", "Its arrows blot out the sun"),
+        MapKind::Swamp => (Kind::Broodmother, "The Broodmother descends", "Her children are hungry"),
+        MapKind::Volcanic => (Kind::EmberKing, "THE EMBER KING", "Defeat him to win the run"),
+    }
+}
+/// a map's signature colour (portals, stage cards)
+pub fn map_color(m: MapKind) -> u32 { match m { MapKind::Forest => 0x8fe06a, MapKind::Swamp => 0x6fd4a0, MapKind::Desert => 0xffc86a, MapKind::Volcanic => 0xff6a2a } }
 pub fn final_boss_up(cx: &Ctx) -> bool { cx.g.boss.and_then(|id| cx.g.enemies.iter().find(|e| e.id == id && !e.dead)).map(|e| e.kind == Kind::EmberKing).unwrap_or(false) }
-/// (seconds until, name) of the next scheduled boss
+/// (seconds until, name) of this stage's boss
 pub fn next_boss(g: &Game) -> Option<(f32, &'static str)> {
     if g.flags.contains_key("endless") { return Some((g.dir.endless_t, "Boss")); }
-    BOSSES.get(g.dir.next_boss).map(|b| (b.0 - g.run_t, crate::enemies::etype(b.1).name))
+    if g.dir.next_boss > 0 { return None; }
+    Some((STAGE_LEN - g.stage_t, crate::enemies::etype(stage_boss(g.map).0).name))
 }
 fn boss_schedule(cx: &mut Ctx) {
-    let t = cx.g.run_t;
     if cx.g.flags.contains_key("endless") {
         cx.g.dir.endless_t -= cx.dt;
         if cx.g.dir.endless_t <= 0.0 && cx.g.boss.is_none() {
             let k = cx.pick(&[Kind::Golem, Kind::Colossus, Kind::Broodmother, Kind::EmberKing]);
-            if spawn_boss(cx, k, "A champion of the wild appears", "Endless: every boss grows stronger") { cx.g.dir.endless_t = 240.0; *cx.g.flags.entry("endless_n").or_insert(0.0) += 1.0; }
+            if spawn_boss(cx, k, "A champion of the wild appears", "Endless: every boss grows stronger") { cx.g.dir.endless_t = 180.0; *cx.g.flags.entry("endless_n").or_insert(0.0) += 1.0; }
         }
         return;
     }
-    let Some(&(at, k, title, sub)) = BOSSES.get(cx.g.dir.next_boss) else { return };
-    if t >= at - 8.0 && !cx.g.dir.warned { cx.g.dir.warned = true; cx.play("rumble"); cx.announce("The ground trembles...", "Something huge is coming", 3.0); cx.shake(0.3); }
-    if t >= at && spawn_boss(cx, k, title, sub) { cx.g.dir.next_boss += 1; cx.g.dir.warned = false; }
+    if cx.g.dir.next_boss > 0 { return; }
+    let t = cx.g.stage_t;
+    let (k, title, sub) = stage_boss(cx.g.map);
+    if t >= STAGE_LEN - 8.0 && !cx.g.dir.warned { cx.g.dir.warned = true; cx.play("rumble"); cx.announce("The ground trembles...", "Something huge is coming", 3.0); cx.shake(0.3); }
+    if t >= STAGE_LEN && spawn_boss(cx, k, title, sub) { cx.g.dir.next_boss += 1; cx.g.dir.warned = false; }
+}
+/// a stage boss fell: the gate to the next map opens nearby (the Ember King's death ends the run instead)
+pub fn stage_boss_down(cx: &mut Ctx, kind: Kind, pos: Vec3) {
+    if cx.g.net.client() || cx.g.flags.contains_key("endless") || kind == Kind::EmberKing || cx.g.stage + 1 >= STAGES || cx.g.dir.portal.is_some() { return; }
+    if kind != stage_boss(cx.g.map).0 { return; }
+    let mut at = pos; at.y = cx.ground(at.x, at.z, pos.y + 2.0);
+    let next = cx.g.stage_map(cx.g.stage + 1);
+    open_portal(cx, at, map_color(next));
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Portal { a: at.to_array(), col: map_color(next) }); }
+    cx.announce("The way opens", &format!("Step into the portal to {}  (it pulls you in after 40s)", next.name()), 4.5);
+    // every gem on the map flies home so nothing is left behind
+    for pk in cx.g.pickups.iter_mut() { if pk.kind == PickKind::Xp { pk.vac = true; } }
+}
+/// build the portal: a ring of standing stones around a swirling gate
+pub fn open_portal(cx: &mut Ctx, at: Vec3, col: u32) {
+    if let Some(p) = cx.g.dir.portal.take() { cx.c.entity(p.root).despawn_recursive(); }
+    let mut b = cx.builder();
+    let root = b.root(at);
+    let v = Vec3::new;
+    let stone = 0x5a5a62;
+    for sx in [-1.0f32, 1.0] {
+        b.bx(root, v(0.7, 4.2, 0.7), stone, v(sx * 1.7, 2.1, 0.0));
+        b.bx(root, v(0.9, 0.4, 0.9), 0x46464e, v(sx * 1.7, 0.2, 0.0));
+        b.glow(root, v(0.12, 3.4, 0.74), col, v(sx * 1.36, 2.2, 0.0));
+    }
+    b.bx(root, v(4.3, 0.6, 0.8), stone, v(0.0, 4.4, 0.0));
+    b.bx(root, v(1.0, 0.5, 0.86), 0x46464e, v(0.0, 4.8, 0.0));
+    b.glow(root, v(0.4, 0.3, 0.9), col, v(0.0, 4.8, 0.0));
+    let swirl = b.pivot(root, v(0.0, 2.2, 0.0));
+    for k in 0..6 {
+        let arm = b.pivot(swirl, Vec3::ZERO);
+        b.glow(arm, v(0.18, 1.8 - k as f32 * 0.18, 0.06), if k % 2 == 0 { col } else { 0xffffff }, v(0.0, 0.5 + k as f32 * 0.08, 0.0));
+        b.rot(arm, 0.0, 0.0, k as f32 / 6.0 * TAU);
+    }
+    b.glow(swirl, v(2.6, 3.6, 0.04), col, Vec3::ZERO);
+    cx.g.dir.portal = Some(Portal { root, swirl, pos: at, t: 0.0, col });
+    cx.play("relic"); cx.shake(0.4);
+    let mut g = cx.gfx(); g.pillar(at, col, 2.0, 30.0, 1.5); g.shock(at, col, 0.5, 12.0, 0.6, 3.0);
+}
+/// the portal hums, and pulls the party through when someone steps in or the timer runs out
+pub fn update_portal(cx: &mut Ctx) {
+    let Some(p) = cx.g.dir.portal.as_mut() else { return };
+    p.t += cx.dt;
+    let (root, swirl, pos, t, col) = (p.root, p.swirl, p.pos, p.t, p.col);
+    if let Ok(mut tr) = cx.q.get_mut(swirl) { tr.rotation = Quat::from_rotation_z(t * 2.4); tr.scale = Vec3::splat(0.92 + 0.08 * (t * 5.0).sin()); }
+    if let Ok(mut tr) = cx.q.get_mut(root) {
+        // face the player
+        let d = cx.p.body.pos - pos; tr.rotation = Quat::from_rotation_y(d.x.atan2(d.z));
+    }
+    if cx.r() < 0.8 { let an = cx.rr(0.0, TAU); let o = Vec3::new(an.cos() * 1.3, 2.2 + an.sin() * 1.8, 0.0); let ro = Quat::from_rotation_y((cx.p.body.pos - pos).x.atan2((cx.p.body.pos - pos).z)); cx.fx.emit(true, pos + ro * o, -(ro * o).with_y(0.0) * 0.6 + Vec3::Y * 0.4, 0.9, 0.35, 0.05, crate::fx::hexc(col) * 3.0, 0.0, 0.0, 1.0); }
+    if cx.g.net.client() { return; }
+    let mut enter = false;
+    let near = |q: Vec3| (q - pos).with_y(0.0).length() < 1.8 && (q.y - pos.y).abs() < 3.0;
+    if !cx.p.dead && near(cx.p.body.pos) { enter = true; }
+    for tg in crate::net::targets(cx.g) { if near(tg.1) { enter = true; } }
+    if t > 40.0 { enter = true; }
+    if t > 30.0 && t - cx.dt <= 30.0 { cx.announce("The portal is closing", "It will pull you through in 10 seconds", 2.5); }
+    if enter { advance_stage(cx); }
+}
+/// leave for the next map: the host picks a seed and everyone rebuilds the world around their kept character
+pub fn advance_stage(cx: &mut Ctx) {
+    if cx.g.pending_stage.is_some() { return; }
+    let stage = cx.g.stage + 1;
+    let kind = cx.g.stage_map(stage);
+    let seed = (cx.r() * 999_999_937.0) as u32;
+    cx.g.pending_stage = Some((stage, kind, seed));
+    if cx.g.net.host() { cx.g.net.send(crate::net::Msg::Stage { stage, kind: kind.id(), seed }); }
+    cx.play("portal");
 }
 fn spawn_boss(cx: &mut Ctx, k: Kind, title: &str, sub: &str) -> bool {
     let (pp, yaw) = (cx.p.body.pos, cx.p.yaw);

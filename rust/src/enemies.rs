@@ -244,7 +244,7 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
     if kind == Kind::Bloater { bloater_pop(cx, i, self_det); }
     crate::horde::on_death(cx, kind, pos);
     if elite { let (nm, _) = affix.map(affix_info).unwrap_or((t.name, 0)); let label = if affix.is_some() { format!("{} {} slain", nm, t.name) } else { format!("{} slain", t.name) }; cx.toast(&label, &format!("+{} experience", xp), 2.5); crate::director::drop_chest(cx, pos, false); }
-    if boss { cx.g.boss = None; *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; for _ in 0..8 { let g = (5.0 + cx.g.minutes()).round(); cx.drop_pick(c, PickKind::Gold, g); } }
+    if boss { cx.g.boss = None; *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; crate::director::stage_boss_down(cx, kind, pos); for _ in 0..8 { let g = (5.0 + cx.g.minutes()).round(); cx.drop_pick(c, PickKind::Gold, g); } }
     if cx.g.net.host() { let id = cx.g.enemies[i].id; let killer = cx.g.net.last_hitter.remove(&id).unwrap_or(cx.g.net.my_id); let sx = if t.passive || t.prop { 0.0 } else { xp }; cx.g.net.send(crate::net::Msg::Die { id, killer, xp: sx }); }
     } else if boss { *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; }
     let e = std::mem::replace(&mut cx.g.enemies[i].rig, Rig::default());

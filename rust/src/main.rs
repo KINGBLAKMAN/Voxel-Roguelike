@@ -106,14 +106,17 @@ fn main() {
     app.run();
 }
 
-fn start_world(mut c: Commands, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>, mut p: ResMut<Player>, mut ctl: ResMut<Controls>, mut ui: ResMut<hud::UiState>, test: Option<Res<testkit::TestCfg>>) {
+fn start_world(mut c: Commands, mut g: ResMut<Game>, mut pal: ResMut<Palette>, mut mats: ResMut<Assets<StandardMaterial>>, mut p: ResMut<Player>, mut ctl: ResMut<Controls>, mut ui: ResMut<hud::UiState>, test: Option<Res<testkit::TestCfg>>) {
     let seed = test.as_ref().map(|t| t.seed).unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
     if test.as_ref().map(|t| t.no_foliage).unwrap_or(false) { c.queue(|w: &mut bevy::prelude::World| w.resource_mut::<GameCfg>().no_foliage = true); }
-    let mut w = world::Voxels::new(seed);
+    let map = test.as_ref().map(|t| t.map).unwrap_or_default();
+    let mut w = world::Voxels::new(seed, map);
     let sp = w.spawn_point();
     p.body.pos = sp; p.vis_y = sp.y;
     // scripted tests skip the title screen
     if let Some(t) = test.as_ref() { if t.camp { ui.screen = if t.class == Class::Mage { hud::Screen::Settings } else { hud::Screen::Camp }; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
+    // a test on a later map plays as if the run got there
+    g.map = map; g.stage = match map { world::MapKind::Forest => 0, world::MapKind::Volcanic => 2, m => { g.route = m; 1 } };
     c.insert_resource(w);
 }
 fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0) } }
@@ -146,45 +149,82 @@ fn run_control(link: Option<Res<net::Link>>, save: Res<meta::Save>, mut c: Comma
     if let Some(cls) = ui.start.take() {
         begin_player(&mut c, &mut pal, &mut mats, &mut p, cls);
         meta::apply_start(&save, &mut g, &mut p);
+        g.route = match ui.route { 1 => world::MapKind::Swamp, 2 => world::MapKind::Desert, _ => if rand::random::<bool>() { world::MapKind::Swamp } else { world::MapKind::Desert } };
         ui.screen = hud::Screen::Playing; ui.dead_t = 0.0; ui.ghost_hp = 1.0;
         ctl.want_lock = true; ctl.relock = true;
         sfx.play("horn");
     }
+    if let (Some((stage, map, seed)), false) = (g.pending_stage, ui.restart) {
+        g.pending_stage = None;
+        next_stage(&mut c, &mut g, &mut p, &mut fx, w, &mut dc, stage, map, seed);
+        return;
+    }
     if !ui.restart { return; }
     ui.restart = false;
     let g = &mut *g;
-    // everything the run spawned into the world goes away
+    clear_run_world(&mut c, g, &mut fx);
+    let netstate = std::mem::take(&mut g.net);
+    *g = Game::default();
+    g.net = netstate; g.net.out.clear();
+    if let Some(r) = p.rig.root.take() { c.entity(r).despawn_recursive(); }
+    // a fresh world
+    if let Some(w) = w { clear_chunks(&mut c, &w); }
+    let seed = join_seed.unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
+    // a client joining mid-run lands on the host's current map
+    let (map, stage) = g.net.join_map.take().filter(|_| join_seed.is_some()).unwrap_or((world::MapKind::Forest, 0));
+    g.map = map; g.stage = stage;
+    let mut nw = world::Voxels::new(seed, map);
+    if let Some(l) = link.as_ref() { if l.host { for id in l.peer_ids() { l.send(Some(id), &net::Msg::Welcome { id, seed, map: map.id(), stage: 0 }); } } }
+    let sp = nw.spawn_point();
+    *p = Player::default(); p.body.pos = sp; p.vis_y = sp.y;
+    c.insert_resource(nw);
+    *dc = DayCycle::default();
+    ui.screen = hud::Screen::Menu; ui.dead_t = 0.0; ui.toast = None;
+}
+
+/// despawn everything a stage put into the world (monsters, corpses, loot, projectiles, zones, chests, the portal)
+fn clear_run_world(c: &mut Commands, g: &mut Game, fx: &mut fx::Fx) {
     let mut ents: Vec<Entity> = vec![];
     for e in g.enemies.drain(..) { ents.extend(e.rig.root); ents.extend(e.ice); }
     ents.extend(g.corpses.drain(..).map(|x| x.root));
     ents.extend(g.pickups.drain(..).map(|x| x.e));
     for pr in g.projs.drain(..) { ents.extend(pr.e); }
     for z in g.zones.iter_mut() { ents.append(&mut z.ents); }
+    g.zones.clear();
     ents.extend(g.traps.drain(..).map(|t| t.root));
     ents.extend(g.dir.chests.drain(..).map(|c| c.root));
+    if let Some(pt) = g.dir.portal.take() { ents.push(pt.root); }
     for l in g.rel.objs.values() { ents.extend(l.iter().copied()); }
+    g.rel.objs.clear();
     ents.extend(g.rel.decoys.drain(..).map(|d| d.e));
     ents.extend(g.rel.stuck.drain(..).map(|s| s.e));
     if let Some(ch) = g.ab.charge.take() { ents.push(ch.wedge()); }
     for t in fx.tweens.drain(..) { ents.push(t.e); }
-    let fx = &mut *fx;
     for d in fx.debris.drain(..) { c.entity(d.e).insert(Visibility::Hidden); fx.debris_free.push(d.e); }
     fx.add.clear(); fx.blend.clear();
     for e in ents { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } }
-    let netstate = std::mem::take(&mut g.net);
-    *g = Game::default();
-    g.net = netstate; g.net.out.clear();
-    if let Some(r) = p.rig.root.take() { c.entity(r).despawn_recursive(); }
-    // a fresh world
-    if let Some(w) = w { for ch in w.chunks.values() { for e in [ch.entity, ch.fol_entity].into_iter().flatten() { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } } } }
-    let seed = join_seed.unwrap_or_else(|| rand::random::<u32>() % 1_000_000_000);
-    let mut nw = world::Voxels::new(seed);
-    if let Some(l) = link.as_ref() { if l.host { for id in l.peer_ids() { l.send(Some(id), &net::Msg::Welcome { id, seed }); } } }
+}
+fn clear_chunks(c: &mut Commands, w: &world::Voxels) {
+    for ch in w.chunks.values() { for e in [ch.entity, ch.fol_entity].into_iter().flatten() { if let Some(mut ec) = c.get_entity(e) { ec.despawn_recursive(); } } }
+}
+/// carry the party to the next map: a fresh world, the same character, and the clock keeps its intensity
+#[allow(clippy::too_many_arguments)]
+fn next_stage(c: &mut Commands, g: &mut Game, p: &mut Player, fx: &mut fx::Fx, w: Option<ResMut<world::Voxels>>, dc: &mut DayCycle, stage: u32, map: world::MapKind, seed: u32) {
+    clear_run_world(c, g, fx);
+    if let Some(w) = w.as_ref() { clear_chunks(c, w); }
+    g.timers.clear(); g.boss = None; g.popups.clear();
+    g.dir = Default::default(); g.ev = Default::default();
+    g.stage = stage; g.stage_t = 0.0; g.map = map;
+    let mut nw = world::Voxels::new(seed, map);
     let sp = nw.spawn_point();
-    *p = Player::default(); p.body.pos = sp; p.vis_y = sp.y;
+    p.body.pos = sp; p.body.vel = Vec3::ZERO; p.vis_y = sp.y; p.dash = None; p.leap = None;
+    if p.dead { p.dead = false; p.hp = p.max_hp * 0.5; }
     c.insert_resource(nw);
-    *dc = DayCycle::default();
-    ui.screen = hud::Screen::Menu; ui.dead_t = 0.0; ui.toast = None;
+    // each new map starts at dawn of the next day
+    dc.time = dc.time.floor() + 1.02;
+    let (k, _, _) = director::stage_boss(map);
+    g.toasts.push((format!("Stage {}: {}", stage + 1, map.name()), format!("Survive five minutes, then face the {}", enemies::etype(k).name), 4.5));
+    g.flash = 0.6;
 }
 
 #[derive(SystemParam)]
@@ -229,7 +269,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     if let Some(q) = devq.as_mut() { for a in std::mem::take(&mut q.0) { test_act(&mut cx, &a); } }
     if cx.g.flags.contains_key("dev_god") { cx.p.hp = cx.p.max_hp; cx.p.dead = false; }
     if cx.g.flags.contains_key("dev_nocd") { cx.g.cds = [0.0; 4]; }
-    cx.g.run_t += dt;
+    cx.g.run_t += dt; cx.g.stage_t += dt;
     // guard and dodge, for every class
     let rmb = input && mouse.pressed(MouseButton::Right) && (ctl.locked || ctl.pad);
     if rmb && !cx.p.dead && cx.p.stam > 0.0 && cx.p.dash.is_none() && cx.p.leap.is_none() { if cx.p.blocking <= 0.0 { cx.play("swing"); } cx.p.blocking += dt; } else { cx.p.blocking = 0.0; }
@@ -276,6 +316,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
         director::update_pois(&mut cx);
         events::update(&mut cx);
     }
+    director::update_portal(&mut cx);
     if cx.g.net.host() { cx.g.net.day = Some(cx.dc.time); }
     relics::update_relics(&mut cx);
     augments::update_augments(&mut cx);
@@ -371,6 +412,9 @@ fn test_act(cx: &mut Ctx, a: &str) {
         "lvl" => { let n = cx.g.xp_need(); cx.gain_xp(n); }
         "mod" => { *cx.g.mods.entry(v.to_string()).or_insert(0) += 1; }
         "minutes" => { cx.g.run_t = v.parse::<f32>().unwrap_or(5.0) * 60.0; }
+        "stage_t" => { let t = v.parse::<f32>().unwrap_or(290.0); cx.g.run_t += (t - cx.g.stage_t).max(0.0); cx.g.stage_t = t; }
+        "nextstage" => { director::advance_stage(cx); }
+        "portal" => { let p = cx.p.body.pos + cx.p.fwd() * 5.0; let mut at = p; at.y = cx.ground(p.x, p.z, p.y + 2.0); let col = director::map_color(cx.g.stage_map(cx.g.stage + 1)); director::open_portal(cx, at, col); }
         "weapon" => { cx.p.widx = v.parse().unwrap_or(0); attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
         "chest" => { let p = cx.p.body.pos + cx.p.fwd() * 4.0; director::drop_chest(cx, p, false); }
         "ab" => { let i: usize = v.parse().unwrap_or(0); cx.g.cds[i] = 0.0; abilities::use_ability(cx, i); }
@@ -381,7 +425,7 @@ fn test_act(cx: &mut Ctx, a: &str) {
         "lvl5" => { for _ in 0..5 { let n = cx.g.xp_need(); cx.gain_xp(n); } }
         "gold" => { cx.g.gold += v.parse::<u32>().unwrap_or(500); }
         "rerolls" => { cx.g.rerolls += 3; }
-        "minutes+1" => { cx.g.run_t += 60.0; }
+        "minutes+1" => { cx.g.run_t += 60.0; cx.g.stage_t += 60.0; }
         "swapw" => { cx.p.widx = 1 - cx.p.widx; cx.p.charging = false; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
         "killall" => { for i in 0..cx.g.enemies.len() { if !cx.g.enemies[i].dead && !cx.g.enemies[i].t.passive { cx.damage(i, 1.0e7, Hit { quiet: true, ..default() }); } } }
         "maxrelics" => { for r in relics::RELICS.iter() { cx.g.mods.insert(format!("r.{}", r.id), relics::RMAX); } }

@@ -18,7 +18,9 @@ pub mod l {
     pub const GRAVEL: u32 = 15; pub const FGRASS: u32 = 16; pub const FGRASS_SIDE: u32 = 17; pub const BIRCH: u32 = 18; pub const AUTUMN: u32 = 19;
     pub const CRYSTAL: u32 = 20; pub const PLANK: u32 = 21; pub const CLOTH: u32 = 22; pub const GOLD: u32 = 23; pub const EMBER: u32 = 24;
     pub const DSTONE: u32 = 25; pub const RUNE: u32 = 26; pub const BERRY: u32 = 27; pub const BIRCH_TOP: u32 = 28;
-    pub const COUNT: u32 = 29;
+    pub const MUD: u32 = 29; pub const BASALT: u32 = 30; pub const BASALT_TOP: u32 = 31; pub const ASH: u32 = 32; pub const OBSIDIAN: u32 = 33;
+    pub const MAGMA: u32 = 34; pub const SANDSTONE: u32 = 35; pub const SANDSTONE_TOP: u32 = 36; pub const CLAY: u32 = 37; pub const CHAR: u32 = 38;
+    pub const COUNT: u32 = 39;
 }
 
 /// which layer a block shows on a face (0 top, 1 side, 2 bottom); `capped` is a side face under open air
@@ -36,6 +38,9 @@ pub fn face_layer(bl: u8, face: u8, capped: bool) -> u32 {
         b::CACTUS => if face == 1 { l::CACTUS } else { l::CACTUS_TOP },
         b::BRICK => l::BRICK, b::MOSS => l::MOSS, b::GRAVEL => l::GRAVEL, b::CRYSTAL => l::CRYSTAL, b::PLANK => l::PLANK,
         b::CLOTH => l::CLOTH, b::GOLD => l::GOLD, b::EMBER => l::EMBER, b::DSTONE => l::DSTONE, b::RUNE => l::RUNE,
+        b::MUD => l::MUD, b::BASALT => if face == 1 { l::BASALT } else { l::BASALT_TOP }, b::ASH => if face == 0 { l::ASH } else { l::BASALT },
+        b::OBSIDIAN => l::OBSIDIAN, b::MAGMA => l::MAGMA, b::SANDSTONE => if face == 1 { l::SANDSTONE } else { l::SANDSTONE_TOP }, b::CLAY => l::CLAY,
+        b::CHAR => if face == 1 { l::CHAR } else { l::RINGS },
         _ => l::STONE,
     }
 }
@@ -337,6 +342,86 @@ fn rune(s: u32) -> Tex {
     t
 }
 
+fn mud(s: u32) -> Tex {
+    let mut t = Tex::new(0.35, 1.8);
+    t.each(|x, y, c, hh| {
+        let n = fbm(x as f32, y as f32, 3, 3, s);
+        *c = pick(&[0x2e2418, 0x3e3020, 0x4a3a26, 0x5a4830], n); *hh = n * 0.6;
+        // wet puddles shine; little stones and roots break the surface
+        if n < 0.32 { *c *= 0.8; *hh = 0.1; }
+        let r = h(x, y, s + 3);
+        if r < 0.03 { *c = hx(0x6a5a44); *hh = 0.9; } else if r > 0.985 { *c = hx(0x2a3a1a); *hh = 0.7; }
+    });
+    t
+}
+/// columnar basalt: tall hexagonal prisms on the side, the hexagon tops on top
+fn basalt(s: u32, top: bool) -> Tex {
+    let mut t = Tex::new(0.8, 3.0);
+    let cells = Cells::new(if top { 7 } else { 4 }, s);
+    t.each(|x, y, c, hh| {
+        let (f1, f2, id) = if top { cells.at(x as f32 + 0.5, y as f32 + 0.5) } else { cells.at(x as f32 + 0.5, 0.5 + (y as f32 * 0.15)) };
+        let n = fbm(x as f32, y as f32, 4, 4, s + 1);
+        *c = pick(&[0x26221f, 0x332e2b, 0x3e3834, 0x4a4440], hash2(id as i32, 4, s) * 0.6 + n * 0.4); *hh = 0.5 + 0.4 * (f1 / 6.0).min(1.0);
+        if f2 - f1 < 0.9 { *c *= 0.45; *hh = 0.0; }
+        if !top && (y % 11 == 0 && h(x, y, s + 2) < 0.6) { *c *= 0.6; *hh = 0.1; }
+    });
+    t
+}
+fn ash(s: u32) -> Tex {
+    let mut t = Tex::new(0.98, 1.2);
+    t.each(|x, y, c, hh| {
+        let n = fbm(x as f32, y as f32, 4, 4, s) * 0.8 + h(x, y, s + 1) * 0.2;
+        *c = pick(&[0x4a4542, 0x5e5854, 0x726c66, 0x8a837c], n); *hh = n;
+        let r = h(x, y, s + 2);
+        if r < 0.02 { *c = hx(0xff7a2a) * 1.4; *hh = 0.2; } else if r < 0.06 { *c = hx(0x2a2624); }
+    });
+    t
+}
+fn obsidian(s: u32) -> Tex {
+    let mut t = Tex::new(0.08, 2.4);
+    let cells = Cells::new(6, s);
+    t.each(|x, y, c, hh| {
+        let (f1, f2, _) = cells.at(x as f32 + 0.5, y as f32 + 0.5);
+        let n = fbm(x as f32, y as f32, 2, 2, s + 1);
+        *c = pick(&[0x0e0a14, 0x1c1426, 0x2c2040, 0x4a3a6a], n * 0.7 + (1.0 - (f1 / 8.0).min(1.0)) * 0.3); *hh = 1.0 - (f1 / 8.0).min(1.0);
+        if f2 - f1 < 0.6 { *c = hx(0x6a5a9a); *hh = 1.0; }
+    });
+    t
+}
+/// cooling magma: a dark crust broken by molten, glowing cracks
+fn magma(s: u32) -> Tex {
+    let mut t = Tex::new(0.9, 3.0);
+    let cells = Cells::new(7, s);
+    t.each(|x, y, c, hh| {
+        let (f1, f2, _) = cells.at(x as f32 + 0.5, y as f32 + 0.5);
+        let crack = smooth(2.4, 0.2, f2 - f1);
+        let pool = smooth(0.62, 0.8, fbm(x as f32, y as f32, 3, 3, s + 1));
+        let k = crack.max(pool);
+        *c = hx(0x1e0e0a).lerp(hx(0xff5a14), k).lerp(hx(0xffd27a), (k - 0.75).max(0.0) * 3.0); *hh = 1.0 - k;
+    });
+    t
+}
+fn sandstone(s: u32, top: bool) -> Tex {
+    let mut t = Tex::new(0.92, 2.0);
+    t.each(|x, y, c, hh| {
+        let n = fbm(x as f32, y as f32, 4, if top { 4 } else { 1 }, s);
+        let band = if top { 0.5 } else { ((y as f32 + n * 3.0) / 5.0).fract() };
+        *c = pick(&[0xb8945a, 0xd0ac70, 0xdcbc80, 0xe8cc94], band * 0.6 + n * 0.4); *hh = 0.4 + band * 0.4;
+        if !top && (y % 10 == 0) { *c *= 0.78; *hh = 0.1; }
+        if top && h(x, y, s + 1) < 0.04 { *c *= 0.85; }
+    });
+    t
+}
+fn clay(s: u32) -> Tex {
+    let mut t = Tex::new(0.9, 1.6);
+    t.each(|x, y, c, hh| {
+        let n = fbm(x as f32, y as f32, 4, 1, s);
+        *c = pick(&[0x8a4428, 0xa45434, 0xb4643a, 0xc87a4a], n); *hh = n;
+        if y % 8 == 0 { *c *= 0.82; }
+    });
+    t
+}
+
 /// paint every layer and build the albedo and normal/roughness texture arrays
 pub fn build(images: &mut Assets<Image>) -> (Handle<Image>, Handle<Image>) {
     let grass = [0x3a6a24, 0x4c8630, 0x5c9a38, 0x72ae48];
@@ -355,6 +440,8 @@ pub fn build(images: &mut Assets<Image>) -> (Handle<Image>, Handle<Image>) {
             l::FGRASS => grass_top(&fgrass, true, s), l::FGRASS_SIDE => with_cap(dirt(s), &fgrass, 5.0, s + 3), l::BIRCH => birch(s),
             l::BIRCH_TOP => rings(&[0xb89a6a, 0xd8c08a, 0xe8d8a8], 0xe6e2d6, s), l::CRYSTAL => crystal(s), l::PLANK => planks(s), l::CLOTH => cloth(s),
             l::GOLD => gold(s), l::EMBER => ember(s), l::DSTONE => bricks(&[0x4a4e56, 0x5a5e66, 0x6a6e76], s, 2, 0x2a2c30), l::RUNE => rune(s),
+            l::MUD => mud(s), l::BASALT => basalt(s, false), l::BASALT_TOP => basalt(s, true), l::ASH => ash(s), l::OBSIDIAN => obsidian(s), l::MAGMA => magma(s),
+            l::SANDSTONE => sandstone(s, false), l::SANDSTONE_TOP => sandstone(s, true), l::CLAY => clay(s), l::CHAR => bark(&[0x100c0a, 0x1c1612, 0x2a201a, 0x3a2a20], s),
             _ => stone(&[0x808080, 0x909090], s, 1.0),
         });
     }

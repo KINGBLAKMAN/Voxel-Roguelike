@@ -12,7 +12,8 @@ struct VOut { @builtin(position) clip: vec4<f32>, @location(0) wp: vec3<f32> };
   let t = globals.time;
   let m = mesh_functions::get_world_from_local(v.ii);
   var wp = (m * vec4<f32>(v.pos, 1.0)).xyz;
-  wp.y += sin(wp.x * 0.35 + t * 1.3) * 0.06 + cos(wp.z * 0.4 + t * 1.1) * 0.06;
+  let calm = select(1.0, 0.35, wm.params.z > 0.5);
+  wp.y += (sin(wp.x * 0.35 + t * 1.3 * calm) * 0.06 + cos(wp.z * 0.4 + t * 1.1 * calm) * 0.06) * calm;
   o.wp = wp;
   o.clip = position_world_to_clip(wp);
   return o;
@@ -20,6 +21,20 @@ struct VOut { @builtin(position) clip: vec4<f32>, @location(0) wp: vec3<f32> };
 @fragment fn fragment(i: VOut) -> @location(0) vec4<f32> {
   let t = globals.time;
   let p = i.wp;
+  if (wm.params.z > 0.5) {
+    // lava: a slow churning crust over a white-hot core that feeds the bloom
+    let q = p.xz * 0.32;
+    let n1 = sin(q.x * 1.3 + t * 0.35 + sin(q.y * 0.9 - t * 0.27) * 1.6) * sin(q.y * 1.1 - t * 0.3 + sin(q.x * 0.7 + t * 0.2) * 1.3);
+    let n2 = sin(q.x * 3.4 - t * 0.6 + n1 * 2.2) * sin(q.y * 2.9 + t * 0.45 - n1);
+    let n3 = sin((q.x + q.y) * 7.0 + n2 * 3.0 - t * 1.1) * 0.5 + 0.5;
+    let crust = smoothstep(-0.15, 0.45, n1 * 0.6 + n2 * 0.35 + n3 * 0.12);
+    var lc = mix(wm.shallow.rgb * 2.6, vec3<f32>(0.05, 0.018, 0.012), crust);
+    lc += vec3<f32>(1.0, 0.62, 0.22) * pow(1.0 - crust, 5.0) * 3.2;
+    lc += wm.deep.rgb * 0.6 * (1.0 - crust) * (0.6 + 0.4 * sin(t * 2.0 + q.x * 2.0));
+    let ldist = length(view.world_position - p);
+    let lf = clamp((ldist - wm.fog.w) / (wm.params.y - wm.fog.w), 0.0, 1.0) * 0.7;
+    return vec4<f32>(mix(lc, wm.fog.rgb, lf), 1.0);
+  }
   let r = sin(p.x * 0.9 + t * 1.7) * sin(p.z * 0.8 - t * 1.3) + sin((p.x + p.z) * 0.45 + t);
   let r2 = sin(p.x * 1.7 - t * 2.1 + sin(p.z * 0.6)) * 0.5 + sin(p.z * 1.9 + t * 1.6 + sin(p.x * 0.5)) * 0.5;
   let n = normalize(vec3<f32>(cos(p.x * 0.9 + t * 1.7) * 0.1 + r2 * 0.07, 1.0, cos(p.z * 0.8 - t * 1.3) * 0.1 - r2 * 0.06));

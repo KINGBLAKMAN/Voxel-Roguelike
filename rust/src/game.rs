@@ -38,19 +38,25 @@ pub struct Game {
     pub hits: u32, pub perk_queue: u32, pub level_pending: u32, pub regen_acc: f32, pub over: bool, pub flash: f32, pub dir: crate::director::Director,
     pub rel: crate::relics::RelicState, pub flags: HashMap<&'static str, f32>, pub rerolls: u32, pub chest_pending: u32, pub boss: Option<u32>, pub ab: crate::abilities::AbState, pub heal_budget: f32, pub last_hit: f32, pub gold: u32, pub locked: Vec<&'static str>, pub ev: crate::events::EventState, pub prompt: String, pub net: crate::net::Net,
     pub dmg_taken: f32, pub healed: f32,
+    /// the run is three stages on three maps: which one we're on, how long we've been here and where we're headed
+    pub stage: u32, pub stage_t: f32, pub map: MapKind, pub route: MapKind, pub pending_stage: Option<(u32, MapKind, u32)>,
 }
 impl Default for Game {
     fn default() -> Self {
         Game { enemies: vec![], projs: vec![], zones: vec![], traps: vec![], pickups: vec![], timers: vec![], corpses: vec![], popups: vec![], toasts: vec![],
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
-            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default(), dmg_taken: 0.0, healed: 0.0 }
+            dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default(), dmg_taken: 0.0, healed: 0.0,
+            stage: 0, stage_t: 0.0, map: MapKind::Forest, route: MapKind::Swamp, pending_stage: None }
     }
 }
 impl Game {
     pub fn m(&self, k: &str) -> u32 { *self.mods.get(k).unwrap_or(&0) }
     pub fn buff(&self, k: &str) -> f32 { *self.buffs.get(k).unwrap_or(&0.0) }
-    pub fn minutes(&self) -> f32 { self.run_t / 60.0 }
+    /// the run's intensity clock: the three five-minute stages compress what used to be twenty minutes of escalation
+    pub fn minutes(&self) -> f32 { self.run_t / 45.0 }
+    /// the map a stage is played on
+    pub fn stage_map(&self, stage: u32) -> MapKind { match stage { 0 => MapKind::Forest, 1 => self.route, _ => MapKind::Volcanic } }
     /// difficulty multipliers from the Ember level (set when a run starts)
     pub fn mods_hp(&self) -> f32 { *self.flags.get("ember_hp").unwrap_or(&1.0) }
     pub fn mods_dmg(&self) -> f32 { *self.flags.get("ember_dmg").unwrap_or(&1.0) }

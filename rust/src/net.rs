@@ -26,7 +26,7 @@ pub struct NEnemy { pub id: u32, pub kind: u8, pub affix: u8, pub boss: bool, pu
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Msg {
     Hello,
-    Welcome { id: u32, seed: u32 },
+    Welcome { id: u32, seed: u32, map: u8, stage: u32 },
     State(PState),
     Leave { id: u32 },
     Snap { t: f32, day: f32, ens: Vec<NEnemy> },
@@ -42,6 +42,10 @@ pub enum Msg {
     Toast { a: String, b: String },
     Revive { to: u32 },
     Victory,
+    /// a stage boss fell: the portal to the next map opened here
+    Portal { a: [f32; 3], col: u32 },
+    /// everyone moves to the next map
+    Stage { stage: u32, kind: u8, seed: u32 },
     GameOver,
 }
 
@@ -106,7 +110,7 @@ pub struct Remote { pub id: u32, pub p: Player, pub target: Vec3, pub state: PSt
 #[derive(Default)]
 pub struct Net {
     pub mode: Mode, pub my_id: u32, pub out: Vec<(Option<u32>, Msg)>, pub remotes: Vec<Remote>, pub ghost: bool, pub no_enemy_dmg: bool,
-    pub snap_t: f32, pub state_t: f32, pub last_hitter: std::collections::HashMap<u32, u32>, pub day: Option<f32>, pub seed: Option<u32>, pub revive_t: f32,
+    pub snap_t: f32, pub state_t: f32, pub last_hitter: std::collections::HashMap<u32, u32>, pub day: Option<f32>, pub seed: Option<u32>, pub join_map: Option<(crate::world::MapKind, u32)>, pub revive_t: f32,
 }
 impl Net {
     pub fn on(&self) -> bool { self.mode != Mode::Off }
@@ -174,8 +178,10 @@ pub fn process(cx: &mut Ctx, link: &Link) {
         // the host relays player-to-player traffic
         if link.host { match &m { Msg::State(_) | Msg::Cast { .. } | Msg::Fire { .. } | Msg::Block { .. } => link.send_except(from, &m), Msg::Revive { to } => link.send(Some(*to), &m), _ => {} } }
         match m {
-            Msg::Hello => { if link.host { let seed = cx.w.seed; link.send(Some(from), &Msg::Welcome { id: from, seed }); cx.toast("A friend joined", "", 2.0); } }
-            Msg::Welcome { id, seed } => { cx.g.net.my_id = id; cx.g.net.seed = Some(seed); }
+            Msg::Hello => { if link.host { let seed = cx.w.seed; link.send(Some(from), &Msg::Welcome { id: from, seed, map: cx.w.kind.id(), stage: cx.g.stage }); cx.toast("A friend joined", "", 2.0); } }
+            Msg::Welcome { id, seed, map, stage } => { cx.g.net.my_id = id; cx.g.net.seed = Some(seed); cx.g.net.join_map = Some((crate::world::MapKind::from_id(map), stage)); }
+            Msg::Portal { a, col } => if cx.g.net.client() { crate::director::open_portal(cx, v3(a), col); },
+            Msg::Stage { stage, kind, seed } => if cx.g.net.client() { cx.g.pending_stage = Some((stage, crate::world::MapKind::from_id(kind), seed)); },
             Msg::Leave { id } => { if let Some(k) = cx.g.net.remotes.iter().position(|r| r.id == id) { let r = cx.g.net.remotes.remove(k); if let Some(e) = r.p.rig.root { cx.c.entity(e).despawn_recursive(); } cx.toast("A friend left", "", 2.0); }
                 if !link.host { *link.status.lock().unwrap() = "Disconnected from host".into(); } }
             Msg::State(s) => state_in(cx, s),
@@ -252,7 +258,7 @@ fn snap_in(cx: &mut Ctx, ens: &[NEnemy]) {
         if n.boss { cx.g.boss = Some(n.id); }
         if n.frozen && !was_frozen { freeze_fx(cx, i); }
     }
-    cx.g.dir.next_boss = crate::director::BOSSES.iter().filter(|b| b.0 <= cx.g.run_t).count();
+    if cx.g.boss.is_some() { cx.g.dir.next_boss = 1; }
 }
 /// clients move puppets toward the host's positions and animate them
 pub fn puppets(cx: &mut Ctx) {

@@ -20,7 +20,7 @@ pub struct DevMenu { pub open: bool }
 const MENU: [(&str, &[(&str, &str)]); 5] = [
     ("Player", &[("god", "God mode"), ("nocd", "No cooldowns"), ("heal", "Full heal"), ("lvl", "+1 level"), ("lvl5", "+5 levels"), ("gold=500", "+500 run gold"), ("chest", "Drop a chest"), ("rerolls", "+3 rerolls")]),
     ("Build", &[("maxrelics", "Max every relic"), ("allups", "All ability and weapon upgrades"), ("aug", "Random chaos augment"), ("swapw", "Swap weapon")]),
-    ("Run", &[("minutes+1", "+1 minute"), ("minutes=4.8", "Go to 4:48 (Golem)"), ("minutes=9.8", "Go to 9:48 (Colossus)"), ("minutes=14.8", "Go to 14:48 (Broodmother)"), ("minutes=19.8", "Go to 19:48 (Ember King)"), ("day", "Time of day +6h"), ("horde=20", "Spawn a horde"), ("killall", "Kill everything")]),
+    ("Run", &[("minutes+1", "+1 minute"), ("stage_t=288", "Skip to this stage's boss"), ("portal", "Open the portal here"), ("nextstage", "Go to the next stage"), ("day", "Time of day +6h"), ("horde=20", "Spawn a horde"), ("killall", "Kill everything")]),
     ("Spawn boss", &[("spawn=golem,12", "Ancient Golem"), ("spawn=colossus,14", "Bone Colossus"), ("spawn=brood,14", "Broodmother"), ("spawn=king,16", "Ember King")]),
     ("Events", &[("event=0", "Challenge"), ("event=1", "Cursed shrine"), ("event=2", "Treasure goblin"), ("event=3", "War totem"), ("event=4", "Merchant"), ("campgold", "+1000 Camp gold")]),
 ];

@@ -42,5 +42,9 @@ pub fn move_body(w: &mut Voxels, e: &mut Body, dt: f32, grav: f32) {
             }
         }
     }
+    // the arena's edge holds everything in, even what flies or gets knocked over the cliffs
+    let lim = HALF as f32 - 1.5;
+    if e.pos.x.abs() > lim { e.pos.x = e.pos.x.clamp(-lim, lim); e.vel.x = 0.0; e.hit_wall = true; }
+    if e.pos.z.abs() > lim { e.pos.z = e.pos.z.clamp(-lim, lim); e.vel.z = 0.0; e.hit_wall = true; }
     if e.pos.y < -10.0 { e.pos.y = w.top_at(e.pos.x.floor() as i32, e.pos.z.floor() as i32) as f32 + 2.0; e.vel = Vec3::ZERO; }
 }
