@@ -29,11 +29,11 @@ fn col(hex: u32, a: f32) -> Color { srgb(hex).with_alpha(a) }
 fn txt(s: &str, size: f32, hex: u32) -> (Text, TextFont, TextColor) { (Text::new(s), TextFont { font_size: size, ..default() }, TextColor(srgb(hex))) }
 fn px(v: f32) -> Val { Val::Px(v) }
 
-pub fn setup_dev(mut c: Commands) {
+pub fn setup_dev(mut c: Commands, kit: Res<crate::uikit::UiTex>) {
     if !cfg!(feature = "dev") { return; }
     let hint = c.spawn((txt("DEV BUILD  |  F1 dev menu", 13.0, 0xff9a3d), Node { position_type: PositionType::Absolute, left: px(18.0), top: px(42.0), ..default() }, GlobalZIndex(20), Visibility::Hidden)).id();
-    let root = c.spawn((Node { position_type: PositionType::Absolute, left: px(10.0), top: px(64.0), flex_direction: FlexDirection::Column, row_gap: px(3.0), padding: UiRect::all(px(10.0)), border: UiRect::all(px(2.0)), ..default() },
-        BackgroundColor(col(0x0c0a10, 0.92)), BorderColor(col(0xff9a3d, 0.7)), BorderRadius::all(px(8.0)), GlobalZIndex(40), Visibility::Hidden)).id();
+    let root = c.spawn((Node { position_type: PositionType::Absolute, left: px(10.0), top: px(64.0), flex_direction: FlexDirection::Column, row_gap: px(3.0), padding: UiRect::all(px(18.0)), ..default() },
+        crate::uikit::stone(&kit), GlobalZIndex(40), Visibility::Hidden)).id();
     let t = c.spawn(txt("DEV MENU  (F1 to close)", 15.0, 0xff9a3d)).id(); c.entity(root).add_child(t);
     let cols = c.spawn(Node { column_gap: px(10.0), align_items: AlignItems::FlexStart, ..default() }).id(); c.entity(root).add_child(cols);
     let colv: Vec<Entity> = (0..2).map(|_| c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(3.0), width: px(220.0), ..default() }).id()).collect();

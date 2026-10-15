@@ -43,6 +43,8 @@ pub struct HudRefs {
     interact: Entity, cross: Vec<Entity>, map: Handle<Image>, day: Entity, pops: Vec<Entity>, flash: Entity, hurt: Entity,
     pub menu: Entity, level: Entity, lv_title: Entity, lv_sub: Entity, cards: Vec<(Entity, Entity, Entity, Entity)>, reroll: Entity,
     pause: Entity, dead: Entity, dead_stats: Entity, victory: Entity, vic_stats: Entity,
+    /// (icon, gold frame) per ability slot and (icon, ribbon) per level-up card
+    slot_fx: Vec<(Entity, Entity)>, card_fx: Vec<(Entity, Entity)>,
 }
 
 const EMBER: u32 = 0xff9a3d;
@@ -52,9 +54,11 @@ fn abs(l: Val, t: Val, r: Val, b: Val) -> Node { Node { position_type: PositionT
 fn px(v: f32) -> Val { Val::Px(v) }
 const A: Val = Val::Auto;
 
-pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
+pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>, t: Res<crate::uikit::UiTex>, icons: Res<crate::icons::Icons>) {
+    use crate::uikit as kit;
+    let t = &*t;
     let map = images.add(Image::new_fill(Extent3d { width: 128, height: 128, depth_or_array_layers: 1 }, TextureDimension::D2, &[20, 24, 30, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::all()));
-    let panel = |a: f32| BackgroundColor(col(0x0c0a10, a));
+    let glyph = |n: &str| icons.glyphs.get(n).cloned().unwrap_or_default();
     // ---------------- HUD ----------------
     let hud = c.spawn((Node { width: Val::Percent(100.0), height: Val::Percent(100.0), position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
     let flash = c.spawn((Node { width: Val::Percent(100.0), height: Val::Percent(100.0), position_type: PositionType::Absolute, ..default() }, BackgroundColor(col(0xfff0c0, 0.0)))).id();
@@ -66,69 +70,85 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
         let e = c.spawn((Node { position_type: PositionType::Absolute, left: Val::Percent(50.0), top: Val::Percent(50.0), width: px(w), height: px(h), margin: UiRect { left: px(dx), top: px(dy), ..default() }, ..default() }, BackgroundColor(col(0xffffff, 0.85)))).id();
         c.entity(hud).add_child(e); cross.push(e);
     }
-    // bottom panel: health, experience, stamina and the action bar
-    let bottom = c.spawn(Node { position_type: PositionType::Absolute, bottom: px(18.0), left: px(0.0), right: px(0.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(5.0), ..default() }).id();
+    // bottom: health in a wooden frame, experience, stamina and the action bar of stone slots
+    let bottom = c.spawn(Node { position_type: PositionType::Absolute, bottom: px(14.0), left: px(0.0), right: px(0.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(4.0), ..default() }).id();
     c.entity(hud).add_child(bottom);
     let interact = c.spawn((txt("", 18.0, 0xfff3d8), Node { margin: UiRect::bottom(px(8.0)), ..default() })).id();
-    let hp_bar = c.spawn((Node { width: px(560.0), height: px(20.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x1a0e10, 0.85)), BorderColor(col(0x000000, 0.9)), BorderRadius::all(px(5.0)))).id();
-    let hp_ghost = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xffd0c0, 0.55)), BorderRadius::all(px(3.0)))).id();
-    let hp_fill = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xd8343a, 1.0)), BorderRadius::all(px(3.0)))).id();
-    let hp_shine = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(40.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xffffff, 0.1)))).id();
-    let hp_text = c.spawn((txt("100 / 100", 14.0, 0xffffff), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
-    c.entity(hp_bar).add_children(&[hp_ghost, hp_fill, hp_shine, hp_text]);
+    let framed_bar = |c: &mut Commands, w: f32, h: f32, bg: u32| -> (Entity, Entity) {
+        let bar = c.spawn(Node { width: px(w), height: px(h), ..default() }).id();
+        let inner = c.spawn((Node { position_type: PositionType::Absolute, left: px(6.0), right: px(6.0), top: px(6.0), bottom: px(6.0), overflow: Overflow::clip(), ..default() }, BackgroundColor(col(bg, 0.92)))).id();
+        let fr = c.spawn((Node { position_type: PositionType::Absolute, left: px(0.0), right: px(0.0), top: px(0.0), bottom: px(0.0), ..default() }, kit::frame(t))).id();
+        c.entity(bar).add_children(&[inner, fr]);
+        (bar, inner)
+    };
+    let (hp_bar, hp_in) = framed_bar(&mut c, 560.0, 28.0, 0x1a0e10);
+    let hp_ghost = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xffd0c0, 0.55)))).id();
+    let hp_fill = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xd8343a, 1.0)))).id();
+    let hp_shine = c.spawn((Node { position_type: PositionType::Absolute, height: Val::Percent(35.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xffffff, 0.14)))).id();
+    c.entity(hp_in).add_children(&[hp_ghost, hp_fill, hp_shine]);
+    let hp_text = c.spawn((txt("100 / 100", 14.0, 0xffffff), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), top: px(5.0), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
+    c.entity(hp_bar).add_child(hp_text);
     let xp_row = c.spawn(Node { width: px(560.0), align_items: AlignItems::Center, column_gap: px(8.0), ..default() }).id();
     let lvl = c.spawn((txt("Lv 1", 15.0, 0x8fd0ff), Node { width: px(44.0), ..default() })).id();
-    let xp_bar = c.spawn((Node { flex_grow: 1.0, height: px(8.0), ..default() }, BackgroundColor(col(0x0e1620, 0.85)), BorderRadius::all(px(4.0)))).id();
-    let xp_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(0.0), ..default() }, BackgroundColor(col(0x5ab8ff, 1.0)), BorderRadius::all(px(4.0)))).id();
-    c.entity(xp_bar).add_child(xp_fill);
-    let stam_bar = c.spawn((Node { width: px(120.0), height: px(5.0), ..default() }, BackgroundColor(col(0x1e1a10, 0.85)), BorderRadius::all(px(3.0)))).id();
-    let stam_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xf0c64a, 1.0)), BorderRadius::all(px(3.0)))).id();
-    c.entity(stam_bar).add_child(stam_fill);
+    let (xp_bar, xp_in) = framed_bar(&mut c, 380.0, 18.0, 0x0e1620);
+    let xp_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(0.0), ..default() }, BackgroundColor(col(0x5ab8ff, 1.0)))).id();
+    c.entity(xp_in).add_child(xp_fill);
+    let (stam_bar, stam_in) = framed_bar(&mut c, 120.0, 16.0, 0x1e1a10);
+    let stam_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xf0c64a, 1.0)))).id();
+    c.entity(stam_in).add_child(stam_fill);
     c.entity(xp_row).add_children(&[lvl, xp_bar, stam_bar]);
     let bar = c.spawn(Node { column_gap: px(8.0), margin: UiRect::top(px(4.0)), align_items: AlignItems::FlexEnd, ..default() }).id();
     let side_slot = |c: &mut Commands, key: &str, label: &str| -> (Entity, Entity) {
-        let s = c.spawn((Node { width: px(76.0), height: px(54.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(px(2.0)), ..default() }, panel(0.72), BorderColor(col(0x4a3e34, 1.0)), BorderRadius::all(px(6.0)))).id();
-        let k = c.spawn(txt(key, 12.0, 0x9a8a78)).id();
-        let t = c.spawn((txt(label, 13.0, 0xf0e6d8), TextLayout::new_with_justify(JustifyText::Center))).id();
-        c.entity(s).add_children(&[k, t]); (s, t)
+        let s = c.spawn((Node { width: px(84.0), height: px(58.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, padding: UiRect::all(px(6.0)), ..default() }, kit::iron(t))).id();
+        let k = c.spawn(txt(key, 11.0, 0x9a8a78)).id();
+        let tx = c.spawn((txt(label, 12.0, 0xf0e6d8), TextLayout::new_with_justify(JustifyText::Center))).id();
+        c.entity(s).add_children(&[k, tx]); (s, tx)
     };
     let (wroot, weapon) = side_slot(&mut c, "Q  swap", "");
     let mut slots = vec![];
     let mut slot_roots = vec![];
+    let mut slot_fx = vec![];
     for i in 0..4 {
-        let s = c.spawn((Node { width: px(78.0), height: px(78.0), border: UiRect::all(px(2.0)), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::Center, overflow: Overflow::clip(), ..default() }, panel(0.8), BorderColor(col(0x4a3e34, 1.0)), BorderRadius::all(px(8.0)),
+        let s = c.spawn((Node { width: px(82.0), height: px(82.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::Center, ..default() }, kit::slot(t),
             Interaction::default(), crate::charsheet::AbilityTip(i))).id();
-        let glow = c.spawn((Node { position_type: PositionType::Absolute, top: px(0.0), left: px(0.0), right: px(0.0), height: px(4.0), ..default() }, BackgroundColor(col(0xffffff, 1.0)))).id();
-        let cd = c.spawn((Node { position_type: PositionType::Absolute, bottom: px(0.0), left: px(0.0), right: px(0.0), height: Val::Percent(0.0), ..default() }, BackgroundColor(col(0x000000, 0.66)))).id();
-        let key = c.spawn((txt(&format!("{}", i + 1), 15.0, 0xfff3d8), Node { position_type: PositionType::Absolute, top: px(6.0), left: px(7.0), ..default() })).id();
-        let cdt = c.spawn((txt("", 22.0, 0xffffff), Node { position_type: PositionType::Absolute, top: px(20.0), ..default() })).id();
-        let name = c.spawn((txt("", 11.0, 0xf0e6d8), TextLayout::new_with_justify(JustifyText::Center), Node { margin: UiRect::bottom(px(5.0)), max_width: px(72.0), ..default() })).id();
-        c.entity(s).add_children(&[glow, cd, key, cdt, name]);
-        slots.push((s, cd, cdt, name)); slot_roots.push((s, glow));
+        let well = c.spawn(Node { position_type: PositionType::Absolute, left: px(10.0), right: px(10.0), top: px(10.0), bottom: px(10.0), overflow: Overflow::clip(), ..default() }).id();
+        let icon = c.spawn((ImageNode::new(glyph("star")), Node { position_type: PositionType::Absolute, left: px(13.0), top: px(6.0), width: px(36.0), height: px(36.0), ..default() })).id();
+        let glow = c.spawn((Node { position_type: PositionType::Absolute, top: px(0.0), left: px(0.0), right: px(0.0), height: px(3.0), ..default() }, BackgroundColor(col(0xffffff, 1.0)))).id();
+        let cd = c.spawn((Node { position_type: PositionType::Absolute, bottom: px(0.0), left: px(0.0), right: px(0.0), height: Val::Percent(0.0), ..default() }, BackgroundColor(col(0x000000, 0.7)))).id();
+        c.entity(well).add_children(&[icon, glow, cd]);
+        let key = c.spawn((txt(&format!("{}", i + 1), 14.0, 0xffd27a), Node { position_type: PositionType::Absolute, top: px(4.0), left: px(7.0), ..default() })).id();
+        let cdt = c.spawn((txt("", 22.0, 0xffffff), Node { position_type: PositionType::Absolute, top: px(18.0), ..default() })).id();
+        let name = c.spawn((txt("", 10.0, 0xf0e6d8), TextLayout::new_with_justify(JustifyText::Center), Node { margin: UiRect::bottom(px(8.0)), max_width: px(70.0), ..default() })).id();
+        let gold = c.spawn((Node { position_type: PositionType::Absolute, left: px(-3.0), right: px(-3.0), top: px(-3.0), bottom: px(-3.0), ..default() }, kit::gold(t), Visibility::Hidden)).id();
+        c.entity(s).add_children(&[well, key, cdt, name, gold]);
+        slots.push((s, cd, cdt, name)); slot_roots.push((s, glow)); slot_fx.push((icon, gold));
     }
     let (froot, food) = side_slot(&mut c, "F  eat", "");
     c.entity(bottom).add_children(&[interact, hp_bar, xp_row, bar]);
-    // top centre: clock, threat, kills, boss bar, toasts
-    let top = c.spawn(Node { position_type: PositionType::Absolute, top: px(14.0), left: px(0.0), right: px(0.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(2.0), ..default() }).id();
+    // top centre: the stage clock on a stone plaque, threat and kills, the boss banner, toasts
+    let top = c.spawn(Node { position_type: PositionType::Absolute, top: px(10.0), left: px(0.0), right: px(0.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(2.0), ..default() }).id();
     c.entity(hud).add_child(top);
-    let timer = c.spawn(txt("0:00", 40.0, 0xfff3d8)).id();
-    let threat_t = c.spawn(txt("Calm", 15.0, 0x9fd8ff)).id();
-    let kills = c.spawn(txt("0 slain", 13.0, 0xb8aca0)).id();
-    let boss = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, margin: UiRect::top(px(10.0)), row_gap: px(3.0), ..default() }, Visibility::Hidden)).id();
-    let boss_name = c.spawn(txt("Ancient Golem", 16.0, 0xffd0a0)).id();
-    let boss_bar = c.spawn((Node { width: px(460.0), height: px(14.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x140c0c, 0.85)), BorderColor(col(0x6ff3ff, 0.8)), BorderRadius::all(px(4.0)))).id();
-    let boss_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0x9a3a2a, 1.0)), BorderRadius::all(px(3.0)))).id();
-    c.entity(boss_bar).add_child(boss_fill);
-    c.entity(boss).add_children(&[boss_name, boss_bar]);
-    let toast = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, margin: UiRect::top(px(16.0)), padding: UiRect::axes(px(26.0), px(8.0)), ..default() }, BackgroundColor(col(0x0c0a10, 0.5)), BorderRadius::all(px(8.0)), Visibility::Hidden)).id();
+    let clock = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::new(px(26.0), px(26.0), px(8.0), px(10.0)), ..default() }, kit::stone(t))).id();
+    let timer = c.spawn(txt("0:00", 36.0, 0xfff3d8)).id();
+    let threat_t = c.spawn(txt("Calm", 14.0, 0x9fd8ff)).id();
+    c.entity(clock).add_children(&[timer, threat_t]);
+    let kills = c.spawn(txt("0 slain", 13.0, 0xd8ccbc)).id();
+    let boss = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, margin: UiRect::top(px(8.0)), row_gap: px(2.0), ..default() }, Visibility::Hidden)).id();
+    let bn = c.spawn((Node { padding: UiRect::axes(px(28.0), px(4.0)), ..default() }, kit::ribbon(t, 0x7a1a14))).id();
+    let boss_name = c.spawn(txt("Ancient Golem", 16.0, 0xffe8c0)).id(); c.entity(bn).add_child(boss_name);
+    let (boss_bar, boss_in) = framed_bar(&mut c, 500.0, 24.0, 0x140c0c);
+    let boss_fill = c.spawn((Node { height: Val::Percent(100.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(0xb8342a, 1.0)))).id();
+    c.entity(boss_in).add_child(boss_fill);
+    c.entity(boss).add_children(&[bn, boss_bar]);
+    let toast = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, margin: UiRect::top(px(14.0)), padding: UiRect::axes(px(30.0), px(10.0)), border: UiRect::vertical(px(2.0)), ..default() }, BackgroundColor(col(0x0c0a10, 0.5)), BorderColor(col(0xd8a840, 0.6)), Visibility::Hidden)).id();
     let toast_a = c.spawn(txt("", 26.0, 0xffd27a)).id();
     let toast_b = c.spawn(txt("", 15.0, 0xe8dccc)).id();
     c.entity(toast).add_children(&[toast_a, toast_b]);
-    c.entity(top).add_children(&[timer, threat_t, kills, boss, toast]);
-    // top left: buffs and relics; top right: minimap and the day
+    c.entity(top).add_children(&[clock, kills, boss, toast]);
+    // top left: buffs and relics; top right: the minimap in an iron ring and the stage and day
     let buffs = c.spawn((txt("", 14.0, 0xe8dccc), abs(px(18.0), px(16.0), A, A))).id();
     let relics = c.spawn((txt("", 13.0, 0xcfe6ff), abs(px(18.0), px(120.0), A, A))).id();
-    let mapbox = c.spawn((Node { position_type: PositionType::Absolute, top: px(14.0), right: px(14.0), width: px(168.0), height: px(168.0), border: UiRect::all(px(3.0)), flex_direction: FlexDirection::Column, overflow: Overflow::clip(), ..default() }, BorderColor(col(0x2a2420, 0.95)), BorderRadius::all(px(84.0)), BackgroundColor(col(0x000000, 0.4)))).id();
+    let mapbox = c.spawn((Node { position_type: PositionType::Absolute, top: px(14.0), right: px(14.0), width: px(168.0), height: px(168.0), border: UiRect::all(px(4.0)), flex_direction: FlexDirection::Column, overflow: Overflow::clip(), ..default() }, BorderColor(col(0x6a6e76, 1.0)), BorderRadius::all(px(84.0)), BackgroundColor(col(0x000000, 0.4)))).id();
     let mapimg = c.spawn((ImageNode::new(map.clone()), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() })).id();
     let me = c.spawn((Node { position_type: PositionType::Absolute, left: px(78.0), top: px(78.0), width: px(6.0), height: px(6.0), ..default() }, BackgroundColor(col(0xffffff, 1.0)), BorderRadius::all(px(3.0)))).id();
     c.entity(mapbox).add_children(&[mapimg, me]);
@@ -138,79 +158,94 @@ pub fn setup_hud(mut c: Commands, mut images: ResMut<Assets<Image>>) {
     let mut pops = vec![];
     for _ in 0..48 { let e = c.spawn((txt("", 18.0, 0xffffff), Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id(); c.entity(hud).add_child(e); pops.push(e); }
 
-    // ---------------- menu ----------------
-    let full = || Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, row_gap: px(10.0), ..default() };
-    let menu = c.spawn((full(), BackgroundColor(col(0x08060c, 0.5)))).id();
-    let title = c.spawn(txt("EMBERWILD", 92.0, EMBER)).id();
-    let sub = c.spawn(txt("The horde never stops coming. Grow strong enough to outlast it.", 18.0, 0xe8dccc)).id();
-    let row = c.spawn(Node { column_gap: px(10.0), margin: UiRect::top(px(20.0)), ..default() }).id();
+    // ---------------- title screen ----------------
+    let full = || Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, row_gap: px(6.0), ..default() };
+    let menu = c.spawn((full(), BackgroundColor(col(0x08060c, 0.3)), kit::Appear::default())).id();
+    let head = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::new(px(48.0), px(48.0), px(6.0), px(12.0)), ..default() }, kit::stone(t))).id();
+    let title = kit::title(&mut c, "EMBERWILD", 64.0, EMBER);
+    let rib = c.spawn((Node { padding: UiRect::axes(px(34.0), px(5.0)), margin: UiRect::top(px(2.0)), ..default() }, kit::ribbon(t, 0x8a2a1e))).id();
+    let sub = c.spawn(txt("The horde never stops coming. Grow strong enough to outlast it.", 15.0, 0xfff3d8)).id();
+    c.entity(rib).add_child(sub);
+    c.entity(head).add_children(&[title, rib]);
+    // the classes hang as banners on a rod
+    let row = c.spawn(Node { column_gap: px(12.0), margin: UiRect::top(px(16.0)), ..default() }).id();
     for (i, cls) in crate::models::CLASSES.into_iter().enumerate() {
         let (role, hp) = match cls { Class::Ranger => ("Fast skirmisher who wins from range and never stands still.", 100), Class::Mage => ("Glass cannon. Fire for damage, frost for control.", 85), Class::Warrior => ("Armored brawler who closes in and refuses to fall.", 140), Class::Priest => ("Holy bruiser who heals through anything.", 110),
             Class::Necromancer => ("Raises the dead to fight for him and reaps souls to survive.", 95), Class::Gunslinger => ("Fast hands, loud guns and a stick of dynamite for every problem.", 105) };
         let cc = class_color(cls);
-        let b = c.spawn((Button, UiBtn::Class(cls), Node { width: px(196.0), height: px(290.0), flex_direction: FlexDirection::Column, padding: UiRect::all(px(12.0)), row_gap: px(8.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.86)), BorderColor(col(cc, 0.5)), BorderRadius::all(px(10.0)))).id();
-        let band = c.spawn((Node { height: px(4.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(col(cc, 1.0)))).id();
-        let n = c.spawn(txt(class_name(cls), 30.0, cc)).id();
-        let r = c.spawn(txt(role, 14.0, 0xd8ccbc)).id();
-        let h = c.spawn(txt(&format!("{} health", hp), 13.0, 0x9a8a78)).id();
+        let dim = { let f = |s: u32| ((((cc >> s) & 255) as f32) * 0.42) as u32; (f(16) << 16) | (f(8) << 8) | f(0) };
+        let b = kit::fancy(&mut c, t, UiBtn::Class(cls), Node { width: px(190.0), height: px(262.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::new(px(12.0), px(12.0), px(20.0), px(30.0)), row_gap: px(4.0), ..default() }, kit::banner(t, dim));
+        let rod = c.spawn((Node { position_type: PositionType::Absolute, top: px(-10.0), left: px(-12.0), width: px(214.0), height: px(16.0), ..default() }, kit::wood(t))).id();
+        let icon = c.spawn((ImageNode::new(glyph(crate::icons::glyph_for_id(crate::player::class_weapons(cls)[0]))).with_color(srgb(cc)), Node { width: px(34.0), height: px(34.0), ..default() })).id();
+        let n = c.spawn(txt(class_name(cls), 21.0, 0xfff3d8)).id();
+        let r = c.spawn((txt(role, 12.0, 0xe8dccc), TextLayout::new_with_justify(JustifyText::Center))).id();
+        let h = c.spawn(txt(&format!("{} health", hp), 12.0, 0xc8b8a8)).id();
         let abl = class_abilities(cls).iter().enumerate().map(|(k, a)| format!("{}  {}", k + 1, ab_info(a).name)).collect::<Vec<_>>().join("\n");
-        let a = c.spawn(txt(&abl, 14.0, 0xf0e6d8)).id();
-        let k = c.spawn((txt(&format!("Press {}", i + 1), 13.0, 0x9a8a78), Node { margin: UiRect::top(Val::Auto), ..default() })).id();
-        c.entity(b).add_children(&[band, n, r, h, a, k]);
+        let a = c.spawn(txt(&abl, 13.0, 0xfff3d8)).id();
+        let k = c.spawn((txt(&format!("Press {}", i + 1), 12.0, 0xd8c8b0), Node { margin: UiRect::top(Val::Auto), ..default() })).id();
+        c.entity(b).add_children(&[rod, icon, n, r, h, a, k]);
         c.entity(row).add_child(b);
     }
-    let help = c.spawn((txt("WASD move  |  Left click attack  |  Right click block/parry  |  Ctrl dodge  |  1-4 abilities  |  Q swap  |  E interact  |  F eat  |  Tab character  |  Esc pause", 14.0, 0x9a8a78), Node { margin: UiRect::top(px(26.0)), ..default() })).id();
-    c.entity(menu).add_children(&[title, sub, row, help]);
+    let help = c.spawn((txt("WASD move  |  Left click attack  |  Right click block/parry  |  Ctrl dodge  |  1-4 abilities  |  Q swap  |  E interact  |  F eat  |  Tab character  |  Esc pause", 12.0, 0xd8ccbc), Node { margin: UiRect::top(px(6.0)), ..default() })).id();
+    c.entity(menu).add_children(&[head, row, help]);
 
-    // ---------------- level up ----------------
-    let level = c.spawn((full(), BackgroundColor(col(0x06040a, 0.62)), Visibility::Hidden)).id();
-    let lv_title = c.spawn(txt("LEVEL UP", 52.0, 0x8fd0ff)).id();
-    let lv_sub = c.spawn(txt("Choose one", 17.0, 0xe8dccc)).id();
-    let crow = c.spawn(Node { column_gap: px(18.0), margin: UiRect::top(px(20.0)), ..default() }).id();
+    // ---------------- level up: three parchment cards ----------------
+    let level = c.spawn((Node { padding: UiRect::bottom(px(150.0)), ..full() }, BackgroundColor(col(0x06040a, 0.6)), Visibility::Hidden, kit::Appear::default())).id();
+    let lv_head = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::new(px(44.0), px(44.0), px(8.0), px(12.0)), ..default() }, kit::stone(t))).id();
+    let lv_title = c.spawn(txt("LEVEL UP", 50.0, 0x8fd0ff)).id();
+    let lv_sub = c.spawn(txt("Choose one", 16.0, 0xe8dccc)).id();
+    c.entity(lv_head).add_children(&[lv_title, lv_sub]);
+    let crow = c.spawn(Node { column_gap: px(20.0), margin: UiRect::top(px(18.0)), ..default() }).id();
     let mut cards = vec![];
+    let mut card_fx = vec![];
     for i in 0..3 {
-        let b = c.spawn((Button, UiBtn::Card(i), Node { width: px(300.0), height: px(250.0), flex_direction: FlexDirection::Column, padding: UiRect::all(px(18.0)), row_gap: px(12.0), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.92)), BorderColor(col(0xffffff, 0.5)), BorderRadius::all(px(12.0)))).id();
-        let tag = c.spawn(txt("", 13.0, 0xffffff)).id();
-        let name = c.spawn(txt("", 28.0, 0xffffff)).id();
-        let desc = c.spawn(txt("", 17.0, 0xe8dccc)).id();
-        let key = c.spawn((txt(&format!("{}", i + 1), 15.0, 0x9a8a78), Node { margin: UiRect::top(Val::Auto), ..default() })).id();
-        c.entity(b).add_children(&[tag, name, desc, key]);
+        let b = kit::fancy(&mut c, t, UiBtn::Card(i), Node { width: px(300.0), height: px(270.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(px(20.0)), row_gap: px(8.0), ..default() }, kit::parch(t));
+        let rib = c.spawn((Node { padding: UiRect::axes(px(16.0), px(3.0)), ..default() }, kit::ribbon(t, 0x6a4a2a))).id();
+        let tag = c.spawn(txt("", 11.0, 0xfff3d8)).id(); c.entity(rib).add_child(tag);
+        let icon = c.spawn((ImageNode::new(glyph("star")), Node { width: px(46.0), height: px(46.0), ..default() })).id();
+        let name = c.spawn((txt("", 24.0, 0x2a1a0e), TextLayout::new_with_justify(JustifyText::Center))).id();
+        let desc = c.spawn((txt("", 15.0, 0x3a2a1a), TextLayout::new_with_justify(JustifyText::Center))).id();
+        let key = c.spawn((txt(&format!("{}", i + 1), 15.0, 0x6a5a4a), Node { margin: UiRect::top(Val::Auto), ..default() })).id();
+        c.entity(b).add_children(&[rib, icon, name, desc, key]);
         c.entity(crow).add_child(b);
-        cards.push((b, tag, name, desc));
+        cards.push((b, tag, name, desc)); card_fx.push((icon, rib));
     }
-    let reroll = c.spawn((txt("", 15.0, 0xb8aca0), Node { margin: UiRect::top(px(18.0)), ..default() })).id();
-    c.entity(level).add_children(&[lv_title, lv_sub, crow, reroll]);
+    let reroll = c.spawn((txt("", 15.0, 0xd8ccbc), Node { margin: UiRect::top(px(16.0)), ..default() })).id();
+    c.entity(level).add_children(&[lv_head, crow, reroll]);
 
-    // ---------------- pause & death ----------------
-    let pause = c.spawn((full(), BackgroundColor(col(0x06040a, 0.6)), Visibility::Hidden)).id();
-    let pt = c.spawn(txt("PAUSED", 64.0, 0xfff3d8)).id();
-    c.entity(pause).add_child(pt);
+    // ---------------- pause, death and victory ----------------
+    let pause = c.spawn((full(), BackgroundColor(col(0x06040a, 0.55)), Visibility::Hidden, kit::Appear::default())).id();
+    let pp = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(10.0), padding: UiRect::axes(px(48.0), px(26.0)), ..default() }, kit::stone(t))).id();
+    let pt = kit::title(&mut c, "PAUSED", 56.0, 0xfff3d8); c.entity(pp).add_child(pt);
     for (label, b) in [("Resume", UiBtn::Resume), ("Settings", UiBtn::Settings), ("Abandon run", UiBtn::Restart), ("Quit to desktop", UiBtn::Quit)] {
-        let e = c.spawn((Button, b, Node { width: px(280.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.4)), BorderRadius::all(px(8.0)))).id();
-        let t = c.spawn(txt(label, 20.0, 0xfff3d8)).id(); c.entity(e).add_child(t); c.entity(pause).add_child(e);
+        let (e, _) = kit::button(&mut c, t, b, 300.0, 46.0, label, 19.0); c.entity(pp).add_child(e);
     }
-    let dead = c.spawn((full(), BackgroundColor(col(0x140406, 0.7)), Visibility::Hidden)).id();
-    let dt = c.spawn(txt("YOU HAVE FALLEN", 64.0, 0xff5a4a)).id();
-    let dead_stats = c.spawn((txt("", 20.0, 0xe8dccc), TextLayout::new_with_justify(JustifyText::Center))).id();
-    let db = c.spawn((Button, UiBtn::Restart, Node { width: px(300.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), margin: UiRect::top(px(18.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.5)), BorderRadius::all(px(8.0)))).id();
-    let dbt = c.spawn(txt("Rise again  (R)", 20.0, 0xfff3d8)).id(); c.entity(db).add_child(dbt);
-    c.entity(dead).add_children(&[dt, dead_stats, db]);
-    let victory = c.spawn((full(), BackgroundColor(col(0x1a1006, 0.72)), Visibility::Hidden)).id();
-    let vt = c.spawn(txt("VICTORY", 80.0, 0xffd35a)).id();
-    let vs = c.spawn(txt("The Ember King has fallen. The wild is yours.", 20.0, 0xfff3d8)).id();
-    let vic_stats = c.spawn((txt("", 18.0, 0xe8dccc), TextLayout::new_with_justify(JustifyText::Center))).id();
-    c.entity(victory).add_children(&[vt, vs, vic_stats]);
+    c.entity(pause).add_child(pp);
+    let dead = c.spawn((full(), BackgroundColor(col(0x140406, 0.66)), Visibility::Hidden, kit::Appear::default())).id();
+    let dp = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(10.0), padding: UiRect::axes(px(48.0), px(26.0)), ..default() }, kit::stone(t))).id();
+    let dt = kit::title(&mut c, "YOU HAVE FALLEN", 56.0, 0xff5a4a);
+    let dsp = c.spawn((Node { padding: UiRect::axes(px(30.0), px(16.0)), ..default() }, kit::parch(t))).id();
+    let dead_stats = c.spawn((txt("", 18.0, 0x2a1a0e), TextLayout::new_with_justify(JustifyText::Center))).id(); c.entity(dsp).add_child(dead_stats);
+    let (db, _) = kit::button(&mut c, t, UiBtn::Restart, 300.0, 46.0, "Rise again  (R)", 19.0);
+    c.entity(dp).add_children(&[dt, dsp, db]); c.entity(dead).add_child(dp);
+    let victory = c.spawn((full(), BackgroundColor(col(0x1a1006, 0.6)), Visibility::Hidden, kit::Appear::default())).id();
+    let vp = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(10.0), padding: UiRect::axes(px(48.0), px(26.0)), ..default() }, kit::stone(t))).id();
+    let vt = kit::title(&mut c, "VICTORY", 76.0, 0xffd35a);
+    let vs = c.spawn(txt("The Ember King has fallen. The wild is yours.", 18.0, 0xfff3d8)).id();
+    let vsp = c.spawn((Node { padding: UiRect::axes(px(30.0), px(16.0)), ..default() }, kit::parch(t))).id();
+    let vic_stats = c.spawn((txt("", 17.0, 0x2a1a0e), TextLayout::new_with_justify(JustifyText::Center))).id(); c.entity(vsp).add_child(vic_stats);
+    c.entity(vp).add_children(&[vt, vs, vsp]);
     for (label, b) in [("Keep fighting: endless  (C)", UiBtn::Endless), ("Return to camp  (R)", UiBtn::Restart)] {
-        let e = c.spawn((Button, b, Node { width: px(340.0), padding: UiRect::all(px(12.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), margin: UiRect::top(px(10.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(EMBER, 0.5)), BorderRadius::all(px(8.0)))).id();
-        let t = c.spawn(txt(label, 20.0, 0xfff3d8)).id(); c.entity(e).add_child(t); c.entity(victory).add_child(e);
+        let (e, _) = kit::button(&mut c, t, b, 340.0, 46.0, label, 19.0); c.entity(vp).add_child(e);
     }
+    c.entity(victory).add_child(vp);
 
     // put the side slots and ability slots into the bar in order
     let mut kids = vec![wroot]; kids.extend(slot_roots.iter().map(|s| s.0)); kids.push(froot);
     c.entity(bar).add_children(&kids);
     c.insert_resource(HudRefs { hud, hp_fill, hp_ghost, hp_text, xp_fill, lvl, stam_fill, slots: slots.iter().zip(slot_roots.iter()).map(|(s, r)| (s.1, s.2, s.3, r.1)).collect(),
         weapon, food, timer, threat: threat_t, kills, boss, boss_fill, boss_name, toast, toast_a, toast_b, buffs, relics, interact, cross, map, day, pops, flash, hurt,
-        menu, level, lv_title, lv_sub, cards, reroll, pause, dead, dead_stats, victory, vic_stats });
+        menu, level, lv_title, lv_sub, cards, reroll, pause, dead, dead_stats, victory, vic_stats, slot_fx, card_fx });
     c.insert_resource(SlotRoots(slot_roots.iter().map(|s| s.0).collect()));
 }
 #[derive(Resource)]
@@ -226,7 +261,7 @@ fn set_border(q: &mut UiQ, e: Entity, c: Color) { if let Ok((_, _, _, _, _, Some
 fn set_size(q: &mut UiQ, e: Entity, size: f32) { if let Ok((.., Some(mut f))) = q.get_mut(e) { f.font_size = size; } }
 fn set_pos(q: &mut UiQ, e: Entity, x: f32, y: f32) { if let Ok((Some(mut n), ..)) = q.get_mut(e) { n.left = px(x); n.top = px(y); } }
 
-pub fn cd_base(g: &Game, id: &str) -> f32 { ab_info(id).cd * g.st.cd * (1.0 - 0.22 * g.m(&format!("{}.cd", id)) as f32) }
+pub fn cd_base(g: &Game, id: &str) -> f32 { ab_info(id).cd * g.st.cd * (1.0 - 0.22 * g.m(&format!("{}.cd", id)) as f32) / (1.0 + 0.025 * (crate::abilities::ab_level(g, id) - 1) as f32) }
 fn fmt_t(t: f32) -> String { let s = t.max(0.0) as u32; format!("{}:{:02}", s / 60, s % 60) }
 
 /// screen flow: menus, level-ups, pause and death
@@ -336,7 +371,8 @@ pub fn button_hover(mut q: Query<(&Interaction, &UiBtn, &mut BorderColor, &mut B
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: ResMut<Game>, p: Res<Player>, dc: Res<DayCycle>, time: Res<Time>,
-    cam: Query<(&Camera, &GlobalTransform), With<MainCam>>, w: Option<Res<Voxels>>, mut images: ResMut<Assets<Image>>, ctl: Res<Controls>, cfg: Res<crate::GameCfg>) {
+    cam: Query<(&Camera, &GlobalTransform), With<MainCam>>, w: Option<Res<Voxels>>, mut images: ResMut<Assets<Image>>, ctl: Res<Controls>, cfg: Res<crate::GameCfg>,
+    icons: Res<crate::icons::Icons>, mut imgs: Query<&mut ImageNode, Without<UiBtn>>) {
     let dt = time.delta_secs();
     let scr = ui.screen;
     set_vis(&mut q, r.menu, scr == Screen::Menu);
@@ -366,6 +402,9 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         let (lv, ub) = (crate::abilities::ab_level(&g, id), crate::abilities::unbound(&g, id));
         set_text(&mut q, *name, &format!("{}\n{}{}", info.name, if ub { "UNBOUND " } else { "Lv " }, lv));
         set_tcol(&mut q, *name, srgb(if ub { 0xffd35a } else { 0xf0e6d8 }));
+        let (icon, gold) = r.slot_fx[i];
+        set_vis(&mut q, gold, ub);
+        if let Ok(mut im) = imgs.get_mut(icon) { if let Some(h) = icons.glyphs.get(crate::icons::glyph_for_id(id)) { if im.image != *h { im.image = h.clone(); } } im.color = srgb(info.color).with_alpha(if left > 0.0 { 0.45 } else { 1.0 }); }
         let ready = left <= 0.0;
         set_bg(&mut q, *glow, col(info.color, if ready { 1.0 } else { 0.35 }));
     }
@@ -447,7 +486,14 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         set_text(&mut q, r.lv_sub, &if chest { if ui.relic_only { "The altar offers its power. Choose one.".to_string() } else { "The chest holds a relic. Choose one.".into() } } else { format!("Level {}. Choose one{}", g.lvl - g.level_pending + 1, if g.level_pending > 1 { format!("  |  {} more to come", g.level_pending - 1) } else { String::new() }) });
         for (i, (b, tag, name, desc)) in r.cards.iter().enumerate() {
             match ui.cards.get(i) {
-                Some(c) => { set_vis(&mut q, *b, true); set_text(&mut q, *tag, &c.tag.to_uppercase()); set_tcol(&mut q, *tag, srgb(c.color)); set_text(&mut q, *name, &c.name); set_tcol(&mut q, *name, srgb(match c.kind { CardKind::Chaos => 0xff7ae8, CardKind::Mastery | CardKind::Evolution => 0xffd27a, _ => 0xfff3d8 })); set_text(&mut q, *desc, &c.desc); }
+                Some(c) => {
+                    set_vis(&mut q, *b, true); set_text(&mut q, *tag, &c.tag.to_uppercase()); set_text(&mut q, *name, &c.name); set_text(&mut q, *desc, &c.desc);
+                    set_tcol(&mut q, *name, srgb(match c.kind { CardKind::Chaos => 0x7a1a6a, CardKind::Mastery | CardKind::Evolution => 0x8a5a0a, CardKind::Empower => 0x1a3a6a, _ => 0x2a1a0e }));
+                    let (icon, rib) = r.card_fx[i];
+                    let dim = { let f = |s: u32| ((((c.color >> s) & 255) as f32) * 0.62) as u32; (f(16) << 16) | (f(8) << 8) | f(0) };
+                    if let Ok(mut im) = imgs.get_mut(rib) { im.color = srgb(dim); }
+                    if let Ok(mut im) = imgs.get_mut(icon) { let g = crate::icons::glyph_for(&c.key, &c.name, &c.desc); if let Some(h) = icons.glyphs.get(g) { if im.image != *h { im.image = h.clone(); } } im.color = srgb(dim); }
+                }
                 None => set_vis(&mut q, *b, false),
             }
         }

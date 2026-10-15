@@ -29,28 +29,27 @@ pub struct SettingsRefs { root: Entity, vals: Vec<Entity> }
 fn col(hex: u32, a: f32) -> Color { srgb(hex).with_alpha(a) }
 fn txt(s: &str, size: f32, hex: u32) -> (Text, TextFont, TextColor) { (Text::new(s), TextFont { font_size: size, ..default() }, TextColor(srgb(hex))) }
 fn px(v: f32) -> Val { Val::Px(v) }
-fn btn(c: &mut Commands, b: UiBtn, w: f32, label: &str) -> Entity {
-    let e = c.spawn((Button, b, Node { width: px(w), padding: UiRect::axes(px(8.0), px(4.0)), justify_content: JustifyContent::Center, border: UiRect::all(px(2.0)), ..default() },
-        BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(0xff9a3d, 0.4)), BorderRadius::all(px(6.0)))).id();
-    let t = c.spawn(txt(label, 18.0, 0xfff3d8)).id(); c.entity(e).add_child(t); e
-}
-pub fn setup_settings(mut c: Commands) {
-    let root = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(6.0), ..default() },
-        BackgroundColor(col(0x0a0806, 0.9)), Visibility::Hidden)).id();
-    let t = c.spawn(txt("SETTINGS", 40.0, 0xffd27a)).id(); c.entity(root).add_child(t);
+fn btn(c: &mut Commands, t: &crate::uikit::UiTex, b: UiBtn, w: f32, label: &str) -> Entity { crate::uikit::button(c, t, b, w, 34.0, label, 17.0).0 }
+pub fn setup_settings(mut c: Commands, kit: Res<crate::uikit::UiTex>) {
+    let kit = &*kit;
+    let back_root = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+        BackgroundColor(col(0x0a0806, 0.62)), Visibility::Hidden, crate::uikit::Appear::default())).id();
+    let root = c.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(5.0), padding: UiRect::axes(px(40.0), px(22.0)), ..default() }, crate::uikit::stone(kit))).id();
+    c.entity(back_root).add_child(root);
+    let t = crate::uikit::title(&mut c, "SETTINGS", 40.0, 0xffd27a); c.entity(root).add_child(t);
     let mut vals = vec![];
     for (i, name) in ROWS.iter().enumerate() {
         let row = c.spawn(Node { column_gap: px(10.0), align_items: AlignItems::Center, ..default() }).id();
         let l = c.spawn((txt(name, 18.0, 0xe8dccc), Node { width: px(240.0), ..default() })).id();
-        let dn = btn(&mut c, UiBtn::Set(i as u8, false), 40.0, "<");
+        let dn = btn(&mut c, kit, UiBtn::Set(i as u8, false), 44.0, "<");
         let v = c.spawn((txt("", 18.0, 0xffd27a), Node { width: px(150.0), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
-        let up = btn(&mut c, UiBtn::Set(i as u8, true), 40.0, ">");
+        let up = btn(&mut c, kit, UiBtn::Set(i as u8, true), 44.0, ">");
         c.entity(row).add_children(&[l, dn, v, up]); c.entity(root).add_child(row); vals.push(v);
     }
     let pad = c.spawn((txt("Gamepad: left stick move, right stick look, RT attack, LT block, A jump, B dodge, X Y LB RB abilities,\nD-pad up interact, left swap, down eat, right character panel, Start pause. On level-ups X Y B pick cards 1 2 3.", 13.0, 0x9a8a78), Node { margin: UiRect::top(px(10.0)), ..default() }, TextLayout::new_with_justify(JustifyText::Center))).id();
-    let back = btn(&mut c, UiBtn::Back, 220.0, "Back  (Esc)");
+    let back = btn(&mut c, kit, UiBtn::Back, 240.0, "Back  (Esc)");
     c.entity(root).add_children(&[pad, back]);
-    c.insert_resource(SettingsRefs { root, vals });
+    c.insert_resource(SettingsRefs { root: back_root, vals });
 }
 pub fn update_settings_ui(ui: Res<UiState>, save: Res<Save>, r: Res<SettingsRefs>, mut q: Query<(Option<&mut Text>, Option<&mut Visibility>), Without<UiBtn>>) {
     if let Ok((_, Some(mut v))) = q.get_mut(r.root) { *v = if ui.screen == Screen::Settings { Visibility::Inherited } else { Visibility::Hidden }; }

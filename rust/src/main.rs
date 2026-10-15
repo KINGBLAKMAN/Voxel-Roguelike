@@ -8,6 +8,7 @@ mod anim;
 mod audio;
 mod camp;
 mod charsheet;
+mod uikit;
 mod cosmetics;
 mod icons;
 mod augments;
@@ -94,14 +95,15 @@ fn main() {
     .insert_resource(meta::Save::load())
     .init_resource::<settings::PadState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
-    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
-    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, camp::camp_preview, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (uikit::build, icons::build_icons, hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
+    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     app.add_systems(Update, player::weapon_trails.after(game_tick));
     app.init_resource::<devmenu::DevQueue>().init_resource::<devmenu::DevMenu>()
         .add_systems(Startup, devmenu::setup_dev.after(hud::setup_hud))
         .add_systems(Update, devmenu::dev_menu.after(hud::ui_flow).before(cursor_lock));
+    app.add_systems(Update, (camp::camp_preview, camp::update_sel, uikit::animate, uikit::appear).after(hud::menu_camera).before(audio::play_sfx));
     app.init_resource::<icons::Icons>().init_resource::<charsheet::Panel>()
-        .add_systems(Startup, (icons::build_icons, charsheet::setup_tips))
+        .add_systems(Startup, charsheet::setup_tips.after(hud::setup_hud))
         .add_systems(Update, (charsheet::update_panel, charsheet::update_tips).chain().after(hud::update_hud));
     if let Some(t) = test { app.insert_resource(t).add_systems(Update, testkit::run_test.before(game_tick)); }
     if let Some(b) = bot { app.insert_resource(b).init_resource::<bot::BotState>().add_systems(Update, bot::bot_drive.after(settings::gamepad_bridge).before(hud::ui_flow)); }

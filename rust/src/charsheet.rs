@@ -31,9 +31,9 @@ fn txt(s: &str, size: f32, hex: u32) -> (Text, TextFont, TextColor) { (Text::new
 fn px(v: f32) -> Val { Val::Px(v) }
 fn roman(n: u32) -> &'static str { ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][n.min(10) as usize] }
 
-pub fn setup_tips(mut c: Commands) {
-    let root = c.spawn((Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, row_gap: px(4.0), padding: UiRect::all(px(12.0)), width: px(340.0), border: UiRect::all(px(2.0)), ..default() },
-        BackgroundColor(col(0x0c0a10, 0.96)), BorderColor(col(0xffffff, 0.5)), BorderRadius::all(px(8.0)), GlobalZIndex(60), Visibility::Hidden)).id();
+pub fn setup_tips(mut c: Commands, kit: Res<crate::uikit::UiTex>) {
+    let root = c.spawn((Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, row_gap: px(4.0), padding: UiRect::all(px(16.0)), width: px(350.0), border: UiRect::top(px(3.0)), ..default() },
+        crate::uikit::stone(&kit), BorderColor(col(0xffffff, 0.5)), GlobalZIndex(60), Visibility::Hidden)).id();
     let wrap = || Node { max_width: px(314.0), ..default() };
     let title = c.spawn((txt("", 19.0, 0xfff3d8), wrap())).id();
     let tag = c.spawn((txt("", 13.0, 0xffd27a), wrap())).id();
@@ -49,6 +49,8 @@ pub fn ability_tip(g: &Game, p: &Player, i: usize) -> Tip {
     let ups: Vec<String> = MODS.iter().filter(|m| m.0 == id).filter_map(|m| { let r = g.m(&format!("{}.{}", id, m.1)); (r > 0).then(|| format!("\n- {}{}: {}", m.2, if m.4 > 1 { format!(" {}", roman(r)) } else { String::new() }, m.3)) }).collect();
     if ups.is_empty() { body += "\n\nNo upgrades yet."; } else { body += "\n"; for u in ups { body += &u; } }
     let left = g.cds[i];
+    let lv = crate::abilities::ab_level(g, id); let ub = crate::abilities::unbound(g, id);
+    body += &format!("\n\n{} {}: {}.", if ub { "UNBOUND, level" } else { "Level" }, lv, crate::abilities::growth(id));
     Tip { title: info.name.into(), tag: format!("Ability {}  |  {:.1}s cooldown{}", i + 1, cd_base(g, id), if left > 0.0 { format!("  |  ready in {:.1}s", left) } else { "  |  ready".into() }), body, color: info.color }
 }
 
@@ -74,8 +76,10 @@ pub fn update_tips(r: Res<TipRefs>, hov: Query<(&Interaction, Option<&Tip>, Opti
 
 /// one icon tile: a tinted glyph on a dark tile with a coloured border and an optional rank badge
 fn tile(c: &mut Commands, icons: &Icons, glyph: &str, color: u32, border: u32, size: f32, badge: &str, tip: Option<Tip>, ab: Option<usize>) -> Entity {
-    let t = c.spawn((Node { width: px(size), height: px(size), border: UiRect::all(px(2.0)), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
-        BackgroundColor(col(0x15111a, 0.95)), BorderColor(col(border, 0.9)), BorderRadius::all(px(8.0)), Interaction::default())).id();
+    let kit = KIT.with(|k| k.borrow().clone()).expect("ui kit");
+    let t = c.spawn((Node { width: px(size), height: px(size), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+        if border == 0xffd35a { crate::uikit::gold(&kit) } else { crate::uikit::iron(&kit) }, BackgroundColor(col(0x15111a, 0.0)), Interaction::default())).id();
+    if border != 0xffd35a { let edge = c.spawn((Node { position_type: PositionType::Absolute, left: px(4.0), right: px(4.0), bottom: px(4.0), height: px(3.0), ..default() }, BackgroundColor(col(border, 0.9)))).id(); c.entity(t).add_child(edge); }
     if let Some(tp) = tip { c.entity(t).insert(tp); }
     if let Some(i) = ab { c.entity(t).insert(AbilityTip(i)); }
     if let Some(h) = icons.glyphs.get(glyph) { let im = c.spawn((ImageNode { image: h.clone(), color: srgb(color), ..default() }, Node { width: px(size * 0.72), height: px(size * 0.72), ..default() })).id(); c.entity(t).add_child(im); }
@@ -86,22 +90,26 @@ fn tile(c: &mut Commands, icons: &Icons, glyph: &str, color: u32, border: u32, s
     t
 }
 fn section(c: &mut Commands, parent: Entity, title: &str, tiles: Vec<Entity>) {
-    let h = c.spawn((txt(title, 15.0, 0xd8ccbc), Node { margin: UiRect::top(px(8.0)), ..default() })).id();
+    let h = c.spawn((txt(title, 15.0, 0xffd27a), Node { margin: UiRect::top(px(8.0)), ..default() })).id();
     c.entity(parent).add_child(h);
     if tiles.is_empty() { let n = c.spawn(txt("None yet", 13.0, 0x6a5e52)).id(); c.entity(parent).add_child(n); return; }
     let row = c.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: px(6.0), row_gap: px(6.0), max_width: px(640.0), ..default() }).id();
     c.entity(row).add_children(&tiles); c.entity(parent).add_child(row);
 }
 
-fn build(c: &mut Commands, icons: &Icons, g: &Game, p: &Player) -> Entity {
+thread_local! { static KIT: std::cell::RefCell<Option<crate::uikit::UiTex>> = const { std::cell::RefCell::new(None) }; }
+fn build(c: &mut Commands, icons: &Icons, g: &Game, p: &Player, kit: &crate::uikit::UiTex) -> Entity {
+    KIT.with(|k| *k.borrow_mut() = Some(kit.clone()));
     let root = c.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: px(10.0), ..default() },
-        BackgroundColor(col(0x08060a, 0.84)), GlobalZIndex(30))).id();
+        BackgroundColor(col(0x08060a, 0.7)), GlobalZIndex(30), crate::uikit::Appear::default())).id();
     let secs = g.run_t as u32;
+    let head = c.spawn((Node { padding: UiRect::axes(px(34.0), px(10.0)), ..default() }, crate::uikit::stone(kit))).id();
     let title = c.spawn(txt(&format!("{}   |   Level {}   |   {}:{:02}   |   {} slain   |   {} gold", class_name(p.cls).to_uppercase(), g.lvl, secs / 60, secs % 60, g.kills, g.gold), 24.0, class_color(p.cls))).id();
-    let cols = c.spawn(Node { column_gap: px(40.0), align_items: AlignItems::FlexStart, ..default() }).id();
-    // stats
-    let left = c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(3.0), width: px(290.0), padding: UiRect::all(px(14.0)), border: UiRect::all(px(2.0)), ..default() }, BackgroundColor(col(0x100c14, 0.9)), BorderColor(col(0x4a3e34, 1.0)), BorderRadius::all(px(10.0)))).id();
-    let h = c.spawn(txt("Stats", 18.0, 0xffd27a)).id(); c.entity(left).add_child(h);
+    c.entity(head).add_child(title);
+    let cols = c.spawn(Node { column_gap: px(24.0), align_items: AlignItems::FlexStart, ..default() }).id();
+    // stats on parchment
+    let left = c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(3.0), width: px(300.0), padding: UiRect::all(px(22.0)), ..default() }, crate::uikit::parch(kit))).id();
+    let h = c.spawn(txt("Stats", 19.0, 0x6a3a0e)).id(); c.entity(left).add_child(h);
     let s = &g.st;
     let pct = |v: f32| if v.abs() < 0.005 { "0%".to_string() } else { format!("{:+.0}%", v * 100.0) };
     let rows: Vec<(&str, String)> = vec![
@@ -115,12 +123,12 @@ fn build(c: &mut Commands, icons: &Icons, g: &Game, p: &Player) -> Entity {
     ];
     for (k, v) in rows {
         let r = c.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).id();
-        let a = c.spawn(txt(k, 14.0, 0xb8aca0)).id(); let b = c.spawn(txt(&v, 14.0, 0xfff3d8)).id();
+        let a = c.spawn(txt(k, 14.0, 0x5a4a3a)).id(); let b = c.spawn(txt(&v, 14.0, 0x2a1a0e)).id();
         c.entity(r).add_children(&[a, b]); c.entity(left).add_child(r);
     }
     // abilities, weapons and picks
-    let right = c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(2.0), width: px(660.0), ..default() }).id();
-    let abl: Vec<Entity> = class_abilities(p.cls).iter().enumerate().map(|(i, id)| { let info = ab_info(id); tile(c, icons, glyph_for_id(id), info.color, info.color, 62.0, &format!("{}", i + 1), None, Some(i)) }).collect();
+    let right = c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2.0), width: px(700.0), padding: UiRect::all(px(20.0)), ..default() }, crate::uikit::stone(kit))).id();
+    let abl: Vec<Entity> = class_abilities(p.cls).iter().enumerate().map(|(_, id)| { let info = ab_info(id); let ub = crate::abilities::unbound(g, id); tile(c, icons, glyph_for_id(id), info.color, if ub { 0xffd35a } else { info.color }, 62.0, &format!("{}{}", if ub { "U" } else { "L" }, crate::abilities::ab_level(g, id)), None, Some(class_abilities(p.cls).iter().position(|a| a == id).unwrap_or(0))) }).collect();
     section(c, right, "Abilities", abl);
     let wpn: Vec<Entity> = class_weapons(p.cls).iter().map(|w| {
         let (name, _, desc) = weapon_info(w);
@@ -169,15 +177,15 @@ fn build(c: &mut Commands, icons: &Icons, g: &Game, p: &Player) -> Entity {
     section(c, right, "Ability and weapon upgrades", ups);
     c.entity(cols).add_children(&[left, right]);
     let hint = c.spawn(txt("Hover an icon for details   |   Tab or Esc to close", 13.0, 0x8a7a6a)).id();
-    c.entity(root).add_children(&[title, cols, hint]);
+    c.entity(root).add_children(&[head, cols, hint]);
     root
 }
 
 /// open and close the panel with the screen; it's rebuilt each time so it always shows the current run
-pub fn update_panel(mut c: Commands, ui: Res<UiState>, mut panel: ResMut<Panel>, icons: Res<Icons>, g: Res<Game>, p: Res<Player>) {
+pub fn update_panel(mut c: Commands, ui: Res<UiState>, mut panel: ResMut<Panel>, icons: Res<Icons>, g: Res<Game>, p: Res<Player>, kit: Res<crate::uikit::UiTex>) {
     let open = ui.screen == Screen::Character;
     match (open, panel.root) {
-        (true, None) => panel.root = Some(build(&mut c, &icons, &g, &p)),
+        (true, None) => panel.root = Some(build(&mut c, &icons, &g, &p, &kit)),
         (false, Some(e)) => { c.entity(e).despawn_recursive(); panel.root = None; }
         _ => {}
     }
