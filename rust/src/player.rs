@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Pose { Push, Raise, Throw, Shout, Pray, Point, Lunge, BowUp, Kneel, Slam, Stab }
+pub enum Pose { Push, Raise, Throw, Shout, Pray, Point, Lunge, BowUp, Kneel, Slam, Stab, Fan }
 
 #[derive(Clone)]
 pub struct Dash { pub dir: Vec3, pub speed: f32, pub t: f32, pub kind: u8 }
@@ -29,13 +29,15 @@ pub struct Player {
     pub charge: f32, pub charging: bool, pub firing: bool, pub anim: Option<(Pose, f32, f32)>, pub roll_t: f32, pub dash: Option<Dash>, pub leap: Option<Leap>,
     pub whirl: f32, pub coyote: f32, pub move_dir: Vec3, pub aim_pt: Vec3, pub aim_dist: f32, pub sprinting: bool, pub spawned: bool, pub blocking: f32, pub dodge_cd: f32,
     pub land: f32, pub air_t: f32, pub prev_yaw: f32, pub lean: f32, pub hip: f32, pub swim_ph: f32,
+    /// where the feet point (the aim can twist the upper body away from it) and the turn-in-place step cycle
+    pub foot_yaw: f32, pub turn_ph: f32, pub turning: f32,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0 }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0, foot_yaw: 0.0, turn_ph: 0.0, turning: 0.0 }
     }
 }
 impl Player {
@@ -158,11 +160,30 @@ pub fn is_melee(id: &str) -> bool { matches!(id, "greatsword" | "swordshield" | 
 pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     let r = p.rig.clone();
     let freeze = frozen();
+    // turning: the feet lag behind the aim. Moving or attacking they catch up fast; standing still the upper
+    // body twists toward the aim first, and past ~35 degrees the feet shuffle round in short steps
+    let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let hs0 = Vec2::new(p.body.vel.x, p.body.vel.z).length();
+    let act = p.swing_t < 1.0 || p.charging || p.firing || p.anim.is_some() || p.blocking > 0.0;
+    let diff = wrap(p.yaw - p.foot_yaw);
+    if freeze.is_some() || p.dead || p.whirl > 0.0 || p.roll_t > 0.0 || p.leap.is_some() { p.foot_yaw = p.yaw; p.turning = 0.0; }
+    else if hs0 > 0.8 || !p.body.on_ground { p.foot_yaw += diff * (dt * 12.0).min(1.0); p.turning = 0.0; }
+    else {
+        if diff.abs() > if act { 0.45 } else { 0.62 } && p.turning <= 0.0 { p.turning = 1.0; }
+        if p.turning > 0.0 {
+            // a quick pivot of the hips with the feet stepping; ends once facing the aim again
+            let rate = if act { 9.0 } else { 6.0 };
+            let step = diff.signum() * (rate * dt).min(diff.abs());
+            p.foot_yaw += step;
+            p.turn_ph += dt * 13.0;
+            if diff.abs() < 0.06 { p.turning = 0.0; }
+        }
+    }
+    p.foot_yaw = wrap(p.foot_yaw);
+    let twist = wrap(p.yaw - p.foot_yaw).clamp(-1.3, 1.3);
     if let Some(root) = r.root { if let Ok(mut t) = q.get_mut(root) {
         t.translation = Vec3::new(p.body.pos.x, p.vis_y, p.body.pos.z);
-        let cur = t.rotation.to_euler(EulerRot::YXZ).0;
-        let dy = ((p.yaw - cur) % std::f32::consts::TAU + std::f32::consts::TAU * 1.5) % std::f32::consts::TAU - std::f32::consts::PI;
-        t.rotation = Quat::from_rotation_y(cur + dy * if freeze.is_some() { 1.0 } else { (dt * 18.0).min(1.0) });
+        t.rotation = Quat::from_rotation_y(p.foot_yaw);
     } }
     if p.dead { let k = (p.death_t * 3.0).min(std::f32::consts::FRAC_PI_2); set_rot(q, r.body, -k, 0.0, 0.0); set_pos(q, r.body, Vec3::new(0.0, (p.death_t).min(0.3), 0.0)); return; }
     // the run cycle: phase follows distance covered, so feet never skate
@@ -186,7 +207,7 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     p.hip += (-(move_a.clamp(-0.85, 0.85)) * amt - p.hip) * (dt * 10.0).min(1.0);
     let yaw_rate = { let d = ((p.yaw - p.prev_yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)) - std::f32::consts::PI; d / dt.max(1e-4) };
     p.prev_yaw = p.yaw;
-    let bank = (-yaw_rate * 0.035 + vr / 6.4 * 0.08).clamp(-0.22, 0.22) * amt;
+    let bank = (-yaw_rate * 0.01 + vr / 6.4 * 0.06).clamp(-0.1, 0.1) * amt * (0.3 + 0.7 * run);
     p.lean += (bank - p.lean) * (dt * 6.0).min(1.0);
     let mut t = Tg::default();
     // legs: a longer reach forward than back, knees lift on the swing and soften on contact
@@ -204,6 +225,17 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     // lean into the run; the shoulders counter the hips so the chest keeps facing the aim
     t.torso = Vec3::new(amt * (0.1 + 0.12 * run) + spr * 0.18 + p.land * 0.6 - p.pitch * 0.12, -(p.hip + s * 0.1 * amt) - s * 0.12 * amt, -p.lean * 0.4);
     t.head = Vec3::new(-p.pitch * 0.45 - t.torso.x * 0.7, s * 0.05 * amt, p.lean * 0.3);
+    // the chest carries most of the twist toward the aim, the head the rest; mid-turn the feet step
+    let busy_twist = act;
+    t.torso.y += twist * if busy_twist { 1.0 } else { 0.7 };
+    t.head.y += twist * if busy_twist { 0.0 } else { 0.3 };
+    if p.turning > 0.0 {
+        let (a, b) = (p.turn_ph.sin(), p.turn_ph.cos());
+        t.kn_l += a.max(0.0) * 0.7; t.kn_r += (-a).max(0.0) * 0.7;
+        t.leg_l -= a.max(0.0) * 0.35; t.leg_r -= (-a).max(0.0) * 0.35;
+        t.body_pos.y += b.abs() * 0.025 - 0.02;
+        t.body.y += -twist * 0.15;
+    }
     // arms: the weapon stance with a walk swing layered on
     let id = p.weapon_id();
     let st = crate::anim::stance(id);
@@ -214,7 +246,7 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     if let Some(f) = freeze { sw = f.min(1.0); if id == "longbow" && p.swing_kind == 0 { p.charging = true; p.charge = f.min(1.0); } }
     let attacking = sw < 1.0;
     if id == "longbow" {
-        if p.charging { pose = crate::anim::bow_draw(p.charge, p.pitch); } else if attacking { pose = crate::anim::bow_release(sw, p.pitch); }
+        if p.charging { pose = crate::anim::bow_draw(p.charge, p.pitch); if p.charge >= 0.98 { pose = crate::anim::bow_hold(pose, p.idle_ph); } } else if attacking { pose = crate::anim::bow_release(sw, p.pitch); }
     } else if attacking {
         pose = crate::anim::attack(id, p.swing_kind, sw);
     }
@@ -321,17 +353,72 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
         set_rot(q, Some(cape), lerp(cur, target, (dt * 8.0).min(1.0)), 0.0, 0.0);
     }
 }
+/// 0 before a, 1 after b, eased between
+fn ramp(k: f32, a: f32, b: f32) -> f32 { let x = ((k - a) / (b - a)).clamp(0.0, 1.0); x * x * (3.0 - 2.0 * x) }
 fn apply_pose(t: &mut Tg, pose: Pose, k: f32, w: f32) {
     let v = Vec3::new;
     let lt = |a: &mut Vec3, b: Vec3| *a = a.lerp(b, w);
     let lf = |a: &mut f32, b: f32| *a += (b - *a) * w;
     match pose {
-        Pose::Push => { let e = (k / 0.3).min(1.0); lt(&mut t.arm_l, v(-1.2 - 0.4 * e, 0.0, -0.25)); lt(&mut t.arm_r, v(-1.2 - 0.4 * e, 0.0, 0.25)); lf(&mut t.el_l, -0.2); lf(&mut t.el_r, -0.2); lt(&mut t.torso, v(0.2 * e - 0.1, 0.0, 0.0)); }
-        Pose::Raise => { lt(&mut t.arm_l, v(-2.95, 0.0, 0.4)); lt(&mut t.arm_r, v(-2.95, 0.0, -0.4)); lf(&mut t.el_l, -0.3); lf(&mut t.el_r, -0.3); lt(&mut t.head, v(-0.4, 0.0, 0.0)); lt(&mut t.torso, v(-0.2, 0.0, 0.0)); }
-        Pose::Throw => { let f = if k < 0.35 { 0.0 } else { ((k - 0.35) / 0.25).min(1.0) }; lt(&mut t.arm_r, v(lerp(-2.9, -0.8, f), 0.0, -0.2)); lf(&mut t.el_r, lerp(-1.4, -0.1, f)); lt(&mut t.arm_l, v(-0.6, 0.0, 0.5)); lt(&mut t.torso, v(0.0, lerp(0.45, -0.35, f), 0.0)); }
-        Pose::Shout => { lt(&mut t.arm_l, v(-0.5, 0.0, 1.35)); lt(&mut t.arm_r, v(-0.5, 0.0, -1.35)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.5, 0.0, 0.0)); lt(&mut t.torso, v(-0.3, 0.0, 0.0)); }
-        Pose::Pray => { lt(&mut t.arm_l, v(-1.2, 0.0, -0.3)); lt(&mut t.arm_r, v(-1.2, 0.0, 0.3)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.35 + 0.6 * (k * 2.0).min(1.0), 0.0, 0.0)); }
-        Pose::Point => { let f = if k < 0.4 { 0.0 } else { ((k - 0.4) / 0.15).min(1.0) }; lt(&mut t.arm_r, v(lerp(-3.0, -1.4, f), 0.0, -0.15)); lf(&mut t.el_r, lerp(-0.8, 0.0, f)); lt(&mut t.arm_l, v(-0.3, 0.0, 0.3)); lt(&mut t.torso, v(-0.15 + 0.35 * f, 0.0, 0.0)); }
+        // a two-handed thrust: gather the power at the hip with the body coiled, then drive both palms at the target
+        Pose::Push => {
+            let g = ramp(k, 0.0, 0.22); let f = ramp(k, 0.22, 0.34);
+            let arm = |side: f32| v(lerp(lerp(-0.4, -0.9, g), -1.6, f), 0.0, side * lerp(lerp(0.3, -0.25, g), 0.18, f));
+            lt(&mut t.arm_l, arm(-1.0)); lt(&mut t.arm_r, arm(1.0));
+            lf(&mut t.el_l, lerp(-1.5, -0.05, f)); lf(&mut t.el_r, lerp(-1.5, -0.05, f));
+            lt(&mut t.hand_l, v(lerp(0.0, -0.9, f), 0.0, 0.0)); lt(&mut t.hand_r, v(lerp(0.0, -0.9, f), 0.0, 0.0));
+            lt(&mut t.torso, v(lerp(-0.1 * g, 0.28, f), lerp(0.55 * g, -0.2, f), 0.0));
+            lt(&mut t.head, v(lerp(0.1, -0.05, f), lerp(-0.4 * g, 0.15, f), 0.0));
+            t.body_pos.y -= 0.1 * g * (1.0 - f) * w; t.body_pos.z += lerp(-0.08 * g, 0.18, f) * w;
+            lf(&mut t.leg_l, lerp(0.2 * g, -0.55, f)); lf(&mut t.leg_r, lerp(-0.1, 0.35, f)); lf(&mut t.kn_l, 0.35 + 0.2 * f); lf(&mut t.kn_r, 0.25);
+        }
+        // a summoning: the hands cross low and gather, then sweep up and apart over the head, the body rising onto the toes
+        Pose::Raise => {
+            let g = ramp(k, 0.0, 0.28); let f = ramp(k, 0.28, 0.5); let tremble = (k * 60.0).sin() * 0.04 * f;
+            lt(&mut t.arm_l, v(lerp(-0.7, -2.95, f) + tremble, 0.0, lerp(-0.45 * g, 0.65, f))); lt(&mut t.arm_r, v(lerp(-0.7, -2.95, f) - tremble, 0.0, lerp(0.45 * g, -0.65, f)));
+            lf(&mut t.el_l, lerp(-1.2, -0.25, f)); lf(&mut t.el_r, lerp(-1.2, -0.25, f));
+            lt(&mut t.hand_l, v(lerp(0.0, -0.6, f), 0.0, 0.0)); lt(&mut t.hand_r, v(lerp(0.0, -0.6, f), 0.0, 0.0));
+            lt(&mut t.head, v(lerp(0.35 * g, -0.55, f), 0.0, 0.0)); lt(&mut t.torso, v(lerp(0.25 * g, -0.25, f), 0.0, 0.0));
+            t.body_pos.y += (lerp(-0.14 * g, 0.06, f)) * w;
+            lf(&mut t.kn_l, lerp(0.6 * g, 0.0, f)); lf(&mut t.kn_r, lerp(0.6 * g, 0.0, f)); lf(&mut t.leg_l, lerp(-0.3 * g, 0.0, f)); lf(&mut t.leg_r, lerp(-0.3 * g, 0.0, f));
+        }
+        // an overhand throw: wind up with the arm cocked behind the head and the off hand aiming, step in and whip it through
+        Pose::Throw => {
+            let g = ramp(k, 0.0, 0.32); let f = ramp(k, 0.32, 0.48);
+            lt(&mut t.arm_r, v(lerp(lerp(-0.5, -2.9, g), -0.7, f), 0.0, lerp(-0.3, -0.1, f))); lf(&mut t.el_r, lerp(lerp(-0.4, -1.6, g), -0.1, f));
+            lt(&mut t.arm_l, v(lerp(-1.5 * g, -0.3, f), 0.0, lerp(0.2, 0.6, f))); lf(&mut t.el_l, -0.2);
+            lt(&mut t.torso, v(lerp(-0.15 * g, 0.35, f), lerp(0.6 * g, -0.5, f), 0.0)); lt(&mut t.head, v(0.0, lerp(-0.5 * g, 0.4, f), 0.0));
+            t.body_pos.z += lerp(-0.1 * g, 0.22, f) * w;
+            lf(&mut t.leg_l, lerp(0.0, -0.7, f)); lf(&mut t.leg_r, lerp(0.2 * g, 0.4, f)); lf(&mut t.kn_l, 0.3); lf(&mut t.kn_r, 0.4 * f);
+        }
+        // a fan shot: snap the bow up level, draw to the cheek, then loose while the torso sweeps across the arc
+        Pose::Fan => {
+            let d = ramp(k, 0.0, 0.2); let f = ramp(k, 0.2, 0.62); let rel = ramp(k, 0.2, 0.28);
+            let sweep = lerp(0.55, -0.55, f) * d;
+            lt(&mut t.arm_l, v(-1.55, 0.0, 0.0)); lf(&mut t.el_l, 0.0); lt(&mut t.hand_l, v(0.0, 0.0, -1.35));
+            lt(&mut t.arm_r, v(-1.5, lerp(-1.35 + d * 1.6, 0.9, rel), 1.57)); lf(&mut t.el_r, lerp(-0.25 - d * 2.3, -1.2, rel));
+            lt(&mut t.torso, v(0.05, -0.35 + sweep, 0.0)); lt(&mut t.head, v(0.0, 0.35 - sweep * 0.5, 0.0));
+            t.body_pos.y -= 0.06 * d * w; lf(&mut t.kn_l, 0.3 * d); lf(&mut t.kn_r, 0.3 * d); lf(&mut t.leg_l, -0.25 * d); lf(&mut t.leg_r, 0.15 * d);
+        }
+        Pose::Shout => { lt(&mut t.arm_l, v(-0.5, 0.0, 1.35)); lt(&mut t.arm_r, v(-0.5, 0.0, -1.35)); lf(&mut t.el_l, -1.3); lf(&mut t.el_r, -1.3); lt(&mut t.head, v(-0.5, 0.0, 0.0)); lt(&mut t.torso, v(-0.3, 0.0, 0.0)); t.body_pos.y -= 0.08 * w; lf(&mut t.kn_l, 0.5); lf(&mut t.kn_r, 0.5); lf(&mut t.leg_l, -0.3); lf(&mut t.leg_r, -0.3); }
+        // a prayer: palms meet before the chest with the head bowed, then open outward to release the blessing
+        Pose::Pray => {
+            let o = ramp(k, 0.6, 0.78);
+            lt(&mut t.arm_l, v(lerp(-1.15, -1.6, o), lerp(0.0, -0.3, o), lerp(-0.42, 0.7, o))); lt(&mut t.arm_r, v(lerp(-1.15, -1.6, o), lerp(0.0, 0.3, o), lerp(0.42, -0.7, o)));
+            lf(&mut t.el_l, lerp(-1.35, -0.3, o)); lf(&mut t.el_r, lerp(-1.35, -0.3, o));
+            lt(&mut t.hand_l, v(-0.4, 0.0, 0.0)); lt(&mut t.hand_r, v(-0.4, 0.0, 0.0));
+            lt(&mut t.head, v(lerp(0.45, -0.35, o), 0.0, 0.0)); lt(&mut t.torso, v(lerp(0.15, -0.15, o), 0.0, 0.0));
+            t.body_pos.y -= 0.08 * (1.0 - o) * w; lf(&mut t.kn_l, 0.35 * (1.0 - o)); lf(&mut t.kn_r, 0.35 * (1.0 - o));
+        }
+        // a smite: the arm rises overhead calling it down, then snaps to point at the target as the body leans in
+        Pose::Point => {
+            let g = ramp(k, 0.0, 0.32); let f = ramp(k, 0.4, 0.5);
+            lt(&mut t.arm_r, v(lerp(lerp(-0.5, -3.05, g), -1.5, f), 0.0, lerp(-0.15, 0.0, f))); lf(&mut t.el_r, lerp(-0.6 * (1.0 - g), 0.0, f));
+            lt(&mut t.hand_r, v(lerp(-0.3, -0.7, f), 0.0, 0.0));
+            lt(&mut t.arm_l, v(lerp(-0.6 * g, 0.35, f), 0.0, lerp(0.4, 0.35, f))); lf(&mut t.el_l, -0.3);
+            lt(&mut t.torso, v(lerp(-0.2 * g, 0.3, f), lerp(0.2 * g, -0.15, f), 0.0)); lt(&mut t.head, v(lerp(-0.45 * g, 0.0, f), 0.0, 0.0));
+            t.body_pos.z += 0.15 * f * w; lf(&mut t.leg_l, -0.45 * f); lf(&mut t.kn_l, 0.35 * f);
+        }
         Pose::Lunge => { lt(&mut t.torso, v(0.55, 0.0, 0.0)); lt(&mut t.arm_r, v(-1.5, 0.0, -0.1)); lf(&mut t.el_r, -0.1); lt(&mut t.arm_l, v(-0.2, 0.0, 0.5)); lf(&mut t.leg_l, -0.9); lf(&mut t.leg_r, 0.7); lf(&mut t.kn_l, 0.9); lf(&mut t.kn_r, 0.3); }
         Pose::BowUp => { lt(&mut t.arm_l, v(-2.7, 0.0, 0.2)); lf(&mut t.el_l, 0.0); lt(&mut t.hand_l, v(0.0, 0.0, 0.0)); lt(&mut t.arm_r, v(-2.4, 0.0, 0.3)); lf(&mut t.el_r, -1.6); lt(&mut t.head, v(-0.55, 0.0, 0.0)); lt(&mut t.torso, v(-0.25, 0.0, 0.0)); }
         Pose::Kneel => {

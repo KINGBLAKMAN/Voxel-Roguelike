@@ -142,7 +142,7 @@ fn kick_dirt(cx: &mut Ctx, p: Vec3, n: usize, speed: f32) { let g = ground_hex(c
 fn volley(cx: &mut Ctx) -> bool {
     let n = 9 + cx.g.st.extra_proj as u32 + 3 * cx.m("volley.more");
     let fire = cx.m("volley.fire") > 0; let split = if cx.m("volley.split") > 0 { 3 } else { 0 };
-    cx.p.pose(Pose::Push, 0.35);
+    cx.p.pose(Pose::Fan, 0.55);
     volley_wave(cx, n, fire, split);
     if cx.m("volley.hail") > 0 { for i in 1..=2 { cx.later(0.22 * i as f32, move |cx| { if !cx.p.dead { volley_wave(cx, n, fire, split); } }); } }
     true

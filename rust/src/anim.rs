@@ -141,7 +141,10 @@ pub fn attack(id: &str, combo: u8, t: f32) -> Pose {
 /// the bow: the left arm raises the bow at the target as soon as the draw starts; the right upper arm swings out
 /// and back as the charge builds while the forearm folds to bring the string hand to the cheek
 pub fn bow_draw(charge: f32, pitch: f32) -> Pose {
-    let c = charge.clamp(0.0, 1.0);
+    // the first moment of the draw pulls an arrow from the quiver over the shoulder and nocks it
+    let raw = charge.clamp(0.0, 1.0);
+    let nock = (raw / 0.16).min(1.0);
+    let c = ((raw - 0.16) / 0.84).clamp(0.0, 1.0);
     let aim = -std::f32::consts::FRAC_PI_2 - pitch * 0.85;
     let mut q = stance("longbow");
     q.al = v(aim, 0.0, 0.0); q.el = 0.0; q.hl = Vec3::ZERO;
@@ -149,8 +152,14 @@ pub fn bow_draw(charge: f32, pitch: f32) -> Pose {
     q.er = -0.25 - c * 2.3;
     q.hr = Vec3::ZERO;
     q.torso = v(0.0, -0.15 - c * 0.2, 0.0);
+    if nock < 1.0 {
+        let mut reach = q; reach.ar = v(-2.7, 0.0, 0.35); reach.er = -1.5; reach.torso = v(-0.05, 0.1, 0.0);
+        return reach.lerp(&q, ease(nock));
+    }
     q
 }
+/// holding a full draw: the arms strain and tremble slightly
+pub fn bow_hold(mut q: Pose, t: f32) -> Pose { let a = (t * 37.0).sin() * 0.012 + (t * 23.0).sin() * 0.008; q.al.x += a; q.ar.y += a * 1.5; q.torso.x += a * 0.5; q }
 /// the moment after the release: the string hand flies back open, the bow arm kicks, then back to stance
 pub fn bow_release(t: f32, pitch: f32) -> Pose {
     let full = bow_draw(1.0, pitch);
