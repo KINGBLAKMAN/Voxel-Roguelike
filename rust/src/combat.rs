@@ -417,7 +417,7 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
     cx.p.swing_t = 0.0; cx.p.swing_dur = (rate * 0.95 / spd).clamp(0.2, 0.9); cx.p.swing_kind = combo;
     cx.p.swing_side = if combo == 1 { -1.0 } else { 1.0 };
     let side = cx.p.swing_side;
-    cx.play(if heavy { "heavy" } else { "swing" });
+    cx.play(match id { "daggers" => "knife", "scythe" => "reap", _ if heavy => "heavy", _ => "swing" });
     let reach = if (id == "greatsword" && cx.m("w.greatsword.reach") > 0) || (id == "scythe" && cx.m("w.scythe.reach") > 0) { 1.3 } else { 1.0 };
     let (range, arc) = (range0 * reach, arc0 * if reach > 1.0 { 1.15 } else { 1.0 });
     // the arc of light lands with the blade, after the wind-up
@@ -550,7 +550,7 @@ fn cast_primary(cx: &mut Ctx, id: &str) {
     cx.p.swing_t = 0.0; cx.p.swing_dur = (weapon_rate(id) * 1.1 / spd).clamp(0.24, 0.75);
     match id {
         "firestaff" => {
-            cx.play("fire");
+            cx.play("staff");
             let rad = 3.0 * cx.g.st.fire_rad * cx.g.st.area * (1.0 + 0.3 * cx.m("w.firestaff.big") as f32);
             let cl = cx.m("w.firestaff.cluster"); let tr = cx.m("w.firestaff.trail") > 0;
             let e = glow_ball(cx, 0xff6a1a, 0.32);
@@ -564,7 +564,7 @@ fn cast_primary(cx: &mut Ctx, id: &str) {
             cx.fx.burst(from, 0xff8a2a, 6, 2.0, 0.25, 0.3, 0.0, 0.0);
         }
         "frostwand" => {
-            cx.play("ice");
+            cx.play("wand");
             let n = 1 + 2 * cx.m("w.frostwand.fork"); let thr = if cx.m("w.frostwand.brittle") > 0 { 3 } else { 5 }; let lance = cx.m("w.frostwand.lance") > 0;
             for k in 0..n {
                 let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.08 };
@@ -583,7 +583,7 @@ fn cast_primary(cx: &mut Ctx, id: &str) {
             for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.16 }; skull_bolt(cx, from, Quat::from_rotation_y(a) * dir * 24.0, 13.0, plague, burst); }
         }
         _ => {
-            cx.play("holy");
+            cx.play("scepter");
             let n = 1 + cx.m("w.scepter.twin"); let split = cx.m("w.scepter.split") > 0; let nova = cx.m("w.scepter.nova") > 0;
             for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.12 }; holy_bolt(cx, from, Quat::from_rotation_y(a) * dir * 30.0, 14.0, 0.24, split, nova); }
         }

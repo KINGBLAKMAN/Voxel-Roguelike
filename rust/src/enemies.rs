@@ -184,7 +184,7 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let mi = cx.g.minutes();
     // health grows both linearly and by a compounding rate, so late-game builds have to keep scaling too
     // abilities stack without limit now, so the horde's toughness keeps compounding across all three maps
-    let diff = (1.0 + mi * 0.1) * 1.055f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
+    let diff = (1.0 + mi * 0.08) * 1.05f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
     let quiet = t.passive || t.prop;
     let mut seed = cx.fx.rng.load(std::sync::atomic::Ordering::Relaxed);
     let mut rng = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };

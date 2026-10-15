@@ -101,6 +101,17 @@ fn play(dt: f32, st: &mut BotState, g: &mut crate::game::Game, p: &mut Player, k
     st.strafe_t -= dt; if st.strafe_t <= 0.0 { st.strafe_t = 2.0 + st.r() * 3.0; st.strafe = if st.r() < 0.5 { -1.0 } else { 1.0 }; }
     st.lmb = false;
     let low = p.hp < p.max_hp * 0.35;
+    // with nothing close, sweep up experience gems (and step into an open portal)
+    let gem = g.pickups.iter().filter(|k| k.kind == crate::game::PickKind::Xp).map(|k| (k.pos.distance(pp), k.pos)).filter(|x| x.0 < 26.0).min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let goal = g.dir.portal.as_ref().map(|pt| pt.pos).or(gem.map(|x| x.1));
+    if let (Some(to), true) = (goal, target.map(|t| t.0 > 8.0).unwrap_or(true) || g.dir.portal.is_some()) {
+        let d = to - pp; p.yaw = d.x.atan2(d.z); p.pitch = -0.1;
+        press(KeyCode::KeyW, st, keys);
+        st.stuck_t += dt;
+        if st.stuck_t > 2.5 { if st.stuck_p.distance(pp) < 1.0 { press(KeyCode::Space, st, keys); } st.stuck_t = 0.0; st.stuck_p = pp; }
+        mouse.release(MouseButton::Left);
+        return;
+    }
     if let Some((d, tp)) = target {
         let to = tp - (pp + Vec3::Y * 1.4);
         p.yaw = to.x.atan2(to.z);

@@ -54,8 +54,9 @@ impl Default for Game {
 impl Game {
     pub fn m(&self, k: &str) -> u32 { *self.mods.get(k).unwrap_or(&0) }
     pub fn buff(&self, k: &str) -> f32 { *self.buffs.get(k).unwrap_or(&0.0) }
-    /// the run's intensity clock: the three five-minute stages compress what used to be twenty minutes of escalation
-    pub fn minutes(&self) -> f32 { self.run_t / 45.0 }
+    /// the run's intensity clock: it starts at a minute per minute and accelerates, so the three five-minute stages
+    /// reach by 15:00 what used to take twenty minutes of escalation
+    pub fn minutes(&self) -> f32 { let m = self.run_t / 60.0; m * (1.0 + self.run_t / 2700.0) }
     /// the map a stage is played on
     pub fn stage_map(&self, stage: u32) -> MapKind { match stage { 0 => MapKind::Forest, 1 => self.route, _ => MapKind::Volcanic } }
     /// difficulty multipliers from the Ember level (set when a run starts)
