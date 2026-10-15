@@ -93,6 +93,10 @@ fn make(name: &str) -> (Vec<u8>, f32) {
         "spawn" => { s.tone(70.0, 40.0, 0.6, Sine, 0.6, 0.0); 0.3 }
         "swap" => { s.hiss(0.14, 1500.0, 3200.0, 0.8, 2, 0.0); s.tone(660.0, 990.0, 0.06, Tri, 0.3, 0.05); 0.25 }
         "rumble" => { s.hiss(1.5, 300.0, 60.0, 1.0, 0, 0.0); s.tone(45.0, 30.0, 1.4, Sine, 0.8, 0.0); 0.6 }
+        "splash" => { s.hiss(0.5, 2600.0, 500.0, 1.0, 0, 0.0); s.hiss(0.25, 5000.0, 2000.0, 0.4, 2, 0.04); s.tone(300.0, 120.0, 0.12, Sine, 0.4, 0.0); 0.35 }
+        "stroke" => { s.hiss(0.22, 1400.0, 500.0, 1.0, 0, 0.0); s.hiss(0.12, 3000.0, 1600.0, 0.3, 2, 0.08); 0.12 }
+        "sizzle" => { s.hiss(0.6, 6000.0, 2500.0, 1.0, 1, 0.0); s.hiss(0.4, 900.0, 300.0, 0.6, 0, 0.0); 0.3 }
+        "portal" => { s.tone(110.0, 440.0, 1.1, Saw, 0.25, 0.0); s.tone(220.0, 880.0, 1.0, Sine, 0.4, 0.1); s.hiss(1.2, 400.0, 3000.0, 0.6, 2, 0.0); 0.45 }
         _ => { s.tone(440.0, 440.0, 0.1, Sine, 0.2, 0.0); 0.1 }
     };
     // trim trailing silence
@@ -102,7 +106,7 @@ fn make(name: &str) -> (Vec<u8>, f32) {
 }
 
 pub const NAMES: &[&str] = &["swing", "heavy", "hit", "crit", "bow", "fire", "boom", "ice", "arcane", "holy", "heal", "level", "hurt", "pick", "gem", "dash", "die", "chest", "shout",
-    "zap", "horn", "glass", "swell", "squelch", "whoosh", "rise", "relic", "bomb", "thud", "snap", "eat", "spawn", "rumble", "swap"];
+    "zap", "horn", "glass", "swell", "squelch", "whoosh", "rise", "relic", "bomb", "thud", "snap", "eat", "spawn", "rumble", "swap", "splash", "stroke", "sizzle", "portal"];
 
 #[derive(Resource, Default)]
 pub struct Sfx { pub queue: Vec<&'static str>, handles: HashMap<&'static str, (Handle<AudioSource>, f32)>, gate: HashMap<&'static str, f64>, pub muted: bool, pub master: f32, pub music: f32 }

@@ -28,14 +28,14 @@ pub struct Player {
     pub walk_ph: f32, pub idle_ph: f32, pub swing_t: f32, pub swing_dur: f32, pub swing_side: f32, pub swing_kind: u8, pub cast_kick: f32,
     pub charge: f32, pub charging: bool, pub firing: bool, pub anim: Option<(Pose, f32, f32)>, pub roll_t: f32, pub dash: Option<Dash>, pub leap: Option<Leap>,
     pub whirl: f32, pub coyote: f32, pub move_dir: Vec3, pub aim_pt: Vec3, pub aim_dist: f32, pub sprinting: bool, pub spawned: bool, pub blocking: f32, pub dodge_cd: f32,
-    pub land: f32, pub air_t: f32, pub prev_yaw: f32, pub lean: f32, pub hip: f32,
+    pub land: f32, pub air_t: f32, pub prev_yaw: f32, pub lean: f32, pub hip: f32, pub swim_ph: f32,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0 }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0 }
     }
 }
 impl Player {
@@ -105,7 +105,7 @@ pub fn move_player(w: &mut Voxels, p: &mut Player, keys: &ButtonInput<KeyCode>, 
     let sprint = keys.pressed(KeyCode::ShiftLeft) && moving && p.stam > 1.0 && !p.charging;
     p.sprinting = sprint;
     if sprint { p.stam = (p.stam - dt * 22.0).max(0.0); } else if p.blocking <= 0.0 { p.stam = (p.stam + dt * 20.0).min(stam_max); }
-    let spd = 6.4 * class_speed * speed_mul * if sprint { 1.55 } else { 1.0 } * if p.charging { 0.55 } else { 1.0 } * if p.body.in_water { 0.6 } else { 1.0 };
+    let spd = 6.4 * class_speed * speed_mul * if sprint { 1.55 } else { 1.0 } * if p.charging { 0.55 } else { 1.0 } * if p.body.in_water { if w.kind.lava() { 0.45 } else { 0.72 } } else if p.body.depth > 0.3 { 0.85 } else { 1.0 };
     if let Some(d) = p.dash.as_mut() {
         d.t -= dt;
         p.body.vel.x = d.dir.x * d.speed; p.body.vel.z = d.dir.z * d.speed; p.body.vel.y = p.body.vel.y.max(-2.0);
@@ -124,10 +124,12 @@ pub fn move_player(w: &mut Voxels, p: &mut Player, keys: &ButtonInput<KeyCode>, 
     }
     p.coyote = if p.body.on_ground { 0.12 } else { p.coyote - dt };
     if keys.pressed(KeyCode::Space) {
-        if p.body.in_water { p.body.vel.y = p.body.vel.y.max(4.5); }
+        if p.body.in_water { p.body.vel.y = p.body.vel.y.max(3.2); }
         else if p.coyote > 0.0 { p.body.vel.y = 9.2; p.coyote = 0.0; p.body.on_ground = false; }
     }
     move_body(w, &mut p.body, dt, 26.0);
+    // swimming into a bank hauls you up and out
+    if p.body.in_water && p.body.hit_wall && moving { p.body.vel.y = p.body.vel.y.max(7.5); }
     p.vis_y = if (p.vis_y - p.body.pos.y).abs() > 2.0 { p.body.pos.y } else { lerp(p.vis_y, p.body.pos.y, (dt * 16.0).min(1.0)) };
 }
 
@@ -237,6 +239,35 @@ pub fn animate_player(p: &mut Player, q: &mut Query<&mut Transform>, dt: f32) {
     t.el_r = pose.er; t.el_l = pose.el; t.hand_r = pose.hr; t.hand_l = pose.hl;
     t.torso += pose.torso;
     t.body_pos.z += pose.step;
+    // swimming: a front crawl when moving, treading water when still
+    let swim = p.body.in_water && !p.body.on_ground && p.leap.is_none() && p.dash.is_none();
+    if swim {
+        let sw = (hs / 3.2).min(1.0);
+        p.swim_ph += dt * (2.0 + hs * 0.55);
+        let ph = p.swim_ph;
+        t.body = Vec3::new(lerp(0.12, 1.3, sw), p.hip * 0.3, ph.sin() * 0.2 * sw);
+        t.body_pos = Vec3::new(0.0, lerp(0.22, 1.02, sw) + (ph * 2.0).sin() * 0.03, 0.0);
+        t.torso = Vec3::new(0.0, ph.sin() * 0.15 * sw, 0.0) + pose.torso * 0.3;
+        t.head = Vec3::new(-lerp(0.08, 1.1, sw) - p.pitch * 0.3, -ph.sin() * 0.3 * sw, 0.0);
+        let k = (ph * 2.2).sin();
+        if sw > 0.45 {
+            t.leg_l = k * 0.35; t.leg_r = -k * 0.35; t.kn_l = 0.2 + k.max(0.0) * 0.35; t.kn_r = 0.2 + (-k).max(0.0) * 0.35;
+        } else {
+            t.leg_l = ph.sin() * 0.5 - 0.35; t.leg_r = -ph.sin() * 0.5 - 0.35; t.kn_l = 0.9 + ph.cos() * 0.45; t.kn_r = 0.9 - ph.cos() * 0.45;
+        }
+        if !busy {
+            if sw > 0.45 {
+                // each arm sweeps a full circle half a turn apart: reach, pull under, recover over the back
+                let a = ph % std::f32::consts::TAU; let b = (ph + std::f32::consts::PI) % std::f32::consts::TAU;
+                t.arm_r = Vec3::new(a - std::f32::consts::PI, 0.0, -0.12 - 0.25 * a.sin().max(0.0)); t.arm_l = Vec3::new(b - std::f32::consts::PI, 0.0, 0.12 + 0.25 * b.sin().max(0.0));
+                t.el_r = -0.15 - 0.9 * a.sin().max(0.0); t.el_l = -0.15 - 0.9 * b.sin().max(0.0);
+            } else {
+                let sc = (ph * 1.6).sin();
+                t.arm_r = Vec3::new(-0.45, sc * 0.4, -1.0 - sc * 0.25); t.arm_l = Vec3::new(-0.45, -sc * 0.4, 1.0 + sc * 0.25);
+                t.el_r = -0.5; t.el_l = -0.5;
+            }
+        }
+    }
     // casters raise the focus at the target while holding the attack
     if !attacking && p.firing && !is_melee(id) && id != "longbow" { t.arm_r = Vec3::new(-1.45 - p.pitch * 0.7, 0.0, 0.05); t.el_r = -0.25; }
     // guard: forearms crossed in front of the face

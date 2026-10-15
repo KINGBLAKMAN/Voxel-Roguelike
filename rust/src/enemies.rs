@@ -502,6 +502,17 @@ pub fn update_enemies(cx: &mut Ctx) {
                 if cx.g.flags.remove("parried").is_some() { let e = &mut cx.g.enemies[i]; e.stun = e.stun.max(if e.boss { 0.5 } else { 1.5 }); if !e.boss { e.body.vel += Vec3::new(-tdx, 0.4, -tdz) * 9.0; } }
                 if cx.g.enemies[i].affix == Some(Affix::Vampiric) { let e = &mut cx.g.enemies[i]; e.hp = (e.hp + d * 1.5).min(e.max_hp); } }
         }
+        // nothing walks into lava on purpose: turn along the shore instead
+        if cx.w.kind.lava() && !fly && (mvx != 0.0 || mvz != 0.0) {
+            let d = Vec2::new(mvx, mvz).normalize_or_zero();
+            let ahead = |cx: &mut Ctx, d: Vec2| { let a = epos + Vec3::new(d.x, 0.0, d.y) * 1.4; cx.w.top_at(a.x.floor() as i32, a.z.floor() as i32) <= crate::world::SEA };
+            if ahead(cx, d) {
+                let (l, r) = (Vec2::new(-d.y, d.x), Vec2::new(d.y, -d.x));
+                let sp = Vec2::new(mvx, mvz).length();
+                let side = if !ahead(cx, l) { l } else if !ahead(cx, r) { r } else { Vec2::ZERO };
+                mvx = side.x * sp; mvz = side.y * sp;
+            }
+        }
         let e = &mut cx.g.enemies[i];
         if e.frozen > 0.0 || e.stun > 0.0 { mvx = 0.0; mvz = 0.0; if fly { e.body.vel.y = (e.body.vel.y - dt * 12.0).max(-6.0); } }
         if (mvx != 0.0 || mvz != 0.0) && (t.passive || !aggro || e.fear > 0.0) { e.yaw = mvx.atan2(mvz); }
@@ -522,6 +533,13 @@ pub fn update_enemies(cx: &mut Ctx) {
         if kind == Kind::Slime && b.on_ground && e.was_air { e.squash = 0.45; }
         e.was_air = !b.on_ground;
         e.body = b;
+        // anything that ends up in the lava burns fast (bosses shrug it off)
+        if cx.w.kind.lava() && !fly && cx.g.enemies[i].body.depth > 0.05 && !cx.g.enemies[i].boss && !cx.g.net.client() {
+            let e = &mut cx.g.enemies[i]; e.burn = e.burn.max(2.0); e.body.vel.y = e.body.vel.y.max(3.0);
+            let d = (e.max_hp * 0.5 + 10.0) * dt;
+            cx.apply_damage(i, d, Hit { quiet: true, ..default() });
+            if cx.g.enemies[i].dead { continue; }
+        }
         visual(cx, i, moving && (cx.g.enemies[i].body.on_ground || fly));
     }
     // keep the horde from stacking into one blob

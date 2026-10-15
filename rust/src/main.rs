@@ -283,6 +283,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     let guard = if cx.p.blocking > 0.0 { 0.5 } else { 1.0 };
     let slowed = guard * if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
     move_player(cx.w, cx.p, keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
+    liquid_fx(&mut cx);
     // hunger: food keeps you going; starving bleeds health
     if !cx.p.dead {
         cx.p.hunger = (cx.p.hunger - dt * 100.0 / 330.0).max(0.0);
@@ -334,6 +335,47 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     update_camera(cx.w, cx.p, cx.cam, &mut ct, &mut proj, raw, &mut rng);
     *cx.q.get_mut(ce).unwrap() = ct;
     if let Some(l) = link { net::flush(&mut cx, l, raw); }
+    }
+}
+/// splashes, ripples and swim strokes in water; burns, sizzles and a hop out of lava
+fn liquid_fx(cx: &mut Ctx) {
+    let dt = cx.dt;
+    let (pos, vel, depth, swim) = (cx.p.body.pos, cx.p.body.vel, cx.p.body.depth, cx.p.body.in_water);
+    let lava = cx.w.kind.lava();
+    let was = cx.g.flags.get("in_liquid").copied().unwrap_or(0.0) > 0.0;
+    let wet = depth > 0.05;
+    if wet { cx.g.flags.insert("in_liquid", 1.0); } else { cx.g.flags.remove("in_liquid"); }
+    let surf = Vec3::new(pos.x, world::WATER_Y, pos.z);
+    let (c1, c2) = if lava { (0xff8a2a, 0xffd27a) } else { (0x1c2a34, 0xffffff) };
+    if wet && !was && vel.y < -2.5 {
+        cx.play(if lava { "sizzle" } else { "splash" });
+        let n = (12.0 + vel.y.abs() * 3.0) as usize;
+        for _ in 0..n { let a = cx.rr(0.0, std::f32::consts::TAU); let sp = cx.rr(1.5, 4.0); let v = Vec3::new(a.cos() * sp, cx.rr(3.0, 7.0), a.sin() * sp); let l = cx.rr(0.4, 0.8); cx.fx.emit(lava, surf, v, l, 0.14, 0.05, fx::hexc(c1) * if lava { 2.5 } else { 1.0 }, 14.0, 0.5, 0.9); }
+        cx.gfx().ring(surf - Vec3::Y * 0.1, c2, 0.3, 2.4, 0.6);
+    }
+    if !wet || cx.p.dead { return; }
+    if lava {
+        // lava burns hard and throws you back up, so a misstep hurts but doesn't trap you
+        let t = cx.g.flags.entry("lava_t").or_insert(0.0); *t -= dt;
+        if *t <= 0.0 {
+            *t = 0.45;
+            let d = 6.0 + cx.p.max_hp * 0.06;
+            cx.hurt_player(d, None, 0.0); cx.p.body.vel.y = cx.p.body.vel.y.max(8.5);
+            cx.play("sizzle"); cx.fx.burst(surf + Vec3::Y * 0.3, 0xff6a1a, 18, 4.0, 0.5, 0.25, 3.0, 4.0); cx.fx.smoke(surf, 0x3a2a24, 4, 1.2, 1.0, 1.0);
+        }
+        return;
+    }
+    // strokes and a wake while swimming; slow rings while treading water; ripples around wading legs
+    let hs = Vec2::new(vel.x, vel.z).length();
+    let t = cx.g.flags.entry("stroke_t").or_insert(0.0); *t -= dt;
+    if *t <= 0.0 {
+        if swim && hs > 1.5 {
+            *t = 0.42; cx.play("stroke");
+            let side = if cx.r() < 0.5 { 1.0 } else { -1.0 }; let r = cx.p.right() * side * 0.45 + cx.p.fwd() * 0.5;
+            for _ in 0..6 { let v = Vec3::new(cx.rr(-1.0, 1.0), cx.rr(2.0, 3.6), cx.rr(-1.0, 1.0)); let l = cx.rr(0.35, 0.6); cx.fx.emit(false, surf + r, v, l, 0.1, 0.04, fx::hexc(c2), 14.0, 0.5, 0.85); }
+            cx.gfx().ring(surf - Vec3::Y * 0.1, c1, 0.4, 1.4, 0.7);
+        } else if hs > 1.0 { *t = 0.3; cx.gfx().ring(surf - Vec3::Y * 0.1, c1, 0.3, 1.1, 0.6); }
+        else { *t = 1.1; cx.gfx().ring(surf - Vec3::Y * 0.1, c1, 0.3, 1.6, 1.2); }
     }
 }
 /// clients follow the host's time of day
@@ -413,6 +455,12 @@ fn test_act(cx: &mut Ctx, a: &str) {
         "mod" => { *cx.g.mods.entry(v.to_string()).or_insert(0) += 1; }
         "minutes" => { cx.g.run_t = v.parse::<f32>().unwrap_or(5.0) * 60.0; }
         "stage_t" => { let t = v.parse::<f32>().unwrap_or(290.0); cx.g.run_t += (t - cx.g.stage_t).max(0.0); cx.g.stage_t = t; }
+        "water" => {
+            // drop into the nearest deep liquid
+            let pp = cx.p.body.pos;
+            'find: for r in (0..90).step_by(2) { for k in 0..24 { let a = k as f32 / 24.0 * std::f32::consts::TAU; let (x, z) = (pp.x + a.cos() * r as f32, pp.z + a.sin() * r as f32);
+                if cx.w.top_at(x.floor() as i32, z.floor() as i32) <= world::SEA - 2 && world::in_bounds(x, z, 4.0) { cx.p.body.pos = Vec3::new(x, world::WATER_Y - 1.2, z); cx.p.vis_y = cx.p.body.pos.y; break 'find; } } }
+        }
         "nextstage" => { director::advance_stage(cx); }
         "portal" => { let p = cx.p.body.pos + cx.p.fwd() * 5.0; let mut at = p; at.y = cx.ground(p.x, p.z, p.y + 2.0); let col = director::map_color(cx.g.stage_map(cx.g.stage + 1)); director::open_portal(cx, at, col); }
         "weapon" => { cx.p.widx = v.parse().unwrap_or(0); attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
