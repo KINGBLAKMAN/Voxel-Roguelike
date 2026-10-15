@@ -95,7 +95,57 @@ pub struct RollSt { hit: Vec<u32>, dance: bool }
 #[derive(Clone, Copy)]
 pub struct SlamSt { to: Vec3, r: f32, stun: f32, after: u32, fis: bool }
 
-pub fn cd_of(cx: &Ctx, id: &str) -> f32 { ab_info(id).cd * cx.g.st.cd * (1.0 - 0.22 * cx.m(&format!("{}.cd", id)) as f32) }
+pub fn cd_of(cx: &Ctx, id: &str) -> f32 { ab_info(id).cd * cx.g.st.cd * (1.0 - 0.22 * cx.m(&format!("{}.cd", id)) as f32) / (1.0 + 0.025 * alv(cx, id) as f32) }
+
+// ---------------- ability levels ----------------
+// Every card taken for an ability (its named upgrades and Empower cards) raises its level by one, and every level
+// makes it bigger: more arrows, swords, skeletons, meteors, wider arcs, more damage. Levels have no ceiling, but
+// only two abilities may break past level 10: the first two to get there become Unbound; the rest stop at 10.
+pub const LV_CAP: u32 = 10;
+pub fn ab_level(g: &Game, id: &str) -> u32 { 1 + g.m(&format!("lv.{}", id)) + MODS.iter().filter(|m| m.0 == id).map(|m| g.m(&format!("{}.{}", id, m.1))).sum::<u32>() }
+pub fn unbound(g: &Game, id: &str) -> bool { g.m(&format!("ub.{}", id)) > 0 }
+pub fn unbound_count(g: &Game, cls: Class) -> usize { class_abilities(cls).iter().filter(|a| unbound(g, a)).count() }
+/// no more levels: at 10 and not Unbound (and the two Unbound slots are taken)
+pub fn capped(g: &Game, cls: Class, id: &str) -> bool { !unbound(g, id) && ab_level(g, id) >= LV_CAP && unbound_count(g, cls) >= 2 }
+/// after any level gain: an ability reaching 10 while an Unbound slot is free breaks its limit
+pub fn check_unbound(g: &mut Game, cls: Class) -> Option<&'static str> {
+    for id in class_abilities(cls) { if !unbound(g, id) && ab_level(g, id) >= LV_CAP && unbound_count(g, cls) < 2 { g.mods.insert(format!("ub.{}", id), 1); return Some(id); } }
+    None
+}
+/// bonus levels above the first
+pub fn alv(cx: &Ctx, id: &str) -> u32 { ab_level(cx.g, id) - 1 }
+/// damage multiplier from levels
+pub fn pw(cx: &Ctx, id: &str) -> f32 { 1.0 + 0.08 * alv(cx, id) as f32 }
+/// what one more level adds, for the Empower cards
+pub fn growth(id: &str) -> &'static str {
+    match id {
+        "volley" => "+2 arrows and a wider fan, all the way to a full circle; every 5 levels another wave",
+        "roll" => "+2 arrows in a ring as you roll and harder blade dance",
+        "snare" => "+1 trap every 2 levels; traps bite harder",
+        "storm" => "a bigger, longer, denser storm; every 4 levels another cloud",
+        "blink" => "blinks further; from level 3 every blink detonates both ends",
+        "nova" => "wider; every 3 levels another pulse and more ice shards",
+        "orb" => "harder hitting; every 3 levels another orb",
+        "meteor" => "+1 meteor in the shower and bigger impacts",
+        "charge" => "charges further and hits harder; from level 3 it ends in a shockwave",
+        "whirl" => "spins longer and wider with more blades",
+        "slam" => "wider; every 3 levels another aftershock",
+        "cry" => "a longer, stronger cry; it also blasts enemies around you",
+        "mend" => "heals more and burns enemies nearby harder",
+        "smite" => "+1 sword per level, striking more enemies",
+        "shield" => "lasts longer with more shields orbiting",
+        "consecrate" => "a bigger ring with more obelisks and holy fire",
+        "raise" => "+1 skeleton every 2 levels, an archer every 4",
+        "bonespear" => "longer; every 4 levels another spear in the fan",
+        "corpse" => "+1 corpse per level and bigger blasts",
+        "drain" => "+1 tether per level, draining harder",
+        "fan" => "+2 shots and a wider arc, up to a full circle",
+        "smoke" => "a bigger cloud; from level 2 the roll drops bombs",
+        "dynamite" => "+1 extra stick per level and a bigger blast",
+        "deadeye" => "+2 marks per level and harder shots",
+        _ => "stronger",
+    }
+}
 
 pub fn use_ability(cx: &mut Ctx, i: usize) {
     if cx.p.dead || cx.g.cds[i] > 0.0 || cx.p.leap.is_some() || cx.g.over { return; }
@@ -161,21 +211,27 @@ fn kick_dirt(cx: &mut Ctx, p: Vec3, n: usize, speed: f32) { let g = ground_hex(c
 
 // ================= RANGER =================
 fn volley(cx: &mut Ctx) -> bool {
-    let n = 9 + cx.g.st.extra_proj as u32 + 3 * cx.m("volley.more");
+    let lv = alv(cx, "volley");
+    let n = 9 + cx.g.st.extra_proj as u32 + 3 * cx.m("volley.more") + 2 * lv;
     let fire = cx.m("volley.fire") > 0; let split = if cx.m("volley.split") > 0 { 3 } else { 0 };
+    // the fan widens with every level until the arrows leave in a full circle
+    let spread = (0.63 + 0.32 * lv as f32).min(TAU);
+    let dmg = (15.0 * pw(cx, "volley")).round();
     cx.p.pose(Pose::Fan, 0.55);
-    volley_wave(cx, n, fire, split);
-    if cx.m("volley.hail") > 0 { for i in 1..=2 { cx.later(0.22 * i as f32, move |cx| { if !cx.p.dead { volley_wave(cx, n, fire, split); } }); } }
+    volley_wave(cx, n, fire, split, spread, dmg);
+    let waves = if cx.m("volley.hail") > 0 { 2 } else { 0 } + lv / 5;
+    for i in 1..=waves { cx.later(0.22 * i as f32, move |cx| { if !cx.p.dead { volley_wave(cx, n, fire, split, spread, dmg); } }); }
     true
 }
-fn volley_wave(cx: &mut Ctx, n: u32, fire: bool, split: u32) {
+fn volley_wave(cx: &mut Ctx, n: u32, fire: bool, split: u32, spread: f32, dmg: f32) {
     let from = cx.hand(); let base = (cx.p.aim_pt - from).normalize();
-    let step = (1.25 / n as f32).min(0.07);
+    let ring = spread >= TAU - 0.01;
+    let step = if ring { TAU / n as f32 } else { spread / (n - 1).max(1) as f32 };
     cx.play("bow"); cx.p.cast_kick = 1.0;
     let glow = if fire { 0xff8a3a } else { 0x9be07a };
     for k in 0..n {
-        let mut d = Quat::from_rotation_y((k as f32 - (n - 1) as f32 / 2.0) * step) * base; d.y += 0.03;
-        player_arrow(cx, from, d.normalize() * 58.0, 15.0, 4.0, true, 2.2, 0x4a7a3a, Some(glow), split, fire, false);
+        let mut d = Quat::from_rotation_y((k as f32 - if ring { 0.0 } else { (n - 1) as f32 / 2.0 }) * step) * base; if ring { d.y = 0.0; } d.y += 0.03;
+        player_arrow(cx, from, d.normalize() * 58.0, dmg, 4.0, true, 2.2, 0x4a7a3a, Some(glow), split, fire, false);
     }
     // the string snaps: a spray of leaves and wind lines fanning out with the arrows
     cx.fx.burst(from, glow, 18, 5.0, 0.35, 0.25, 0.0, 0.0);
@@ -199,7 +255,8 @@ fn roll(cx: &mut Ctx) -> bool {
     kick_dirt(cx, pp, 8, 4.0);
     afterimage(cx, 0x9be07a, 0.35);
     if cx.m("roll.decoy") > 0 { spawn_decoy(cx, pp); }
-    if cx.m("roll.shot") > 0 { let c = pp + Vec3::Y * 1.2; for i in 0..10 { let an = i as f32 / 10.0 * TAU; player_arrow(cx, c, Vec3::new(an.cos(), 0.05, an.sin()) * 44.0, 12.0, 3.0, false, 1.2, 0x4a7a3a, Some(0x9be07a), 0, false, false); } }
+    let ring = if cx.m("roll.shot") > 0 { 10 } else { 0 } + 2 * alv(cx, "roll");
+    if ring > 0 { let c = pp + Vec3::Y * 1.2; let dm = (12.0 * pw(cx, "roll")).round(); for i in 0..ring { let an = i as f32 / ring as f32 * TAU; player_arrow(cx, c, Vec3::new(an.cos(), 0.05, an.sin()) * 44.0, dm, 3.0, false, 1.2, 0x4a7a3a, Some(0x9be07a), 0, false, false); } }
     true
 }
 /// a straw dummy in a green hood: the horde can't resist it
@@ -222,7 +279,7 @@ fn spawn_decoy(cx: &mut Ctx, pos: Vec3) {
 }
 
 fn snare(cx: &mut Ctx) -> bool {
-    let cnt = 1 + cx.m("snare.twin");
+    let cnt = 1 + cx.m("snare.twin") + alv(cx, "snare") / 2;
     let fl = cx.p.fwd(); let rt = cx.p.right(); let pp = cx.p.body.pos;
     let mut base = cx.p.aim_pt; if pp.distance(base) > 22.0 { base = pp + fl * 22.0; }
     cx.p.pose(Pose::Throw, 0.45); cx.play("whoosh");
@@ -311,7 +368,7 @@ pub fn update_traps(cx: &mut Ctx) {
             cx.play("snap"); cx.shake(0.12);
             { let mut g = cx.gfx(); g.flare(pos + Vec3::Y * 0.4, 0xffe0a0, if mini { 2.0 } else { 3.5 }, 0.25, true); }
             cx.fx.sparks(pos + Vec3::Y * 0.4, 0xffe0a0, 12, 8.0);
-            let dm = (32.0 * (1.0 + 0.6 * spiked as f32) * if mini { 0.6 } else { 1.0 }).round();
+            let dm = (32.0 * (1.0 + 0.6 * spiked as f32) * if mini { 0.6 } else { 1.0 } * pw(cx, "snare")).round();
             cx.damage(v, dm, Hit { col: 0xd9b46a, ..default() });
             cx.status(v, Status { stun: (3.0 + spiked as f32) * if mini { 0.5 } else { 1.0 }, ..default() });
             if boom > 0 { explode_fire(cx, pos + Vec3::Y * 0.5, if mini { 2.5 } else { 4.0 }, if mini { 20.0 } else { 40.0 }, 0, false); }
@@ -325,9 +382,13 @@ pub fn update_traps(cx: &mut Ctx) {
 fn storm(cx: &mut Ctx) -> bool {
     let eye = cx.m("storm.eye") > 0;
     let mut c = if eye { cx.p.body.pos } else { clamp_aim(cx, 30.0) }; c.y = cx.ground(c.x, c.z, c.y + 1.0);
-    let r = 6.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("storm.wide") as f32);
-    let life = 4.0 + 1.5 * cx.m("storm.long") as f32 + if eye { 2.0 } else { 0.0 };
+    let lv = alv(cx, "storm") as f32;
+    let r = 6.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("storm.wide") as f32 + 0.05 * lv);
+    let life = 4.0 + 1.5 * cx.m("storm.long") as f32 + if eye { 2.0 } else { 0.0 } + 0.3 * lv;
     let frost = cx.m("storm.frost") > 0;
+    cx.g.flags.insert("storm_pw", pw(cx, "storm"));
+    // every 4 levels another cloud gathers nearby
+    for k in 0..(lv as u32 / 4) { let a = k as f32 * 2.4; let mut c2 = c + Vec3::new(a.cos(), 0.0, a.sin()) * r * 1.6; c2.y = cx.ground(c2.x, c2.z, c.y + 2.0); cx.later(0.5 + 0.15 * k as f32, move |cx| storm_cloud(cx, c2, r * 0.8, life, frost, false)); }
     cx.p.pose(Pose::BowUp, 0.5); cx.play("bow");
     { let pp = cx.p.body.pos + Vec3::Y * 3.0; cx.gfx().speed_lines(pp, Vec3::Y, 12, 5.0, 0.8, 0xeaffd8, 0.3); }
     // a single glowing arrow shot straight up calls the storm
@@ -375,7 +436,7 @@ fn storm_cloud(cx: &mut Ctx, c: Vec3, r: f32, life: f32, frost: bool, eye: bool)
         if cx.r() < 0.04 { let a = cp + Vec3::new(cx.rr(-r, r) * 0.6, -0.5, cx.rr(-r, r) * 0.6); let b = a + Vec3::new(cx.rr(-2.0, 2.0), cx.rr(-3.0, -1.0), cx.rr(-2.0, 2.0)); cx.gfx().lightning(a, b, if frost { 0xd8f8ff } else { 0xeaffd8 }, 0.12, 0.12); }
         if !raining { return; }
         // the rain: real arrows falling out of the cloud
-        acc += cx.dt * 16.0 * (r / 6.0).max(1.0);
+        acc += cx.dt * 16.0 * (r / 6.0).max(1.0) * cx.g.flags.get("storm_pw").copied().unwrap_or(1.0).sqrt();
         while acc >= 1.0 {
             acc -= 1.0;
             let an = cx.rr(0.0, TAU); let rr = cx.r().sqrt() * z.r;
@@ -395,7 +456,7 @@ fn storm_cloud(cx: &mut Ctx, c: Vec3, r: f32, life: f32, frost: bool, eye: bool)
 fn storm_arrow(cx: &mut Ctx, from: Vec3, v: Vec3, frost: bool) {
     let e = arrow_mesh(cx, if frost { 0x8fb8d0 } else { 0x4a7a3a }, 0xd8dde4, if frost { Some(0xbff4ff) } else { None });
     cx.c.entity(e).insert(Transform::from_translation(from).with_scale(Vec3::splat(1.5)));
-    let mut p = Proj::new(from, v); p.e = Some(e); p.grav = 10.0; p.life = 1.5; p.r = 0.25; p.stick = true; p.dmg = 10.0;
+    let mut p = Proj::new(from, v); p.e = Some(e); p.grav = 10.0; p.life = 1.5; p.r = 0.25; p.stick = true; p.dmg = (10.0 * cx.g.flags.get("storm_pw").copied().unwrap_or(1.0)).round();
     p.trail = Some(Box::new(move |cx, p, _| { if cx.r() < 0.5 { cx.fx.emit(true, p.pos, Vec3::ZERO, 0.15, 0.14, 0.02, hexc(if frost { 0xd8f8ff } else { 0xeaffd8 }) * 1.5, 0.0, 0.0, 0.6); } }));
     p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; let d = p.dmg; cx.damage(i, d, Hit { kb: 0.5, src: Some(s), quiet: true, col: 0xb8ff8a, ..default() }); if frost { cx.status(i, Status { slow: 1.5, ..default() }); } cx.fx.sparks(s, 0xeaffd8, 3, 5.0); } }));
     p.on_world = Some(Box::new(|cx, p, _| { if cx.r() < 0.3 { cx.fx.emit(false, p.pos, Vec3::Y * 0.8, 0.5, 0.15, 0.35, hexc(0xb8a888), 0.0, 1.0, 0.5); } }));
@@ -406,7 +467,7 @@ fn storm_arrow(cx: &mut Ctx, from: Vec3, v: Vec3, frost: bool) {
 fn blink(cx: &mut Ctx) -> bool {
     let mut f = cx.p.look(); f.y = 0.0; let f = f.normalize_or_zero();
     let from = cx.p.body.pos;
-    let far = 11.0 + 5.0 * cx.m("blink.far") as f32;
+    let far = 11.0 + 5.0 * cx.m("blink.far") as f32 + 0.6 * alv(cx, "blink") as f32;
     let mut ok = None; let mut d = far;
     while d >= 1.0 {
         let (x, z) = (from.x + f.x * d, from.z + f.z * d);
@@ -426,11 +487,12 @@ fn blink(cx: &mut Ctx) -> bool {
     { let mid = from.lerp(to, 0.5) + Vec3::Y; let len = from.distance(to); let mut g = cx.gfx(); g.speed_lines(mid, f, 18, len, 1.1, 0xe8dcff, 0.3); g.impact(to + Vec3::Y, 0xc4a8ff, 1.5); g.glint(from + Vec3::Y * 1.2, 0xffffff, 1.2, 0.3); }
     cx.punch(0.25);
     for i in 0..40 { let t = i as f32 / 40.0; let p = from.lerp(to, t) + Vec3::Y * (1.0 + (t * PI).sin() * 0.6); let v = Vec3::new(cx.rr(-0.6, 0.6), cx.rr(-0.6, 0.6), cx.rr(-0.6, 0.6)) + f * 6.0; let c = hexc(if i % 3 == 0 { 0xffffff } else { 0xa183ff }) * 2.5; cx.fx.emit(true, p, v, 0.45, 0.3, 0.04, c, 0.0, 3.0, 1.0); }
-    if cx.m("blink.wake") > 0 {
+    if cx.m("blink.wake") > 0 || alv(cx, "blink") >= 3 {
+        let dm = (30.0 * pw(cx, "blink")).round();
         for p in [from, to] {
             { let mut g = cx.gfx(); g.ring(p, 0xd08aff, 0.5, 3.5, 0.4); g.shock(p, 0xd08aff, 0.4, 3.5, 0.35, 1.4); }
             cx.fx.burst(p + Vec3::Y, 0xd08aff, 30, 6.0, 0.5, 0.4, 0.0, 0.0);
-            cx.aoe(p, 3.5, &mut |cx, i, _| cx.damage(i, 30.0, Hit { kb: 6.0, src: Some(p), col: 0xd08aff, ..default() }));
+            cx.aoe(p, 3.5, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 6.0, src: Some(p), col: 0xd08aff, ..default() }));
         }
     }
     true
@@ -459,13 +521,16 @@ fn mirror_image(cx: &mut Ctx, pos: Vec3) {
 }
 
 fn nova(cx: &mut Ctx) -> bool {
-    let r = 7.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("nova.wide") as f32);
+    let lv = alv(cx, "nova");
+    let r = 7.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("nova.wide") as f32 + 0.05 * lv as f32);
     let fr = 2.6 + 1.2 * cx.m("nova.deep") as f32;
     let p0 = cx.p.body.pos;
+    let k = pw(cx, "nova");
     cx.p.pose(Pose::Slam, 0.5);
-    nova_pulse(cx, p0, r, fr, 15.0);
-    if cx.m("nova.zero") > 0 { for i in 1..=2 { cx.later(0.45 * i as f32, move |cx| { if !cx.p.dead { let p = cx.p.body.pos; nova_pulse(cx, p, r * (1.0 + 0.25 * i as f32), fr * 0.6, 12.0); } }); } }
-    let ns = 10 * cx.m("nova.shards");
+    nova_pulse(cx, p0, r, fr, (15.0 * k).round());
+    let pulses = if cx.m("nova.zero") > 0 { 2 } else { 0 } + lv / 3;
+    for i in 1..=pulses { cx.later(0.45 * i as f32, move |cx| { if !cx.p.dead { let p = cx.p.body.pos; nova_pulse(cx, p, r * (1.0 + 0.25 * (i as f32).min(4.0)), fr * 0.6, (12.0 * k).round()); } }); }
+    let ns = 10 * cx.m("nova.shards") + 3 * lv;
     for i in 0..ns {
         let an = i as f32 / ns as f32 * TAU;
         let e = shard_mesh(cx, 0xbff4ff, 2.6);
@@ -498,9 +563,11 @@ fn nova_pulse(cx: &mut Ctx, p0: Vec3, r: f32, fr: f32, dmg: f32) {
 fn orb(cx: &mut Ctx) -> bool {
     let from = cx.hand(); let dir = (cx.p.aim_pt - from).normalize();
     cx.play("arcane"); cx.p.cast_kick = 1.0; cx.p.pose(Pose::Push, 0.4);
-    let sc = 1.0 + 0.35 * cx.m("orb.big") as f32; let n = 1 + cx.m("orb.twin");
+    let lv = alv(cx, "orb");
+    let sc = 1.0 + 0.35 * cx.m("orb.big") as f32; let n = 1 + cx.m("orb.twin") + lv / 3;
     let (split, sing) = (cx.m("orb.split"), cx.m("orb.sing") > 0);
-    for k in 0..n { let d = if n > 1 { Quat::from_rotation_y(if k > 0 { 0.14 } else { -0.14 }) * dir } else { dir }; make_orb(cx, from, d, sc, (26.0 * sc).round(), split, sing); }
+    let dm = (26.0 * sc * pw(cx, "orb")).round();
+    for k in 0..n { let a = if n > 1 { (k as f32 / (n - 1) as f32 - 0.5) * (0.28 * (n - 1) as f32).min(2.4) } else { 0.0 }; let d = Quat::from_rotation_y(a) * dir; make_orb(cx, from, d, sc, dm, split, sing); }
     cx.fx.burst(from, 0xd08aff, 20, 4.0, 0.4, 0.35, 0.0, 0.0);
     true
 }
@@ -556,16 +623,16 @@ fn meteor(cx: &mut Ctx) -> bool {
     c.y = cx.ground(c.x, c.z, c.y + 1.0);
     let cata = cx.m("meteor.cata") as f32;
     let r = 5.5 * cx.g.st.area * (1.0 + 0.2 * cata);
-    let dmg = (95.0 * (1.0 + 0.4 * cata)).round();
+    let dmg = (95.0 * (1.0 + 0.4 * cata) * pw(cx, "meteor")).round();
     let inf = cx.m("meteor.inferno") > 0;
     cx.play("arcane"); cx.p.pose(Pose::Raise, 0.9);
     let pp = cx.p.body.pos; cx.gfx().circle(pp, 0xff6a1a, 2.0, 0.9, "fire", 3.0, None, None);
     call_meteor(cx, c, r, dmg, true, inf);
-    let sh = 2 * cx.m("meteor.shower");
+    let sh = 2 * cx.m("meteor.shower") + alv(cx, "meteor");
     for i in 0..sh {
         let an = i as f32 / sh as f32 * TAU + cx.rr(-0.3, 0.3); let d = r * cx.rr(0.8, 1.4);
         let off = Vec3::new(c.x + an.cos() * d, c.y, c.z + an.sin() * d);
-        cx.later(0.3 + i as f32 * 0.28, move |cx| { let mut o = off; o.y = cx.ground(o.x, o.z, c.y + 2.0); call_meteor(cx, o, r * 0.55, (dmg * 0.4).round(), false, false); });
+        cx.later(0.3 + i as f32 * (0.28 / (1.0 + sh as f32 * 0.05)), move |cx| { let mut o = off; o.y = cx.ground(o.x, o.z, c.y + 2.0); call_meteor(cx, o, r * 0.55, (dmg * 0.4).round(), false, false); });
     }
     if cx.m("meteor.arma") > 0 {
         cx.later(1.2, move |cx| {
@@ -697,7 +764,9 @@ fn meteor_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bo
 fn charge(cx: &mut Ctx) -> bool {
     let d = cx.p.fwd();
     cx.play("dash"); cx.play("shout");
-    let tt = 0.38 * (1.0 + 0.5 * cx.m("charge.mom") as f32);
+    let lv = alv(cx, "charge");
+    let tt = 0.38 * (1.0 + 0.5 * cx.m("charge.mom") as f32 + 0.06 * lv as f32);
+    cx.g.flags.insert("charge_pw", pw(cx, "charge"));
     cx.p.dash = Some(Dash { dir: d, speed: 30.0, t: tt, kind: 2 });
     cx.p.invuln = 0.3; cx.p.pose(Pose::Lunge, tt + 0.1);
     { let pp = cx.p.body.pos + Vec3::Y; let mut g = cx.gfx(); g.speed_lines(pp + d * 3.0, d, 20, 6.0, 1.5, 0xffd0c0, 0.35); g.card(pp + d * 0.8, 0xff6a4a, g.fx.tex.burst.clone(), Vec3::splat(0.5), Vec3::splat(3.0), 0.2, 0.0, 0.0, 6.0); }
@@ -707,13 +776,15 @@ fn charge(cx: &mut Ctx) -> bool {
     let m = cx.pal.mat(cx.mats, 0xff6a4a, Mk::Ghost); let cone = cx.fx.cone.clone(); let tor = cx.pal.torus.clone();
     mesh_part(cx, wedge, cone, m.clone(), Transform::from_xyz(0.0, 0.0, 1.0).with_rotation(Quat::from_rotation_x(FRAC_PI_2)).with_scale(Vec3::new(2.4, 1.6, 2.0)));
     for k in 0..3 { mesh_part(cx, wedge, tor.clone(), m.clone(), Transform::from_xyz(0.0, 0.0, 0.4 - k as f32 * 0.6).with_rotation(Quat::from_rotation_x(FRAC_PI_2)).with_scale(Vec3::splat(1.2 - k as f32 * 0.2))); }
-    cx.g.ab.charge = Some(ChargeSt { hit: vec![], drop: 0.0, ruin: cx.m("charge.ruin") > 0, wave: cx.m("charge.wave") > 0, wedge, dust: 0.0 });
+    cx.g.ab.charge = Some(ChargeSt { hit: vec![], drop: 0.0, ruin: cx.m("charge.ruin") > 0, wave: cx.m("charge.wave") > 0 || lv >= 3, wedge, dust: 0.0 });
     true
 }
 fn whirl(cx: &mut Ctx) -> bool {
-    let life = 2.5 + 1.5 * cx.m("whirl.long") as f32;
+    let lv = alv(cx, "whirl");
+    let life = 2.5 + 1.5 * cx.m("whirl.long") as f32 + 0.2 * lv as f32;
     cx.p.whirl = life; cx.play("heavy");
-    let r = 4.2 * cx.g.st.area * (1.0 + 0.25 * cx.m("whirl.wide") as f32);
+    let r = 4.2 * cx.g.st.area * (1.0 + 0.25 * cx.m("whirl.wide") as f32 + 0.04 * lv as f32);
+    let wdm = (11.0 * pw(cx, "whirl")).round(); let blades = 3 + lv;
     let (vortex, storm) = (cx.m("whirl.vortex") > 0, cx.m("whirl.blades") > 0);
     let pp = cx.p.body.pos;
     { let mut g = cx.gfx(); for k in 0..6 { let an = k as f32 / 6.0 * TAU; let p = pp + Vec3::new(an.cos() * r * 0.6, 1.0 + (k % 2) as f32 * 0.5, an.sin() * r * 0.6); g.slash(p, 0xfff0d8, r * 0.55, 0.2, an); } }
@@ -740,9 +811,9 @@ fn whirl(cx: &mut Ctx) -> bool {
     z.on_tick = Some(Box::new(move |cx, z| {
         cx.play("swing"); tk += 1;
         let c = z.pos;
-        let n = cx.aoe(c, r, &mut |cx, i, _| { cx.damage(i, 11.0, Hit { kb: if vortex { 0.0 } else { 3.0 }, src: Some(c), col: 0xffd0a0, quiet: true, ..default() }); if vortex { let e = &cx.g.enemies[i]; let p = Vec3::new((c.x - e.body.pos.x) * 1.6, 0.0, (c.z - e.body.pos.z) * 1.6); cx.status(i, Status { push: Some(p), ..default() }); } });
+        let n = cx.aoe(c, r, &mut |cx, i, _| { cx.damage(i, wdm, Hit { kb: if vortex { 0.0 } else { 3.0 }, src: Some(c), col: 0xffd0a0, quiet: true, ..default() }); if vortex { let e = &cx.g.enemies[i]; let p = Vec3::new((c.x - e.body.pos.x) * 1.6, 0.0, (c.z - e.body.pos.z) * 1.6); cx.status(i, Status { push: Some(p), ..default() }); } });
         if n > 0 && cx.g.st.ww_heal > 0.0 { let h = n.min(6) as f32 * cx.g.st.ww_heal; cx.sustain(h); }
-        if storm && tk % 2 == 0 { let off = cx.rr(0.0, TAU); for i in 0..3 { let an = off + i as f32 / 3.0 * TAU; spin_blade(cx, c + Vec3::Y, Vec3::new(an.sin(), 0.0, an.cos()), 14.0, 0xffe0b0); } }
+        if (storm || lv >= 4) && tk % 2 == 0 { let off = cx.rr(0.0, TAU); for i in 0..blades { let an = off + i as f32 / blades as f32 * TAU; spin_blade(cx, c + Vec3::Y, Vec3::new(an.sin(), 0.0, an.cos()), (14.0 * (1.0 + 0.08 * lv as f32)).round(), 0xffe0b0); } }
     }));
     z.on_frame = Some(Box::new(move |cx, z| {
         let c = z.pos; let t = z.t; let fade = ((z.life - t) / 0.4).clamp(0.0, 1.0) * (t / 0.2).min(1.0);
@@ -776,12 +847,14 @@ fn slam(cx: &mut Ctx) -> bool {
     if dd > 13.0 { to = pp + f * 13.0; } if dd < 2.0 { to = pp + f * 3.0; }
     to.y = cx.ground(to.x, to.z, to.y + 2.0);
     if crate::physics::collides(cx.w, to.x, to.y, to.z, 0.3, 1.8) { to.y += 1.0; }
-    let r = 6.0 * cx.g.st.area * (1.0 + 0.3 * cx.m("slam.wide") as f32);
+    let lv = alv(cx, "slam");
+    let r = 6.0 * cx.g.st.area * (1.0 + 0.3 * cx.m("slam.wide") as f32 + 0.06 * lv as f32);
     let stun = 1.0 + cx.m("slam.quake") as f32;
+    cx.g.flags.insert("slam_pw", pw(cx, "slam"));
     cx.gfx().circle(to, 0xd9a46a, r, 0.6, "war", 2.0, None, None);
     cx.play("heavy"); cx.p.invuln = 0.6;
     cx.p.leap = Some(Leap { from: pp, to, t: 0.0, dur: 0.55, height: 5.0 });
-    cx.g.ab.slam = Some(SlamSt { to, r, stun, after: cx.m("slam.after"), fis: cx.m("slam.fissure") > 0 });
+    cx.g.ab.slam = Some(SlamSt { to, r, stun, after: cx.m("slam.after") + lv / 3, fis: cx.m("slam.fissure") > 0 });
     true
 }
 /// pillars of the ground itself heave up out of the earth, hold, and sink back
@@ -833,7 +906,7 @@ fn slam_land(cx: &mut Ctx, s: SlamSt) {
     earth_pillars(cx, &pts, 1.6);
     let g = ground_hex(cx, to);
     for _ in 0..26 { let an = cx.rr(0.0, TAU); let sp = cx.rr(3.0, 9.0); let v = Vec3::new(an.cos() * sp, cx.rr(5.0, 11.0), an.sin() * sp); let col = cx.pick(&[g, 0x8a5b34, 0x8c9097]); let sz = cx.rr(0.2, 0.45); let l = cx.rr(1.0, 2.0); cx.gfx().debris_one(to + Vec3::new(an.cos(), 0.3, an.sin()), v, col, sz, l); }
-    cx.aoe(to, r, &mut |cx, i, _| { cx.damage(i, 42.0, Hit { kb: 9.0, up: 8.0, src: Some(to), col: 0xffd0a0, ..default() }); cx.status(i, Status { stun: s.stun, ..default() }); });
+    let sk = cx.g.flags.get("slam_pw").copied().unwrap_or(1.0); cx.aoe(to, r, &mut |cx, i, _| { cx.damage(i, (42.0 * sk).round(), Hit { kb: 9.0, up: 8.0, src: Some(to), col: 0xffd0a0, ..default() }); cx.status(i, Status { stun: s.stun, ..default() }); });
     for i in 1..=s.after {
         cx.later(0.45 * i as f32, move |cx| {
             let rr = r * (1.0 + 0.25 * i as f32);
@@ -843,7 +916,7 @@ fn slam_land(cx: &mut Ctx, s: SlamSt) {
             let mut pts = vec![]; let n = (rr * 1.6) as usize;
             for k in 0..n { let an = k as f32 / n as f32 * TAU + i as f32; let mut p = Vec3::new(to.x + an.cos() * rr * 0.9, 0.0, to.z + an.sin() * rr * 0.9); p.y = cx.ground(p.x, p.z, to.y + 2.0); pts.push((p, cx.rr(0.8, 1.5))); }
             earth_pillars(cx, &pts, 0.9);
-            cx.aoe(to, rr, &mut |cx, j, _| { cx.damage(j, 25.0, Hit { kb: 6.0, up: 5.0, src: Some(to), col: 0xffb070, ..default() }); cx.status(j, Status { stun: 0.6, ..default() }); });
+            let sk = cx.g.flags.get("slam_pw").copied().unwrap_or(1.0); cx.aoe(to, rr, &mut |cx, j, _| { cx.damage(j, (25.0 * sk).round(), Hit { kb: 6.0, up: 5.0, src: Some(to), col: 0xffb070, ..default() }); cx.status(j, Status { stun: 0.6, ..default() }); });
         });
     }
     if s.fis {
@@ -862,8 +935,12 @@ fn slam_land(cx: &mut Ctx, s: SlamSt) {
 
 fn cry(cx: &mut Ctx) -> bool {
     let rage = cx.m("cry.rage") as f32; let rally = cx.m("cry.rally") > 0;
-    let dur = 8.0 + 2.0 * rage + if rally { 1.0 } else { 0.0 };
+    let lv = alv(cx, "cry") as f32;
+    let dur = 8.0 + 2.0 * rage + if rally { 1.0 } else { 0.0 } + 0.4 * lv;
     cx.g.buffs.insert("cry", dur);
+    cx.g.flags.insert("cry_amp", 1.4 + 0.04 * lv);
+    // a levelled cry hits like a shockwave
+    if lv >= 1.0 { let c = cx.p.body.pos; let dm = (12.0 * lv).round(); { let mut g = cx.gfx(); g.ring(c, 0xff5b4c, 0.5, 5.0 + lv * 0.3, 0.4); g.shock(c, 0xff5b4c, 0.5, 5.0 + lv * 0.3, 0.35, 1.6); } cx.aoe(c, 5.0 + lv * 0.3, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 7.0, up: 4.0, src: Some(c), col: 0xff5b4c, ..default() })); }
     cx.g.flags.insert("cry_leech", 0.1 + 0.1 * rage);
     cx.heal(if rally { 24.0 } else { 20.0 }, false);
     cx.play("shout"); cx.shake(0.4); cx.p.pose(Pose::Shout, 0.8);
@@ -920,7 +997,8 @@ fn banner(cx: &mut Ctx, p: Vec3, yaw: f32, dur: f32) {
 
 // ================= PRIEST =================
 fn mend(cx: &mut Ctx) -> bool {
-    let amt = cx.p.max_hp * 0.25 * (1.0 + 0.15 * cx.m("mend.greater") as f32);
+    let amt = cx.p.max_hp * 0.25 * (1.0 + 0.15 * cx.m("mend.greater") as f32 + 0.03 * alv(cx, "mend") as f32);
+    cx.g.flags.insert("mend_pw", pw(cx, "mend"));
     let hot = 4.0 * (1.0 + cx.m("mend.renew") as f32);
     cx.heal(amt, false); cx.g.buffs.insert("hot", hot);
     cx.play("heal"); cx.p.pose(Pose::Pray, 0.9);
@@ -930,9 +1008,10 @@ fn mend(cx: &mut Ctx) -> bool {
     for i in 0..30 { let an = i as f32 / 30.0 * TAU * 3.0; let v = Vec3::new(-an.sin() * 1.5, 2.5, an.cos() * 1.5); let c = hexc(cx.pick(&[0x8dff9e, 0xffffff, 0xffe48a])) * 2.5; cx.fx.emit(true, pp + Vec3::new(an.cos() * 1.1, i as f32 * 0.06, an.sin() * 1.1), v, 0.9, 0.4, 0.05, c, 0.0, 0.5, 1.0); }
     let bloom = cx.m("mend.bloom") > 0;
     lotus(cx, pp, if bloom { 2.2 } else { 1.4 }, if bloom { 6.0 } else { 1.8 }, bloom);
-    if cx.g.st.radiance > 0.0 || cx.m("mend.prayer") > 0 {
+    if cx.g.st.radiance > 0.0 || cx.m("mend.prayer") > 0 || alv(cx, "mend") >= 2 {
+        let dm = (40.0 * pw(cx, "mend")).round();
         { let mut g = cx.gfx(); g.ring(pp, 0xffe48a, 0.5, 6.0, 0.4); g.shock(pp, 0xffe48a, 0.5, 6.0, 0.4, 1.6); }
-        cx.aoe(pp, 6.0, &mut |cx, i, _| cx.damage(i, 40.0, Hit { kb: 4.0, src: Some(pp), col: 0xffe48a, ..default() }));
+        cx.aoe(pp, 6.0, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 4.0, src: Some(pp), col: 0xffe48a, ..default() }));
     }
     true
 }
@@ -979,16 +1058,23 @@ fn smite(cx: &mut Ctx) -> bool {
     let mut c = clamp_aim(cx, 38.0);
     c.y = cx.ground(c.x, c.z, c.y + 1.0);
     let r = 2.9 * cx.g.st.area;
-    let dmg = (48.0 * (1.0 + 0.4 * cx.m("smite.wrath") as f32)).round();
+    let dmg = (48.0 * (1.0 + 0.4 * cx.m("smite.wrath") as f32) * pw(cx, "smite")).round();
     cx.play("holy"); cx.p.cast_kick = 1.0; cx.p.pose(Pose::Point, 0.6);
     holy_sword(cx, c, r, dmg, 1.0);
     if cx.m("smite.judg") > 0 { for i in 1..=2 { cx.later(0.5 * i as f32, move |cx| holy_sword(cx, c, r * (1.0 + 0.15 * i as f32), (dmg * 0.7).round(), 0.85)); } }
-    let chain = 2 * cx.m("smite.chain") as usize;
+    // every level adds a sword: they rain on the enemies around the target, and on empty ground when they run out
+    let lv = alv(cx, "smite") as usize;
+    let chain = 2 * cx.m("smite.chain") as usize + lv;
     if chain > 0 {
+        let reach = 12.0 + lv as f32 * 0.6;
         cx.later(0.45, move |cx| {
-            let mut cand: Vec<(f32, Vec3)> = cx.g.enemies.iter().filter(|e| !e.dead && !e.t.passive).map(|e| (Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(), e.body.pos)).filter(|(d, _)| *d < 12.0 && *d > r).collect();
+            let mut cand: Vec<(f32, Vec3)> = cx.g.enemies.iter().filter(|e| !e.dead && !e.t.passive && !e.t.prop).map(|e| (Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(), e.body.pos)).filter(|(d, _)| *d < reach && *d > r * 0.5).collect();
             cand.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            for (i, (_, p)) in cand.into_iter().take(chain).enumerate() { cx.later(0.12 * i as f32, move |cx| { let mut g = p; g.y = cx.ground(g.x, g.z, g.y + 1.0); holy_sword(cx, g, r * 0.8, (dmg * 0.7).round(), 0.7); }); }
+            let gap = (0.12 / (1.0 + chain as f32 * 0.04)).max(0.03);
+            for i in 0..chain {
+                let p = if let Some(&(_, p)) = cand.get(i) { p } else { let a = i as f32 * 2.39996; let d = r * 1.2 + (i as f32).sqrt() * 2.2; c + Vec3::new(a.cos() * d, 0.0, a.sin() * d) };
+                cx.later(gap * i as f32, move |cx| { let mut g = p; g.y = cx.ground(g.x, g.z, g.y + 1.0); holy_sword(cx, g, r * 0.8, (dmg * 0.7).round(), 0.7); });
+            }
         });
     }
     true
@@ -1041,7 +1127,8 @@ fn smite_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32) {
 }
 
 fn shield(cx: &mut Ctx) -> bool {
-    let dur = 3.0 + 1.5 * cx.m("shield.long") as f32;
+    let dur = 3.0 + 1.5 * cx.m("shield.long") as f32 + 0.15 * alv(cx, "shield") as f32;
+    cx.g.flags.insert("shield_pw", pw(cx, "shield"));
     cx.g.buffs.insert("shield", dur);
     cx.play("holy"); cx.p.pose(Pose::Raise, 0.6);
     let pp = cx.p.body.pos;
@@ -1066,7 +1153,7 @@ fn shield(cx: &mut Ctx) -> bool {
     }
     let aegis = cx.m("shield.aegis") > 0; let thorns = cx.m("shield.thorns") > 0; let retri = cx.m("shield.retri") > 0;
     let mut z = Zone::new(pp, 4.5, dur); z.follow = true; z.ents.push(root);
-    if thorns || aegis { z.every = 0.5; }
+    if thorns || aegis { z.every = 0.5 / (1.0 + 0.05 * alv(cx, "shield") as f32); }
     z.on_frame = Some(Box::new(move |cx, z| {
         let t = z.t; let c = z.pos;
         let k = (t / 0.25).min(1.0) * ((z.life - t) / 0.3).clamp(0.0, 1.0);
@@ -1077,8 +1164,9 @@ fn shield(cx: &mut Ctx) -> bool {
     }));
     z.on_tick = Some(Box::new(move |cx, z| {
         let c = z.pos;
-        if thorns { cx.gfx().ring(c, 0xfff3b8, 0.5, 4.5, 0.3); cx.aoe(c, 4.5, &mut |cx, i, _| cx.damage(i, 14.0, Hit { kb: 4.0, src: Some(c), col: 0xfff3b8, quiet: true, ..default() })); }
-        if aegis { cx.aoe(c, 2.4, &mut |cx, i, _| { cx.damage(i, 10.0, Hit { kb: 7.0, src: Some(c), col: 0xffd35a, quiet: true, ..default() }); }); }
+        let sk = cx.g.flags.get("shield_pw").copied().unwrap_or(1.0);
+        if thorns { cx.gfx().ring(c, 0xfff3b8, 0.5, 4.5, 0.3); cx.aoe(c, 4.5, &mut |cx, i, _| cx.damage(i, (14.0 * sk).round(), Hit { kb: 4.0, src: Some(c), col: 0xfff3b8, quiet: true, ..default() })); }
+        if aegis { cx.aoe(c, 2.4, &mut |cx, i, _| { cx.damage(i, (10.0 * sk).round(), Hit { kb: 7.0, src: Some(c), col: 0xffd35a, quiet: true, ..default() }); }); }
     }));
     if retri { z.on_end = Some(Box::new(|cx, z| {
         let c = z.pos; cx.play("boom");
@@ -1094,8 +1182,8 @@ fn shield(cx: &mut Ctx) -> bool {
 fn consecrate(cx: &mut Ctx) -> bool {
     let march = cx.m("consecrate.march") > 0;
     let c = cx.p.body.pos;
-    let r = 6.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("consecrate.wide") as f32);
-    let dmg = (9.0 * (1.0 + 0.5 * cx.m("consecrate.purge") as f32)).round();
+    let r = 6.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("consecrate.wide") as f32 + 0.05 * alv(cx, "consecrate") as f32);
+    let dmg = (9.0 * (1.0 + 0.5 * cx.m("consecrate.purge") as f32) * pw(cx, "consecrate")).round();
     let sanct = cx.m("consecrate.sanct") > 0;
     let life = 6.0 + if march { 3.0 } else { 0.0 };
     cx.play("holy"); cx.p.pose(Pose::Kneel, 0.8);
@@ -1150,7 +1238,7 @@ pub fn update_abilities(cx: &mut Ctx) {
             for i in cands {
                 st.hit.push(cx.g.enemies[i].id);
                 let ep = cx.g.enemies[i].body.pos;
-                cx.damage(i, 26.0, Hit { kb: 10.0, src: Some(pp), col: 0xff8a6a, ..default() });
+                let dm = (26.0 * cx.g.flags.get("charge_pw").copied().unwrap_or(1.0)).round(); cx.damage(i, dm, Hit { kb: 10.0, src: Some(pp), col: 0xff8a6a, ..default() });
                 cx.status(i, Status { stun: 1.3, ..default() });
                 cx.fx.burst(ep + Vec3::Y, 0xffd0a0, 16, 5.0, 0.4, 0.3, 0.0, 0.0); cx.fx.sparks(ep + Vec3::Y, 0xffd0a0, 8, 10.0);
                 cx.g.hitstop = 0.05;
@@ -1165,7 +1253,7 @@ pub fn update_abilities(cx: &mut Ctx) {
             cx.c.entity(st.wedge).despawn_recursive();
             { let mut g = cx.gfx(); g.ring(pp, 0xff8a6a, 0.3, 3.0, 0.3); g.shock(pp, 0xff8a6a, 0.3, 3.0, 0.3, 1.0); }
             cx.shake(0.2);
-            if st.wave { let c = pp; cx.play("boom"); { let mut g = cx.gfx(); g.ring(c, 0xffd0a0, 0.5, 4.5, 0.45); g.shock(c, 0xffd0a0, 0.5, 4.5, 0.4, 1.6); } cx.fx.smoke(c, 0xb8a888, 10, 2.5, 1.0, 1.2); cx.aoe(c, 4.5, &mut |cx, i, _| { cx.damage(i, 30.0, Hit { kb: 8.0, up: 6.0, src: Some(c), ..default() }); cx.status(i, Status { stun: 1.0, ..default() }); }); }
+            if st.wave { let c = pp; cx.play("boom"); { let mut g = cx.gfx(); g.ring(c, 0xffd0a0, 0.5, 4.5, 0.45); g.shock(c, 0xffd0a0, 0.5, 4.5, 0.4, 1.6); } cx.fx.smoke(c, 0xb8a888, 10, 2.5, 1.0, 1.2); let dm = (30.0 * cx.g.flags.get("charge_pw").copied().unwrap_or(1.0)).round(); cx.aoe(c, 4.5, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 8.0, up: 6.0, src: Some(c), ..default() }); cx.status(i, Status { stun: 1.0, ..default() }); }); }
             if st.ruin { explode_fire(cx, pp + Vec3::Y * 0.6, 4.5, 40.0, 0, false); cx.gfx().pillar(pp, 0xff7a2a, 1.6, 10.0, 0.6); }
         }
     }
@@ -1177,7 +1265,7 @@ pub fn update_abilities(cx: &mut Ctx) {
                 let cands: Vec<usize> = (0..cx.g.enemies.len()).filter(|&i| { let e = &cx.g.enemies[i]; !e.dead && !e.t.passive && !st.hit.contains(&e.id) && Vec2::new(e.body.pos.x - pp.x, e.body.pos.z - pp.z).length() < 1.6 + e.body.w && (e.body.pos.y - pp.y).abs() < 2.2 }).collect();
                 for i in cands {
                     st.hit.push(cx.g.enemies[i].id); let ep = cx.g.enemies[i].body.pos;
-                    cx.damage(i, 35.0, Hit { kb: 5.0, src: Some(pp), col: 0xd8f0ff, ..default() });
+                    let dm = (35.0 * pw(cx, "roll")).round(); cx.damage(i, dm, Hit { kb: 5.0, src: Some(pp), col: 0xd8f0ff, ..default() });
                     let yaw = (ep.x - pp.x).atan2(ep.z - pp.z); let tilt = cx.rr(-0.5, 0.5);
                     cx.gfx().swoosh(pp + Vec3::Y, yaw, 2.2, 2.4, 0xd8f0ff, 0.18, tilt, 1.0); cx.fx.sparks(ep + Vec3::Y, 0xd8f0ff, 6, 8.0);
                     if let Some(k) = class_abilities(cx.p.cls).iter().position(|&a| a == "roll") { cx.g.cds[k] = (cx.g.cds[k] - 0.4).max(0.0); }

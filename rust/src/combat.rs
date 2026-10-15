@@ -32,13 +32,13 @@ impl Zone { pub fn new(pos: Vec3, r: f32, life: f32) -> Self { Zone { pos, r, li
 pub struct Trap { pub ghost: bool, pub pos: Vec3, pub life: f32, pub armed: f32, pub spiked: u32, pub boom: u32, pub field: bool, pub mini: bool, pub root: Entity, pub jaws: [Entity; 2], pub snap: f32 }
 
 pub fn spawn_proj(cx: &mut Ctx, mut p: Proj) {
-    if cx.g.projs.len() >= 300 { let o = cx.g.projs.remove(0); if let Some(e) = o.e { cx.c.entity(e).despawn_recursive(); } }
+    if cx.g.projs.len() >= 700 { let o = cx.g.projs.remove(0); if let Some(e) = o.e { cx.c.entity(e).despawn_recursive(); } }
     if p.owner == Owner::Player && p.bnc == 0 && !cx.g.net.ghost { p.bnc = cx.m("x.bounce"); }
     p.ghost = cx.g.net.ghost;
     cx.g.projs.push(p);
 }
 pub fn zone(cx: &mut Ctx, mut z: Zone) {
-    z.ghost = cx.g.net.ghost; if cx.g.zones.len() >= 60 { let mut o = cx.g.zones.remove(0); for e in o.ents.drain(..) { cx.c.entity(e).despawn_recursive(); } } cx.g.zones.push(z); }
+    z.ghost = cx.g.net.ghost; if cx.g.zones.len() >= 160 { let mut o = cx.g.zones.remove(0); for e in o.ents.drain(..) { cx.c.entity(e).despawn_recursive(); } } cx.g.zones.push(z); }
 
 // ---------------- meshes for projectiles ----------------
 pub fn arrow_mesh(cx: &mut Ctx, shaft: u32, tip: u32, glow: Option<u32>) -> Entity {
@@ -259,7 +259,7 @@ pub fn replay_primary(cx: &mut Ctx, charge: f32) {
 
 // ---------------- the Gunslinger's guns ----------------
 pub const CYLINDER: i32 = 12;
-fn reload_time(cx: &Ctx) -> f32 { 1.1 * (1.0 - 0.2 * cx.m("w.revolvers.quick") as f32) * if cx.g.perks.iter().any(|p| p == "g2") { 0.7 } else { 1.0 } }
+fn reload_time(cx: &Ctx) -> f32 { 1.1 * (1.0 - 0.2 * cx.m("w.revolvers.quick") as f32) * if cx.g.perks.iter().any(|p| p == "Speed Loader") { 0.7 } else { 1.0 } }
 /// trigger handling: the revolvers empty their cylinders then twirl through a reload; the rifle works its lever between shots
 fn guns(cx: &mut Ctx, id: &'static str, lmb: bool) {
     let dt = cx.dt;

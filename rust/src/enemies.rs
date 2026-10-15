@@ -179,11 +179,12 @@ impl Default for SpawnOpts { fn default() -> Self { SpawnOpts { size: 1.0, color
 
 pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usize> {
     let live = cx.g.enemies.iter().filter(|e| !e.dead).count();
-    if live >= 160 + if o.force { 24 } else { 0 } { return None; }
+    if live >= 210 + if o.force { 30 } else { 0 } { return None; }
     let t = etype(k);
     let mi = cx.g.minutes();
     // health grows both linearly and by a compounding rate, so late-game builds have to keep scaling too
-    let diff = (1.0 + mi * 0.08) * 1.045f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
+    // abilities stack without limit now, so the horde's toughness keeps compounding across all three maps
+    let diff = (1.0 + mi * 0.1) * 1.055f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
     let quiet = t.passive || t.prop;
     let mut seed = cx.fx.rng.load(std::sync::atomic::Ordering::Relaxed);
     let mut rng = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };
@@ -194,7 +195,7 @@ pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usi
     let (mut w, mut h) = (t.w, t.h);
     if k == Kind::Slime { w = 0.45 * o.size; h = 0.9 * o.size; }
     let curse = if cx.g.flags.contains_key("curse") { 1.4 } else { 1.0 };
-    let boss_hp = (1.0 + mi * 0.05) * cx.g.mods_hp() * if cx.g.ember() >= 5 { 1.4 } else { 1.0 } * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
+    let boss_hp = (1.0 + mi * 0.09) * 1.03f32.powf(mi) * cx.g.mods_hp() * if cx.g.ember() >= 5 { 1.4 } else { 1.0 } * (1.0 + *cx.g.flags.get("endless_n").unwrap_or(&0.0) * 0.5);
     let mut hp = t.hp * if quiet { 1.0 } else if o.boss { boss_hp } else { diff * curse } * if k == Kind::Slime { o.size } else { 1.0 } * if o.boss { 1.5 } else { 1.0 };
     let mut dmg = t.dmg * (0.75 + mi * 0.07) * 1.02f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.05) * cx.g.mods_dmg();
     let mut speed_mul = if quiet { 1.0 } else { (1.0 + (mi * 0.02).min(0.3)) * if cx.g.ember() >= 9 { 1.15 } else { 1.0 } };
@@ -244,6 +245,7 @@ pub fn kill_enemy(cx: &mut Ctx, i: usize, no_xp: bool, self_det: bool) {
     if kind == Kind::Bloater { bloater_pop(cx, i, self_det); }
     crate::horde::on_death(cx, kind, pos);
     if elite { let (nm, _) = affix.map(affix_info).unwrap_or((t.name, 0)); let label = if affix.is_some() { format!("{} {} slain", nm, t.name) } else { format!("{} slain", t.name) }; cx.toast(&label, &format!("+{} experience", xp), 2.5); crate::director::drop_chest(cx, pos, false); }
+    if !t.passive && !t.prop && cx.g.perks.iter().any(|p| p == "Soul Siphon") { cx.heal(1.0, true); }
     if boss { cx.g.boss = None; *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; crate::director::stage_boss_down(cx, kind, pos); for _ in 0..8 { let g = (5.0 + cx.g.minutes()).round(); cx.drop_pick(c, PickKind::Gold, g); } }
     if cx.g.net.host() { let id = cx.g.enemies[i].id; let killer = cx.g.net.last_hitter.remove(&id).unwrap_or(cx.g.net.my_id); let sx = if t.passive || t.prop { 0.0 } else { xp }; cx.g.net.send(crate::net::Msg::Die { id, killer, xp: sx }); }
     } else if boss { *cx.g.flags.entry("bosses").or_insert(0.0) += 1.0; }

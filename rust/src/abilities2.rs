@@ -20,6 +20,7 @@ pub fn cast(cx: &mut Ctx, id: &str) -> bool {
     }
 }
 
+use crate::abilities::{alv, pw};
 fn clamp_aim(cx: &Ctx, max: f32) -> Vec3 {
     let pp = cx.p.body.pos; let a = cx.p.aim_pt;
     let d = Vec2::new(a.x - pp.x, a.z - pp.z);
@@ -30,7 +31,7 @@ fn flat_aim(cx: &Ctx) -> Vec3 { let d = cx.p.aim_pt - cx.p.body.pos; let d = Vec
 
 // ================= the risen dead =================
 pub struct Minion { pub body: Body, pub rig: Rig, pub yaw: f32, pub life: f32, pub atk: f32, pub archer: bool, pub ghost: bool, pub ph: f32, pub rise: f32, pub swing: f32 }
-const MINION_CAP: usize = 12;
+const MINION_CAP: usize = 24;
 
 /// a skeleton claws up out of the ground beside you
 pub fn spawn_minion(cx: &mut Ctx, at: Vec3, archer: bool) {
@@ -44,7 +45,7 @@ pub fn spawn_minion(cx: &mut Ctx, at: Vec3, archer: bool) {
         if archer { weapon_model(&mut b, r.hand_l.unwrap(), "ebow"); } else { let w = weapon_model(&mut b, r.hand_r.unwrap(), "sword"); b.rot(w.root, 0.9, 0.0, 0.0); }
         r
     };
-    let n1 = cx.g.perks.iter().any(|p| p == "n1");
+    let n1 = cx.g.perks.iter().any(|p| p == "Grave Pact");
     let life = 15.0 + 6.0 * cx.m("raise.long") as f32 + if n1 { 4.0 } else { 0.0 };
     let yaw = cx.p.yaw;
     cx.g.minions.push(Minion { body: Body::new(pos, 0.3, 1.7), rig, yaw, life, atk: 0.4, archer, ghost: cx.g.net.ghost, ph: cx.rr(0.0, TAU), rise: 0.6, swing: 1.0 });
@@ -70,7 +71,7 @@ pub fn update_minions(cx: &mut Ctx) {
     let dt = cx.dt;
     let mut list = std::mem::take(&mut cx.g.minions);
     let was_ghost = cx.g.net.ghost;
-    let n1 = cx.g.perks.iter().any(|p| p == "n1");
+    let n1 = cx.g.perks.iter().any(|p| p == "Grave Pact");
     let legion = cx.m("raise.legion") > 0;
     let mut keep = vec![];
     for mut m in list.drain(..) {
@@ -88,7 +89,7 @@ pub fn update_minions(cx: &mut Ctx) {
                 let reach = if m.archer { 9.0 } else { 1.3 + ew };
                 if dist > reach { mv = d / dist.max(0.01); } else if m.archer && dist < 5.0 { mv = -d / dist.max(0.01) * 0.6; }
                 if dist <= reach + 0.3 && m.atk <= 0.0 {
-                    let dmg = (9.0 * (1.0 + cx.g.minutes() * 0.08) * if n1 { 1.3 } else { 1.0 }).round();
+                    let dmg = (9.0 * (1.0 + cx.g.minutes() * 0.08) * if n1 { 1.3 } else { 1.0 } * cx.g.flags.get("raise_pw").copied().unwrap_or(1.0)).round();
                     if m.archer {
                         m.atk = 1.3;
                         let from = pos + Vec3::Y * 1.4; let to = ep + Vec3::Y * eh * 0.6;
@@ -137,8 +138,10 @@ fn list_len(keep: &[Minion], cx: &Ctx) -> usize { keep.len() + cx.g.minions.len(
 
 // ================= NECROMANCER =================
 fn raise(cx: &mut Ctx) -> bool {
-    let n = 3 + cx.m("raise.more");
-    let archers = if cx.m("raise.archer") > 0 { 2 } else { 0 };
+    let lv = alv(cx, "raise");
+    let n = 3 + cx.m("raise.more") + lv / 2;
+    let archers = if cx.m("raise.archer") > 0 { 2 } else { 0 } + lv / 4;
+    cx.g.flags.insert("raise_pw", pw(cx, "raise"));
     let pp = cx.p.body.pos; let f = cx.p.fwd(); let r = cx.p.right();
     cx.play("rise"); cx.play("bone"); cx.p.pose(Pose::Raise, 0.9);
     { let c = pp + f * 2.0; let mut g = cx.gfx(); g.circle(c, 0x7affb0, 3.2, 1.2, "blood", 2.0, None, None); g.ring(c, 0x7affb0, 0.5, 4.0, 0.5); }
@@ -153,17 +156,19 @@ fn raise(cx: &mut Ctx) -> bool {
 
 /// a line of bone spikes races out of the ground toward the aim
 fn bone_spear(cx: &mut Ctx) -> bool {
-    let len = 14.0 * (1.0 + 0.5 * cx.m("bonespear.long") as f32);
+    let lv = alv(cx, "bonespear");
+    let len = 14.0 * (1.0 + 0.5 * cx.m("bonespear.long") as f32 + 0.08 * lv as f32);
+    cx.g.flags.insert("spear_pw", pw(cx, "bonespear"));
     let dir = flat_aim(cx);
     cx.play("bone"); cx.p.pose(Pose::Slam, 0.5); cx.shake(0.2);
-    let twin = cx.m("bonespear.twin") > 0;
-    let dirs: Vec<Vec3> = if twin { vec![Quat::from_rotation_y(0.28) * dir, Quat::from_rotation_y(-0.28) * dir] } else { vec![dir] };
+    let lines = 1 + cx.m("bonespear.twin") + lv / 4;
+    let dirs: Vec<Vec3> = (0..lines).map(|k| if lines == 1 { dir } else { Quat::from_rotation_y((k as f32 / (lines - 1) as f32 - 0.5) * (0.56 * (lines - 1) as f32).min(TAU * 0.9)) * dir }).collect();
     for d in dirs { spike_line(cx, cx.p.body.pos + d * 1.2, d, len); }
     true
 }
 fn spike_line(cx: &mut Ctx, from: Vec3, dir: Vec3, len: f32) {
     let wall = cx.m("bonespear.wall") > 0; let shards = cx.m("bonespear.shards") > 0;
-    let dmg = (30.0 * (1.0 + cx.g.minutes() * 0.05)).round();
+    let dmg = (30.0 * (1.0 + cx.g.minutes() * 0.05) * cx.g.flags.get("spear_pw").copied().unwrap_or(1.0)).round();
     let n = (len / 0.9) as usize;
     let travel = n as f32 * 0.025;
     let hold = if wall { 3.0 } else { 0.7 };
@@ -215,7 +220,9 @@ fn spike_line(cx: &mut Ctx, from: Vec3, dir: Vec3, len: f32) {
 /// every corpse near the aim bursts: a green-fire blast and a shower of gore
 fn corpse_explosion(cx: &mut Ctx) -> bool {
     let c = clamp_aim(cx, 30.0);
-    let n = 4 + 2 * cx.m("corpse.more") as usize;
+    let lv = alv(cx, "corpse");
+    let n = 4 + 2 * cx.m("corpse.more") as usize + lv as usize;
+    cx.g.flags.insert("corpse_pw", pw(cx, "corpse"));
     let mut found: Vec<(f32, usize)> = cx.g.corpses.iter().enumerate().map(|(i, k)| (Vec2::new(k.pos.x - c.x, k.pos.z - c.z).length(), i)).filter(|(d, _)| *d < 10.0).collect();
     found.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let mut pts: Vec<Vec3> = vec![];
@@ -223,15 +230,16 @@ fn corpse_explosion(cx: &mut Ctx) -> bool {
     idx.sort_unstable_by(|a, b| b.cmp(a));
     for i in idx { let k = cx.g.corpses.remove(i); pts.push(k.pos); cx.c.entity(k.root).despawn_recursive(); }
     // no bodies? the necromancer makes some: bones heave out of the ground at the aim
-    if pts.is_empty() { let mut g = c; g.y = cx.ground(c.x, c.z, c.y + 2.0); pts.push(g); for k in 0..cx.m("corpse.more") { let a = k as f32 * 2.4; pts.push(g + Vec3::new(a.cos() * 2.5, 0.0, a.sin() * 2.5)); } }
+    if pts.is_empty() { let mut g = c; g.y = cx.ground(c.x, c.z, c.y + 2.0); pts.push(g); for k in 0..cx.m("corpse.more") + lv / 2 { let a = k as f32 * 2.4; pts.push(g + Vec3::new(a.cos() * 2.5, 0.0, a.sin() * 2.5)); } }
     cx.play("squelch"); cx.p.pose(Pose::Push, 0.4); cx.p.cast_kick = 1.0;
     let depth = if cx.m("corpse.cascade") > 0 { 2 } else { 0 };
     for (k, p) in pts.into_iter().enumerate() { cx.later(0.06 * k as f32, move |cx| gore_blast(cx, p, depth)); }
     true
 }
 fn gore_blast(cx: &mut Ctx, p: Vec3, depth: u32) {
-    let r = 3.2 * (1.0 + 0.3 * cx.m("corpse.wide") as f32) * cx.g.st.area;
-    let dmg = (42.0 * (1.0 + cx.g.minutes() * 0.06)).round();
+    let k = cx.g.flags.get("corpse_pw").copied().unwrap_or(1.0);
+    let r = 3.2 * (1.0 + 0.3 * cx.m("corpse.wide") as f32 + 0.04 * (k - 1.0) / 0.08) * cx.g.st.area;
+    let dmg = (42.0 * (1.0 + cx.g.minutes() * 0.06) * k).round();
     cx.play("boom"); cx.shake(0.25);
     cx.fx.burst(p + Vec3::Y * 0.6, 0x9aff6a, 30, r * 2.2, 0.5, 0.55, 2.0, 0.0);
     cx.fx.burst(p + Vec3::Y * 0.6, 0xff3a3a, 12, r * 1.6, 0.4, 0.3, 3.0, 10.0);
@@ -257,14 +265,14 @@ fn gore_blast(cx: &mut Ctx, p: Vec3, depth: u32) {
 /// green tethers to the nearest enemies, pulling their life into yours
 fn soul_drain(cx: &mut Ctx) -> bool {
     let pp = cx.p.body.pos;
-    let n = 3 + 2 * cx.m("drain.more") as usize;
+    let n = 3 + 2 * cx.m("drain.more") as usize + alv(cx, "drain") as usize;
     let ids: Vec<u32> = cx.foes(pp, 16.0).into_iter().take(n).map(|i| cx.g.enemies[i].id).collect();
     if ids.is_empty() { return false; }
     cx.play("soul"); cx.p.pose(Pose::Push, 0.6); cx.p.cast_kick = 1.0;
     let life = 2.5 + 1.5 * cx.m("drain.long") as f32;
     let heal_k = 0.4 * (1.0 + 0.5 * cx.m("drain.feast") as f32);
     let harvest = cx.m("drain.harvest") > 0;
-    let dmg = (8.0 * (1.0 + cx.g.minutes() * 0.06)).round();
+    let dmg = (8.0 * (1.0 + cx.g.minutes() * 0.06) * pw(cx, "drain")).round();
     let mut z = crate::combat::Zone::new(pp, 0.0, life); z.follow = true; z.every = 0.25;
     let ids2 = ids.clone();
     z.on_tick = Some(Box::new(move |cx, _z| {
@@ -295,17 +303,20 @@ fn soul_drain(cx: &mut Ctx) -> bool {
 // ================= GUNSLINGER =================
 /// thumb the hammer six times in a heartbeat, sweeping the muzzle across a cone
 fn fan(cx: &mut Ctx) -> bool {
-    let n = 6 + 3 * cx.m("fan.more");
+    let lv = alv(cx, "fan");
+    let n = 6 + 3 * cx.m("fan.more") + 2 * lv;
+    cx.g.flags.insert("fan_pw", pw(cx, "fan"));
     cx.p.pose(Pose::FanHammer, 0.45);
-    fan_burst(cx, n, 1.0, false);
+    let cone = (1.0 + 0.22 * lv as f32).min(TAU);
+    fan_burst(cx, n, cone, cone >= TAU - 0.01);
     if cx.m("fan.hellfire") > 0 { cx.later(0.45, move |cx| { cx.p.pose(Pose::FanHammer, 0.45); fan_burst(cx, n + 6, TAU, true); }); }
     true
 }
 fn fan_burst(cx: &mut Ctx, n: u32, cone: f32, ring: bool) {
     let fire = cx.m("fan.fire") > 0;
-    let dmg = (14.0 * (1.0 + cx.g.minutes() * 0.05) * (1.0 + 0.35 * cx.m("w.revolvers.hollow") as f32)).round();
+    let dmg = (14.0 * (1.0 + cx.g.minutes() * 0.05) * (1.0 + 0.35 * cx.m("w.revolvers.hollow") as f32) * cx.g.flags.get("fan_pw").copied().unwrap_or(1.0)).round();
     for k in 0..n {
-        cx.later(k as f32 * if ring { 0.025 } else { 0.045 }, move |cx| {
+        cx.later(k as f32 * if ring { 0.025 } else { 0.045 } / (1.0 + n as f32 * 0.02), move |cx| {
             if cx.p.dead { return; }
             let dir = { let mut d = (cx.p.aim_pt - cx.hand()).normalize(); if ring { d.y = 0.02; } d.normalize() };
             let a = if ring { k as f32 / n as f32 * cone } else { (k as f32 / (n - 1).max(1) as f32 - 0.5) * cone };
@@ -328,8 +339,11 @@ fn smoke_roll(cx: &mut Ctx) -> bool {
     cx.p.roll_t = 0.3; cx.p.invuln = 0.45;
     cx.play("dash"); cx.play("whoosh");
     crate::abilities::afterimage(cx, 0xc8c0b0, 0.35);
-    let r = 4.2 * cx.g.st.area;
+    let lv = alv(cx, "smoke");
+    let r = 4.2 * cx.g.st.area * (1.0 + 0.05 * lv as f32);
     let flash = cx.m("smoke.flash") > 0;
+    // a levelled roll leaves little bombs in its wake
+    for k in 0..lv / 2 { let a = k as f32 * 2.4; let at = pp + Vec3::new(a.cos(), 0.0, a.sin()) * 1.5; cx.later(0.3 + 0.12 * k as f32, move |cx| { let mut g = at; g.y = cx.ground(g.x, g.z, at.y + 2.0); blast(cx, g, true); }); }
     if flash { cx.play("snap"); cx.gfx().flare(pp + Vec3::Y, 0xffffff, 6.0, 0.15, true); cx.aoe(pp, r, &mut |cx, i, _| cx.status(i, Status { stun: 1.2, ..default() })); }
     let mut z = crate::combat::Zone::new(pp, r, 4.0); z.every = 0.3;
     z.on_tick = Some(Box::new(|cx, z| { let (c, rr) = (z.pos, z.r); cx.aoe(c, rr, &mut |cx, i, _| { if !cx.g.enemies[i].boss { cx.status(i, Status { fear: 0.8, slow: 0.6, ..default() }); } }); }));
@@ -358,7 +372,8 @@ fn dynamite(cx: &mut Ctx) -> bool {
     cx.p.pose(Pose::Throw, 0.45); cx.play("whoosh");
     cx.later(0.15, move |cx| throw_bundle(cx, from, to, false));
     let cl = cx.m("dynamite.cluster");
-    for k in 0..2 * cl { let a = k as f32 * 2.4 + cx.rr(-0.4, 0.4); let off = Vec3::new(a.cos(), 0.0, a.sin()) * cx.rr(2.5, 4.0); let t2 = to + off; cx.later(0.2 + 0.05 * k as f32, move |cx| throw_bundle(cx, from, t2, true)); }
+    cx.g.flags.insert("dyn_pw", pw(cx, "dynamite"));
+    for k in 0..2 * cl + alv(cx, "dynamite") { let a = k as f32 * 2.4 + cx.rr(-0.4, 0.4); let off = Vec3::new(a.cos(), 0.0, a.sin()) * cx.rr(2.5, 4.0); let t2 = to + off; cx.later(0.2 + 0.05 * k as f32, move |cx| throw_bundle(cx, from, t2, true)); }
     true
 }
 fn bundle_mesh(cx: &mut Ctx, small: bool) -> Entity {
@@ -403,7 +418,7 @@ fn fuse(cx: &mut Ctx, at: Vec3, stuck: Option<u32>, small: bool) {
 fn blast(cx: &mut Ctx, p: Vec3, small: bool) {
     let big = cx.m("dynamite.big") as f32;
     let r = if small { 2.6 } else { 4.6 } * (1.0 + 0.3 * big) * cx.g.st.area;
-    let dmg = (if small { 25.0 } else { 62.0 } * (1.0 + 0.3 * big) * (1.0 + cx.g.minutes() * 0.06)).round();
+    let dmg = (if small { 25.0 } else { 62.0 } * (1.0 + 0.3 * big) * (1.0 + cx.g.minutes() * 0.06) * cx.g.flags.get("dyn_pw").copied().unwrap_or(1.0)).round();
     cx.play("bomb"); cx.shake(if small { 0.3 } else { 0.7 }); cx.punch(if small { 0.2 } else { 0.6 });
     cx.fx.burst(p + Vec3::Y * 0.5, 0xff7a22, if small { 20 } else { 50 }, r * 2.4, 0.55, 0.7, 2.0, 0.0);
     cx.fx.burst(p + Vec3::Y * 0.5, 0xffe08a, if small { 8 } else { 20 }, r * 1.4, 0.35, 0.5, 0.0, 0.0);
@@ -421,7 +436,7 @@ fn blast(cx: &mut Ctx, p: Vec3, small: bool) {
 fn deadeye(cx: &mut Ctx) -> bool {
     let pp = cx.p.body.pos; let f = flat_aim(cx);
     let noon = cx.m("deadeye.noon") > 0;
-    let n = if noon { 40 } else { 6 + 3 * cx.m("deadeye.more") as usize };
+    let n = if noon { 40 } else { 6 + 3 * cx.m("deadeye.more") as usize } + 2 * alv(cx, "deadeye") as usize;
     let mut cand: Vec<(f32, u32)> = cx.foes(pp, if noon { 40.0 } else { 30.0 }).into_iter().filter_map(|i| {
         let e = &cx.g.enemies[i]; let d = Vec3::new(e.body.pos.x - pp.x, 0.0, e.body.pos.z - pp.z);
         let dot = d.normalize_or_zero().dot(f);
@@ -435,9 +450,9 @@ fn deadeye(cx: &mut Ctx) -> bool {
     cx.toast("DEADEYE", "", 1.0);
     for &id in ids.iter() { if let Some(i) = cx.find(id) { let p = cx.g.enemies[i].body.pos + Vec3::Y * cx.g.enemies[i].body.h * 0.7; cx.gfx().glint(p, 0xff3a3a, 1.2, 0.6); } }
     let exec = cx.m("deadeye.exec") > 0;
-    let dmg = (80.0 * (1.0 + cx.g.minutes() * 0.07)).round();
+    let dmg = (80.0 * (1.0 + cx.g.minutes() * 0.07) * pw(cx, "deadeye")).round();
     for (k, id) in ids.into_iter().enumerate() {
-        cx.later(0.25 + k as f32 * 0.06, move |cx| {
+        cx.later(0.25 + k as f32 * (0.06 / (1.0 + k as f32 * 0.01)), move |cx| {
             let Some(i) = cx.find(id) else { return };
             let to = cx.g.enemies[i].body.pos + Vec3::Y * cx.g.enemies[i].body.h * 0.7;
             let from = cx.hand();

@@ -33,13 +33,13 @@ pub fn threat(m: f32) -> (&'static str, u32) { let mut t = THREAT[0]; for q in T
 /// how many hostiles should be hunting right now
 fn horde_target(cx: &Ctx) -> f32 {
     let m = cx.g.minutes();
-    let mut n = 6.0 + m * 6.5 + (cx.dc.day as f32 - 1.0) * 3.0;
+    let mut n = 8.0 + m * 8.0 + (cx.dc.day as f32 - 1.0) * 3.0;
     if cx.dc.night { n *= 1.3; }
     if cx.dc.blood { n *= 1.4; }
     if cx.g.dir.trial.is_some() { n += 10.0; }
     if cx.g.ember() >= 6 { n *= 1.25; }
     if cx.g.flags.contains_key("curse") { n *= 1.6; }
-    n.min(150.0)
+    n.min(205.0)
 }
 
 /// a spawn point on a ring around `a`; spots in front of the player are pushed further out so the horde rises at the edge of sight

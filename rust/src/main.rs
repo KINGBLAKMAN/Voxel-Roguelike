@@ -482,6 +482,8 @@ fn test_act(cx: &mut Ctx, a: &str) {
             'find: for r in (0..90).step_by(2) { for k in 0..24 { let a = k as f32 / 24.0 * std::f32::consts::TAU; let (x, z) = (pp.x + a.cos() * r as f32, pp.z + a.sin() * r as f32);
                 if cx.w.top_at(x.floor() as i32, z.floor() as i32) <= world::SEA - 2 && world::in_bounds(x, z, 4.0) { cx.p.body.pos = Vec3::new(x, world::WATER_Y - 1.2, z); cx.p.vis_y = cx.p.body.pos.y; break 'find; } } }
         }
+        // dev: raise an ability's level, e.g. ablv=1,9
+        "ablv" => { let (i, n) = v.split_once(',').map(|(a, b)| (a.parse().unwrap_or(0usize), b.parse().unwrap_or(1u32))).unwrap_or((0, 1)); let id = abilities::class_abilities(cx.p.cls)[i % 4]; *cx.g.mods.entry(format!("lv.{}", id)).or_insert(0) += n; while let Some(u) = abilities::check_unbound(cx.g, cx.p.cls) { cx.toast(&format!("{} is UNBOUND", abilities::ab_info(u).name), "", 2.0); } }
         "nextstage" => { director::advance_stage(cx); }
         "portal" => { let p = cx.p.body.pos + cx.p.fwd() * 5.0; let mut at = p; at.y = cx.ground(p.x, p.z, p.y + 2.0); let col = director::map_color(cx.g.stage_map(cx.g.stage + 1)); director::open_portal(cx, at, col); }
         "weapon" => { cx.p.widx = v.parse().unwrap_or(0); attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }

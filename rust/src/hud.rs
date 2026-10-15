@@ -363,7 +363,9 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         let left = g.cds[i]; let base = cd_base(&g, id);
         set_h(&mut q, *cd_e, if left > 0.0 { left / base } else { 0.0 });
         set_text(&mut q, *cdt, &if left > 0.0 { if left < 1.0 { format!("{:.1}", left) } else { format!("{}", left.ceil() as i32) } } else { String::new() });
-        set_text(&mut q, *name, info.name);
+        let (lv, ub) = (crate::abilities::ab_level(&g, id), crate::abilities::unbound(&g, id));
+        set_text(&mut q, *name, &format!("{}\n{}{}", info.name, if ub { "UNBOUND " } else { "Lv " }, lv));
+        set_tcol(&mut q, *name, srgb(if ub { 0xffd35a } else { 0xf0e6d8 }));
         let ready = left <= 0.0;
         set_bg(&mut q, *glow, col(info.color, if ready { 1.0 } else { 0.35 }));
     }

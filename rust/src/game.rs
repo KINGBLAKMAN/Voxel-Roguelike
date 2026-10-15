@@ -98,7 +98,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
         self.p.body.pos + Vec3::Y * 1.45 + f * 0.55 + r * if self.p.weapon_id() == "longbow" { -0.25 } else { 0.32 }
     }
     pub fn dmg_mul(&self) -> f32 {
-        self.g.st.dmg * if self.g.buff("riposte") > 0.0 { 1.5 } else { 1.0 } * if self.g.buff("cry") > 0.0 { 1.4 } else { 1.0 } * if self.g.buff("shrine") > 0.0 { 1.25 } else { 1.0 } * crate::augments::dmg_mul(self)
+        self.g.st.dmg * if self.g.buff("riposte") > 0.0 { 1.5 } else { 1.0 } * if self.g.buff("cry") > 0.0 { self.g.flags.get("cry_amp").copied().unwrap_or(1.4) } else { 1.0 } * if self.g.buff("shrine") > 0.0 { 1.25 } else { 1.0 } * crate::augments::dmg_mul(self)
     }
 
     // ---------------- damage ----------------

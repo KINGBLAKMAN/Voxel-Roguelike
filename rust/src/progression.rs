@@ -1,6 +1,6 @@
 //! Level-up choices. Every pick draws three cards from one weighted pool: ability and weapon upgrades (with a
 //! mastery per ability once it has two ranks), relics (new or ranked up), chaos augments and general boons.
-use crate::abilities::{ab_info, class_abilities, MODS, WMODS};
+use crate::abilities::{ab_info, ab_level, capped, class_abilities, growth, unbound, unbound_count, LV_CAP, MODS, WMODS};
 use crate::augments::{AUGS, AUG_COLOR};
 use crate::combat::weapon_info;
 use crate::game::*;
@@ -9,7 +9,7 @@ use crate::player::{class_weapons, Player};
 use crate::relics::{relic_count, rk, RELICS, RMAX, RSLOTS};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum CardKind { Upgrade, Mastery, Relic, Chaos, Boon, Evolution }
+pub enum CardKind { Upgrade, Mastery, Relic, Chaos, Boon, Evolution, Empower }
 #[derive(Clone)]
 pub struct Card { pub kind: CardKind, pub key: String, pub name: String, pub desc: String, pub tag: String, pub color: u32, pub w: f32 }
 
@@ -49,12 +49,17 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
     let mut out = vec![];
     for ab in class_abilities(cls) {
         let info = ab_info(ab);
+        if capped(g, cls, ab) { continue; }
+        let lv = ab_level(g, ab); let ub = unbound(g, ab);
+        let tag = if ub { format!("UNBOUND {}  -  level {}", info.name, lv) } else if lv + 1 >= LV_CAP && unbound_count(g, cls) < 2 { format!("{}  -  level 10 makes it UNBOUND", info.name) } else if lv + 1 >= LV_CAP { format!("{}  -  final level (2 abilities already Unbound)", info.name) } else { format!("{}  -  level {} of 10", info.name, lv) };
+        out.push(Card { kind: CardKind::Empower, key: format!("lv.{}", ab), name: format!("Empower {}", info.name), desc: format!("Level {} to {}: {}.", lv, lv + 1, growth(ab)), tag: tag.clone(), color: info.color, w: if ub { 1.7 } else { 1.25 } });
+        if g.lvl >= 4 && (ub || lv + 2 <= LV_CAP) { out.push(Card { kind: CardKind::Empower, key: format!("lv2.{}", ab), name: format!("Surge: {} +2", info.name), desc: format!("Two levels at once ({} to {}): {}.", lv, lv + 2, growth(ab)), tag, color: info.color, w: 0.15 }); }
         let inv: u32 = MODS.iter().filter(|m| m.0 == ab && !m.5).map(|m| g.m(&format!("{}.{}", ab, m.1))).sum();
         for m in MODS.iter().filter(|m| m.0 == ab) {
             let key = format!("{}.{}", ab, m.1); let r = g.m(&key);
             if r >= m.4 || (m.5 && inv < 2) { continue; }
             out.push(Card { kind: if m.5 { CardKind::Mastery } else { CardKind::Upgrade }, key, name: m.2.into(), desc: m.3.into(),
-                tag: if m.5 { format!("{} mastery", info.name) } else { format!("{} upgrade - rank {}/{}", info.name, r + 1, m.4) }, color: info.color, w: if m.5 { 2.2 } else { 1.0 } });
+                tag: if m.5 { format!("{} mastery  (+1 level)", info.name) } else { format!("{} upgrade - rank {}/{}  (+1 level)", info.name, r + 1, m.4) }, color: info.color, w: if m.5 { 2.2 } else { 1.0 } });
         }
     }
     for w in class_weapons(cls) {
@@ -82,6 +87,10 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
         let r = g.m(&format!("x.{}", a.id));
         if r as usize >= a.ranks.len() || (r == 0 && chaos_owned >= 2) { continue; }
         out.push(Card { kind: CardKind::Chaos, key: format!("x.{}", a.id), name: a.name.into(), desc: a.ranks[r as usize].into(), tag: if r > 0 { format!("Chaos augment - rank {}/{}", r + 1, a.ranks.len()) } else { "Chaos augment".into() }, color: AUG_COLOR, w: if g.lvl < 3 { 0.4 } else if r > 0 { 1.1 } else { 1.2 } });
+    }
+    // the rare card that feeds every ability at once
+    if g.lvl >= 5 && class_abilities(cls).iter().filter(|a| !capped(g, cls, a)).count() >= 2 {
+        out.push(Card { kind: CardKind::Empower, key: "lvall".into(), name: "Ascendance".into(), desc: "+1 level to every ability that can still grow.".into(), tag: "Rare".into(), color: 0xffd35a, w: 0.25 });
     }
     // each boon can be taken at most 5 times
     let pool: Vec<_> = PERKS.iter().filter(|p| p.3.map(|c| c == cls).unwrap_or(true) && !(p.4 && g.perks.iter().any(|q| q == p.1)) && g.perks.iter().filter(|q| *q == p.1).count() < 5).collect();
@@ -117,6 +126,13 @@ pub fn apply(g: &mut Game, p: &mut Player, c: &Card) {
                 _ => {}
             }
         }
+        CardKind::Empower => {
+            let cls = p.cls;
+            let bump = |g: &mut Game, id: &str, n: u32| { let k = format!("lv.{}", id); *g.mods.entry(k).or_insert(0) += n; };
+            if c.key == "lvall" { for a in class_abilities(cls) { if !capped(g, cls, a) { bump(g, a, 1); } } }
+            else if let Some(id) = c.key.strip_prefix("lv2.") { bump(g, id, 2); }
+            else if let Some(id) = c.key.strip_prefix("lv.") { bump(g, id, 1); }
+        }
         _ => {
             let was = g.m(&c.key);
             g.mods.insert(c.key.clone(), was + 1);
@@ -125,4 +141,9 @@ pub fn apply(g: &mut Game, p: &mut Player, c: &Card) {
         }
     }
     g.perks.push(c.name.clone());
+    // the first two abilities to reach level 10 break their limit
+    while let Some(id) = crate::abilities::check_unbound(g, p.cls) {
+        g.toasts.push((format!("{} is UNBOUND", ab_info(id).name), "It keeps growing forever; the other abilities stop at level 10 once two are Unbound".into(), 4.0));
+        g.flash = 0.3;
+    }
 }
