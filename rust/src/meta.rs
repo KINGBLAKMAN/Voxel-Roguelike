@@ -1,5 +1,6 @@
-//! Progress that outlives a run: gold, permanent upgrades bought at the Camp, unlockable classes and relics, the
-//! Ember difficulty ladder, settings and a run history. Saved as JSON next to the player's other app data.
+//! Progress that outlives a run. It is purely cosmetic: gold buys outfits, headgear, capes, weapon finishes and
+//! auras at the Camp; every class and relic is open from the start; the only thing that climbs besides your
+//! wardrobe is the Ember difficulty ladder. Also settings and a run history. Saved as JSON in the app data folder.
 use crate::game::Game;
 use crate::models::Class;
 use crate::player::Player;
@@ -21,8 +22,11 @@ pub struct RunRecord { pub class: String, pub time: f32, pub kills: u32, pub lev
 pub struct Save {
     pub gold: u32, pub upgrades: HashMap<String, u32>, pub unlocks: Vec<String>, pub max_ember: u32, pub ember: u32,
     pub settings: Settings, pub history: Vec<RunRecord>, pub runs: u32, pub wins: u32, pub best_time: f32, pub best_kills: u32, pub total_kills: u32,
+    /// cosmetics bought, what each class wears, and gold handed back when the old power upgrades were retired
+    pub owned: Vec<String>, pub wear: HashMap<String, crate::cosmetics::Cos>, pub refunded: u32,
 }
 
+/// retired: the permanent power upgrades of earlier versions, kept only to refund what was spent on them
 /// (id, name, description per rank, max rank, base cost)
 pub const UPGRADES: [(&str, &str, &str, u32, u32); 10] = [
     ("vit", "Vitality", "+10 max health", 5, 40),
@@ -69,9 +73,14 @@ impl Save {
     pub fn load() -> Self {
         if crate::testkit::active() || crate::bot::active() { return Save::default(); }
         let mut s: Save = std::fs::read_to_string(dir().join(file())).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        // the dev build keeps its own save with every class, relic and Ember level open
+        // meta progression is cosmetic now: give back every coin spent on power upgrades and unlocks
+        let mut back = 0;
+        for u in UPGRADES.iter() { let r = s.up(u.0); back += (1..=r).map(|k| u.4 * k).sum::<u32>(); }
+        if !cfg!(feature = "dev") { for u in UNLOCKS.iter() { if s.has(u.0) { back += u.3; } } }
+        if back > 0 || !s.upgrades.is_empty() || !s.unlocks.is_empty() { s.gold += back; s.refunded += back; s.upgrades.clear(); s.unlocks.clear(); s.write(); }
+        // the dev build keeps its own save with every cosmetic owned and every Ember level open
         if cfg!(feature = "dev") {
-            for u in UNLOCKS.iter() { if !s.has(u.0) { s.unlocks.push(u.0.to_string()); } }
+            for c in crate::cosmetics::COSMETICS.iter() { if !s.owns(c.id) { s.owned.push(c.id.to_string()); } }
             s.max_ember = 10;
         }
         s
@@ -85,32 +94,23 @@ impl Save {
     pub fn has(&self, id: &str) -> bool { self.unlocks.iter().any(|u| u == id) }
     pub fn cost(&self, i: usize) -> u32 { let u = UPGRADES[i]; u.4 * (self.up(u.0) + 1) }
     pub fn class_open(&self, _c: Class) -> bool { true }
-    pub fn buy(&mut self, i: usize) -> bool {
-        let u = UPGRADES[i]; let c = self.cost(i);
-        if self.up(u.0) >= u.3 || self.gold < c { return false; }
-        self.gold -= c; *self.upgrades.entry(u.0.to_string()).or_insert(0) += 1; self.write(); true
-    }
-    pub fn unlock(&mut self, i: usize) -> bool {
-        let u = UNLOCKS[i];
-        if self.has(u.0) || self.gold < u.3 { return false; }
-        self.gold -= u.3; self.unlocks.push(u.0.to_string()); self.write(); true
+    pub fn owns(&self, id: &str) -> bool { self.owned.iter().any(|o| o == id) }
+    /// what a class wears; anything no longer owned falls back to the default
+    pub fn wear(&self, c: Class) -> crate::cosmetics::Cos { self.wear.get(crate::progression::class_name(c)).copied().unwrap_or_default() }
+    /// buy (if needed) and put on cosmetic `idx` (1-based) for class `c`, or take that slot off if it's already worn
+    pub fn wardrobe(&mut self, c: Class, idx: u8) -> bool {
+        let Some(item) = crate::cosmetics::COSMETICS.get(idx as usize - 1) else { return false };
+        if !self.owns(item.id) { if self.gold < item.cost { return false; } self.gold -= item.cost; self.owned.push(item.id.to_string()); }
+        let mut w = self.wear(c);
+        w.set(item.kind, if w.get(item.kind) == idx { 0 } else { idx });
+        self.wear.insert(crate::progression::class_name(c).to_string(), w);
+        self.write(); true
     }
 }
 
 /// apply permanent upgrades and the chosen Ember level when a run begins
-pub fn apply_start(s: &Save, g: &mut Game, p: &mut Player) {
-    let st = &mut g.st;
-    let vit = s.up("vit") as f32 * 10.0; p.max_hp += vit; p.hp = p.max_hp;
-    st.dmg += 0.05 * s.up("might") as f32;
-    st.speed += 0.04 * s.up("swift") as f32;
-    st.cd *= 1.0 - 0.04 * s.up("haste") as f32;
-    st.armor = 1.0 - (1.0 - st.armor) * (1.0 - 0.03 * s.up("armor") as f32);
-    st.xp_mul += 0.06 * s.up("insight") as f32;
-    st.magnet *= 1.0 + 0.1 * s.up("magnet") as f32;
-    g.rerolls += s.up("reroll");
-    g.flags.insert("lives", s.up("revive") as f32);
-    g.flags.insert("greed", 1.0 + 0.1 * s.up("greed") as f32);
-    for r in ["axe", "flask", "frost"] { if !s.has(&format!("relic.{}", r)) { g.locked.push(r); } }
+/// a run starts with nothing but the chosen Ember level: all power is earned inside the run
+pub fn apply_start(s: &Save, g: &mut Game, _p: &mut Player) {
     // the Ember ladder
     let e = s.ember;
     g.flags.insert("ember", e as f32);

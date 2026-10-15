@@ -175,13 +175,16 @@ pub fn class_look(c: Class) -> Look {
         Class::Gunslinger => Look { skin: 0xd8a47a, shirt: 0xc8b48a, pants: 0x4a3a2c, boots: Some(0x3a261a), belt: Some(0x2a1e16), sleeve: Some(0x7a5434), ..default() },
     }
 }
-pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
-    let mut r = humanoid(b, pos, &class_look(cls));
+pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig { player_model_cos(b, pos, cls, &crate::cosmetics::Cos::default()) }
+/// a class model wearing its cosmetics
+pub fn player_model_cos(b: &mut Builder, pos: Vec3, cls: Class, cos: &crate::cosmetics::Cos) -> Rig {
+    use crate::cosmetics::accent;
+    let mut r = humanoid(b, pos, &crate::cosmetics::dress(class_look(cls), cos));
     let (head, torso) = (r.head.unwrap(), r.torso.unwrap());
     let v = Vec3::new;
     match cls {
         Class::Ranger => {
-            let hm = 0x355e2c;
+            let hm = accent(cos, 0x355e2c);
             b.bx(head, v(0.5, 0.14, 0.5), hm, v(0.0, 0.47, -0.02)); b.bx(head, v(0.5, 0.46, 0.1), hm, v(0.0, 0.24, -0.25));
             b.bx(head, v(0.08, 0.46, 0.42), hm, v(-0.25, 0.24, -0.02)); b.bx(head, v(0.08, 0.46, 0.42), hm, v(0.25, 0.24, -0.02));
             let q = b.pivot(torso, v(0.12, 0.45, -0.22)); b.rot(q, 0.0, 0.0, 0.5);
@@ -189,7 +192,7 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
             for i in 0..3 { b.bx(q, v(0.03, 0.18, 0.03), 0xe8e0c8, v(-0.03 + i as f32 * 0.03, 0.32, 0.0)); }
         }
         Class::Mage => {
-            let hm = 0x3a2a78;
+            let hm = accent(cos, 0x3a2a78);
             b.bx(head, v(0.66, 0.06, 0.66), hm, v(0.0, 0.46, 0.0)); b.bx(head, v(0.42, 0.2, 0.42), hm, v(0.0, 0.58, -0.02));
             b.bx(head, v(0.3, 0.2, 0.3), hm, v(0.0, 0.76, -0.06)); b.bx(head, v(0.18, 0.2, 0.18), hm, v(0.0, 0.93, -0.12));
             b.bx(head, v(0.1, 0.14, 0.1), hm, v(0.0, 1.06, -0.18));
@@ -197,14 +200,14 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
             b.glow(head, v(0.08, 0.08, 0.08), 0xd08aff, v(0.0, 1.16, -0.2));
         }
         Class::Warrior => {
-            let (st, dk, rd) = (0xa7afb8, 0x1b1b22, 0xb3342a);
+            let (st, dk, rd) = (accent(cos, 0xa7afb8), 0x1b1b22, 0xb3342a);
             b.bx(head, v(0.5, 0.32, 0.5), st, v(0.0, 0.34, 0.0)); b.bx(head, v(0.5, 0.22, 0.08), st, v(0.0, 0.12, -0.22));
             b.bx(head, v(0.38, 0.05, 0.02), dk, v(0.0, 0.28, 0.255)); b.bx(head, v(0.06, 0.18, 0.3), rd, v(0.0, 0.56, -0.04));
             b.bx(r.arm_l.unwrap(), v(0.28, 0.16, 0.3), st, v(0.0, 0.02, 0.0)); b.bx(r.arm_r.unwrap(), v(0.28, 0.16, 0.3), st, v(0.0, 0.02, 0.0));
             b.bx(torso, v(0.3, 0.52, 0.02), rd, v(0.0, 0.32, 0.16));
         }
         Class::Priest => {
-            let (hm, gd) = (0xf2eee4, 0xe0b84a);
+            let (hm, gd) = (accent(cos, 0xf2eee4), 0xe0b84a);
             b.bx(head, v(0.5, 0.14, 0.5), hm, v(0.0, 0.47, -0.02)); b.bx(head, v(0.5, 0.46, 0.1), hm, v(0.0, 0.24, -0.25));
             b.bx(torso, v(0.12, 0.7, 0.02), gd, v(0.0, 0.35, 0.16)); b.bx(torso, v(0.4, 0.12, 0.02), gd, v(0.0, 0.48, 0.16));
             let torus = b.pal.torus.clone();
@@ -212,7 +215,7 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
         }
         Class::Necromancer => {
             // a deep hood over a bone mask with glowing eyes, bone pauldrons and a skull at the belt
-            let (hd, bone) = (0x1c1824, 0xe8e2d0);
+            let (hd, bone) = (accent(cos, 0x1c1824), 0xe8e2d0);
             b.bx(head, v(0.56, 0.16, 0.56), hd, v(0.0, 0.48, -0.02)); b.bx(head, v(0.56, 0.5, 0.12), hd, v(0.0, 0.24, -0.27));
             b.bx(head, v(0.1, 0.5, 0.46), hd, v(-0.28, 0.24, -0.02)); b.bx(head, v(0.1, 0.5, 0.46), hd, v(0.28, 0.24, -0.02));
             b.bx(head, v(0.18, 0.16, 0.16), hd, v(0.0, 0.62, -0.2));
@@ -227,7 +230,7 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
         }
         Class::Gunslinger => {
             // a wide-brimmed hat, a long duster, a red bandana and a bandolier
-            let (hat, band) = (0x3a2a1e, 0x8a2a1e);
+            let (hat, band) = (accent(cos, 0x3a2a1e), 0x8a2a1e);
             b.bx(head, v(0.86, 0.05, 0.86), hat, v(0.0, 0.46, 0.0)); b.bx(head, v(0.5, 0.22, 0.5), hat, v(0.0, 0.58, 0.0));
             b.bx(head, v(0.52, 0.05, 0.52), 0xb88a4a, v(0.0, 0.5, 0.0)); b.bx(head, v(0.16, 0.06, 0.5), hat, v(0.0, 0.7, 0.0));
             b.bx(head, v(0.5, 0.14, 0.06), band, v(0.0, 0.0, 0.24)); b.bx(head, v(0.14, 0.18, 0.04), band, v(0.0, -0.1, 0.26));
@@ -241,6 +244,8 @@ pub fn player_model(b: &mut Builder, pos: Vec3, cls: Class) -> Rig {
     }
     // capes hang from the shoulders and stream out behind when running
     let cape_c = match cls { Class::Warrior => Some((0x9a2a22, 0xd8b04a)), Class::Mage => Some((0x2c2266, 0xf0c95a)), Class::Priest => Some((0xf2eee4, 0xe0b84a)), Class::Necromancer => Some((0x1c1824, 0x6adf9a)), _ => None };
+    crate::cosmetics::build_head(b, head, cls, cos);
+    let cape_c = crate::cosmetics::cape_colors(cos, cape_c);
     if let Some((a, c2)) = cape_c {
         let cape = b.pivot(torso, v(0.0, 0.66, -0.17));
         b.bx(cape, v(0.5, 0.86, 0.04), a, v(0.0, -0.43, 0.0)); b.bx(cape, v(0.52, 0.06, 0.05), c2, v(0.0, -0.85, 0.0)); b.bx(cape, v(0.56, 0.08, 0.08), a, v(0.0, 0.0, 0.02));

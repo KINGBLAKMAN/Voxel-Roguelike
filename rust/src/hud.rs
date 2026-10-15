@@ -24,14 +24,16 @@ pub struct UiState {
     pub pops: Vec<(Vec3, f32, bool)>, pub rng: u32, pub paid: u32, pub recorded: bool, pub last_gain: u32, pub settings_from: Option<Screen>, pub req_host: bool, pub req_join: Option<String>, pub join_text: String, pub net_msg: String,
     /// the second stage picked on the title screen: 0 random, 1 swamp, 2 desert
     pub route: u8,
+    /// which class the Camp wardrobe is showing
+    pub camp_cls: usize,
 }
 impl Default for UiState {
-    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0, settings_from: None, req_host: false, req_join: None, join_text: String::new(), net_msg: String::new(), route: 0 } }
+    fn default() -> Self { UiState { screen: Screen::Menu, cards: vec![], relic_only: false, dead_t: 0.0, toast: None, ghost_hp: 100.0, map_t: 0.0, menu_t: 0.0, start: None, restart: false, quit: false, cards_dirty: true, pops: vec![], rng: 0x1234567, paid: 0, recorded: false, last_gain: 0, settings_from: None, req_host: false, req_join: None, join_text: String::new(), net_msg: String::new(), route: 0, camp_cls: 0 } }
 }
 impl UiState { fn rnd(&mut self) -> f32 { let mut x = self.rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; self.rng = x; (x % 1_000_000) as f32 / 1_000_000.0 } }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize), Settings, Set(u8, bool), Host, Join, Route(u8) }
+pub enum UiBtn { Class(Class), Card(usize), Resume, Restart, Quit, Endless, Camp, Back, Buy(usize), Unlock(usize), EmberUp, EmberDown, ShopBuy(usize), Settings, Set(u8, bool), Host, Join, Route(u8), CampCls(i8) }
 
 #[derive(Resource)]
 pub struct HudRefs {
@@ -297,8 +299,14 @@ pub fn ui_flow(mut save: ResMut<crate::meta::Save>, mut ui: ResMut<UiState>, key
         }
         Screen::Camp => {
             if keys.just_pressed(KeyCode::Escape) || clicked == Some(UiBtn::Back) { ui.screen = Screen::Menu; }
-            if let Some(UiBtn::Buy(i)) = clicked { sfx.play(if save.buy(i) { "relic" } else { "hurt" }); }
-            if let Some(UiBtn::Unlock(i)) = clicked { sfx.play(if save.unlock(i) { "chest" } else { "hurt" }); }
+            let n = crate::models::CLASSES.len();
+            if let Some(UiBtn::CampCls(d)) = clicked { ui.camp_cls = (ui.camp_cls + n).wrapping_add_signed(d as isize) % n; sfx.play("pick"); }
+            if keys.just_pressed(KeyCode::ArrowLeft) { ui.camp_cls = (ui.camp_cls + n - 1) % n; }
+            if keys.just_pressed(KeyCode::ArrowRight) { ui.camp_cls = (ui.camp_cls + 1) % n; }
+            if let Some(UiBtn::Buy(i)) = clicked {
+                let cls = crate::models::CLASSES[ui.camp_cls % n]; let had = save.owns(crate::cosmetics::COSMETICS[i].id);
+                sfx.play(if save.wardrobe(cls, i as u8 + 1) { if had { "pick" } else { "chest" } } else { "hurt" });
+            }
         }
         Screen::Victory => {
             if keys.just_pressed(KeyCode::KeyR) || clicked == Some(UiBtn::Restart) { ui.restart = true; }

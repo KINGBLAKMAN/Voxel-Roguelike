@@ -8,6 +8,7 @@ mod anim;
 mod audio;
 mod camp;
 mod charsheet;
+mod cosmetics;
 mod icons;
 mod augments;
 mod bot;
@@ -94,7 +95,7 @@ fn main() {
     .init_resource::<settings::PadState>()
     .add_plugins((ScenePlugin, fx::FxPlugin))
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
-    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
+    .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, camp::camp_preview, audio::play_sfx, audio::update_music).chain());
     app.add_systems(Update, player::weapon_trails.after(game_tick));
     app.init_resource::<devmenu::DevQueue>().init_resource::<devmenu::DevMenu>()
         .add_systems(Startup, devmenu::setup_dev.after(hud::setup_hud))
@@ -115,18 +116,18 @@ fn start_world(mut c: Commands, mut g: ResMut<Game>, mut pal: ResMut<Palette>, m
     let sp = w.spawn_point();
     p.body.pos = sp; p.vis_y = sp.y;
     // scripted tests skip the title screen
-    if let Some(t) = test.as_ref() { if t.camp { ui.screen = if t.class == Class::Mage { hud::Screen::Settings } else { hud::Screen::Camp }; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class); ctl.want_lock = true; } }
+    if let Some(t) = test.as_ref() { if t.camp { ui.screen = if t.class == Class::Mage { hud::Screen::Settings } else { hud::Screen::Camp }; } if !t.menu && !t.camp { ui.screen = hud::Screen::Playing; begin_player(&mut c, &mut pal, &mut mats, &mut p, t.class, if t.cos { cosmetics::Cos { outfit: 3, head: 19, cape: 25, weapon: 30, aura: 35 } } else { Default::default() }); ctl.want_lock = true; } }
     // a test on a later map plays as if the run got there
     g.map = map; g.stage = match map { world::MapKind::Forest => 0, world::MapKind::Volcanic => 2, m => { g.route = m; 1 } };
     c.insert_resource(w);
 }
 fn class_stats(c: Class) -> (f32, f32) { match c { Class::Ranger => (100.0, 1.08), Class::Mage => (85.0, 1.0), Class::Warrior => (140.0, 0.98), Class::Priest => (110.0, 1.0), Class::Necromancer => (95.0, 1.0), Class::Gunslinger => (105.0, 1.05) } }
-fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardMaterial>, p: &mut Player, cls: Class) {
+fn begin_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardMaterial>, p: &mut Player, cls: Class, cos: cosmetics::Cos) {
     let pos = p.body.pos;
     let old = p.rig.root.take();
     if let Some(r) = old { c.entity(r).despawn_recursive(); }
     *p = Player::default();
-    p.cls = cls; p.body.pos = pos; p.vis_y = pos.y;
+    p.cls = cls; p.cos = cos; p.body.pos = pos; p.vis_y = pos.y;
     let (hp, _) = class_stats(cls); p.hp = hp; p.max_hp = hp; p.ghost_hp = hp;
     build_player(c, pal, mats, p);
     p.spawned = true;
@@ -148,7 +149,7 @@ fn run_control(link: Option<Res<net::Link>>, save: Res<meta::Save>, mut c: Comma
     let join_seed = g.net.seed.take();
     if join_seed.is_some() { ui.restart = true; }
     if let Some(cls) = ui.start.take() {
-        begin_player(&mut c, &mut pal, &mut mats, &mut p, cls);
+        begin_player(&mut c, &mut pal, &mut mats, &mut p, cls, save.wear(cls));
         meta::apply_start(&save, &mut g, &mut p);
         g.route = match ui.route { 1 => world::MapKind::Swamp, 2 => world::MapKind::Desert, _ => if rand::random::<bool>() { world::MapKind::Swamp } else { world::MapKind::Desert } };
         ui.screen = hud::Screen::Playing; ui.dead_t = 0.0; ui.ghost_hp = 1.0;
@@ -288,6 +289,7 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     let slowed = guard * if cx.g.buff("web") > 0.0 || cx.g.buff("chill") > 0.0 { 0.55 } else { 1.0 };
     move_player(cx.w, cx.p, keys, dt, st.speed * slowed * if cx.g.buff("haste") > 0.0 { 1.3 } else { 1.0 }, cspeed, st.stam_max);
     liquid_fx(&mut cx);
+    aura_fx(&mut cx);
     // hunger: food keeps you going; starving bleeds health
     if !cx.p.dead {
         cx.p.hunger = (cx.p.hunger - dt * 100.0 / 330.0).max(0.0);
@@ -340,6 +342,20 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
     update_camera(cx.w, cx.p, cx.cam, &mut ct, &mut proj, raw, &mut rng);
     *cx.q.get_mut(ce).unwrap() = ct;
     if let Some(l) = link { net::flush(&mut cx, l, raw); }
+    }
+}
+/// cosmetic auras: motes that drift around the character
+fn aura_fx(cx: &mut Ctx) {
+    let Some((a, b, id)) = cosmetics::aura(&cx.p.cos) else { return };
+    if cx.p.dead || cx.r() > 0.55 { return; }
+    let pp = cx.p.body.pos; let an = cx.rr(0.0, std::f32::consts::TAU); let r = cx.rr(0.3, 0.9);
+    let p = pp + Vec3::new(an.cos() * r, cx.rr(0.1, 1.9), an.sin() * r);
+    let c = fx::hexc(if cx.r() < 0.5 { a } else { b });
+    match id {
+        "a.wisps" => cx.fx.emit(false, p, Vec3::new(cx.rr(-0.2, 0.2), cx.rr(0.3, 0.8), cx.rr(-0.2, 0.2)), 1.0, 0.18, 0.4, c, -0.2, 0.5, 0.5),
+        "a.frost" => cx.fx.emit(true, p, Vec3::new(cx.rr(-0.3, 0.3), cx.rr(-0.5, 0.2), cx.rr(-0.3, 0.3)), 0.9, 0.12, 0.02, c * 2.0, 0.5, 0.3, 0.9),
+        "a.fireflies" => cx.fx.emit(true, p, Vec3::new(cx.rr(-0.6, 0.6), cx.rr(-0.2, 0.4), cx.rr(-0.6, 0.6)), 1.2, 0.1, 0.1, c * 2.5, 0.0, 0.0, 1.0),
+        _ => cx.fx.emit(true, p, Vec3::new(cx.rr(-0.2, 0.2), cx.rr(0.8, 1.8), cx.rr(-0.2, 0.2)), 0.6, 0.12, 0.02, c * 2.5, -1.0, 0.5, 1.0),
     }
 }
 /// splashes, ripples and swim strokes in water; burns, sizzles and a hop out of lava

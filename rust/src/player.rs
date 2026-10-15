@@ -33,13 +33,15 @@ pub struct Player {
     pub foot_yaw: f32, pub turn_ph: f32, pub turning: f32,
     /// the Gunslinger's cylinder and reload timer
     pub ammo: i32, pub reload: f32,
+    /// what this character wears (purely cosmetic)
+    pub cos: crate::cosmetics::Cos,
 }
 impl Default for Player {
     fn default() -> Self {
         Player { cls: Class::Warrior, body: Body::new(Vec3::new(0.5, 40.0, 0.5), 0.3, 1.8), yaw: 0.0, pitch: -0.15, vis_y: 40.0, rig: Rig::default(), weapons: vec![], widx: 0,
             hp: 100.0, max_hp: 100.0, ghost_hp: 100.0, stam: 100.0, hunger: 100.0, dead: false, death_t: 0.0, invuln: 0.0, hit_t: 0.0,
             walk_ph: 0.0, idle_ph: 0.0, swing_t: 1.0, swing_dur: 0.3, swing_side: 1.0, swing_kind: 0, cast_kick: 0.0, charge: 0.0, charging: false, firing: false,
-            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0, foot_yaw: 0.0, turn_ph: 0.0, turning: 0.0, ammo: 12, reload: 0.0 }
+            anim: None, roll_t: 0.0, dash: None, leap: None, whirl: 0.0, coyote: 0.0, move_dir: Vec3::ZERO, aim_pt: Vec3::ZERO, aim_dist: 60.0, sprinting: false, spawned: false, blocking: 0.0, dodge_cd: 0.0, land: 0.0, air_t: 0.0, prev_yaw: 0.0, lean: 0.0, hip: 0.0, swim_ph: 0.0, foot_yaw: 0.0, turn_ph: 0.0, turning: 0.0, ammo: 12, reload: 0.0, cos: Default::default() }
     }
 }
 impl Player {
@@ -54,7 +56,7 @@ impl Player {
 pub fn build_player(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<StandardMaterial>, p: &mut Player) {
     if let Some(r) = p.rig.root { c.entity(r).despawn_recursive(); }
     let mut b = Builder::new(c, pal, mats);
-    p.rig = player_model(&mut b, p.body.pos, p.cls);
+    p.rig = player_model_cos(&mut b, p.body.pos, p.cls, &p.cos);
     p.weapons.clear();
     attach_weapon(c, pal, mats, p);
 }
@@ -69,6 +71,8 @@ pub fn attach_weapon(c: &mut Commands, pal: &mut Palette, mats: &mut Assets<Stan
         "revolvers" => { p.weapons.push(weapon_model(&mut b, hr, "revolver")); p.weapons.push(weapon_model(&mut b, hl, "revolver")); }
         id => p.weapons.push(weapon_model(&mut b, hr, id)),
     }
+    let parts = std::mem::take(&mut b.parts);
+    crate::cosmetics::finish_weapon(&mut b, &p.cos, &parts);
 }
 
 #[derive(Resource, Default)]

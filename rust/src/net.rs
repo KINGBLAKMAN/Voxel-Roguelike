@@ -19,7 +19,7 @@ pub const PORT: u16 = 7777;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct PState { pub id: u32, pub cls: u8, pub pos: [f32; 3], pub yaw: f32, pub pitch: f32, pub hp: f32, pub max_hp: f32, pub dead: bool, pub in_run: bool,
-    pub blocking: bool, pub charging: bool, pub charge: f32, pub widx: u8, pub roll: f32, pub whirl: f32 }
+    pub blocking: bool, pub charging: bool, pub charge: f32, pub widx: u8, pub roll: f32, pub whirl: f32, pub cos: crate::cosmetics::Cos }
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct NEnemy { pub id: u32, pub kind: u8, pub affix: u8, pub boss: bool, pub size: f32, pub color: u32, pub pos: [f32; 3], pub yaw: f32, pub hp: f32, pub frozen: bool, pub sink: f32, pub wind: bool }
 
@@ -223,14 +223,14 @@ fn state_in(cx: &mut Ctx, s: PState) {
     if s.id == cx.g.net.my_id { return; }
     let k = match cx.g.net.remotes.iter().position(|r| r.id == s.id) { Some(k) => k, None => { cx.g.net.remotes.push(Remote { id: s.id, p: Player::default(), target: v3(s.pos), state: s, revive: 0.0 }); cx.g.net.remotes.len() - 1 } };
     let cls = u8_cls(s.cls);
-    let need_build = s.in_run && (cx.g.net.remotes[k].p.rig.root.is_none() || cx.g.net.remotes[k].p.cls != cls);
+    let need_build = s.in_run && (cx.g.net.remotes[k].p.rig.root.is_none() || cx.g.net.remotes[k].p.cls != cls || cx.g.net.remotes[k].p.cos != s.cos);
     if !s.in_run { if let Some(e) = cx.g.net.remotes[k].p.rig.root.take() { cx.c.entity(e).despawn_recursive(); } }
     let r = &mut cx.g.net.remotes[k];
     r.state = s; r.target = v3(s.pos);
     if need_build {
         let mut p = std::mem::take(&mut r.p);
         if let Some(e) = p.rig.root.take() { cx.c.entity(e).despawn_recursive(); }
-        p.cls = cls; p.body.pos = v3(s.pos); p.vis_y = s.pos[1]; p.widx = s.widx as usize; p.spawned = true;
+        p.cls = cls; p.cos = s.cos; p.body.pos = v3(s.pos); p.vis_y = s.pos[1]; p.widx = s.widx as usize; p.spawned = true;
         build_player(cx.c, cx.pal, cx.mats, &mut p);
         cx.g.net.remotes[k].p = p;
     }
@@ -302,7 +302,7 @@ pub fn flush(cx: &mut Ctx, link: &Link, raw_dt: f32) {
         cx.g.net.state_t = 0.05;
         let p = &cx.p;
         let s = PState { id: cx.g.net.my_id, cls: cls_u8(p.cls), pos: p.body.pos.to_array(), yaw: p.yaw, pitch: p.pitch, hp: p.hp, max_hp: p.max_hp, dead: p.dead, in_run: p.spawned,
-            blocking: p.blocking > 0.0, charging: p.charging, charge: p.charge, widx: p.widx as u8, roll: p.roll_t, whirl: p.whirl };
+            blocking: p.blocking > 0.0, charging: p.charging, charge: p.charge, widx: p.widx as u8, roll: p.roll_t, whirl: p.whirl, cos: p.cos };
         link.send(None, &Msg::State(s));
     }
     if link.host {

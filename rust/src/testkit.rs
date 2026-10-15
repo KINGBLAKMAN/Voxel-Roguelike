@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 #[derive(Resource, Clone)]
-pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32, pub held: Vec<KeyCode>, pub no_foliage: bool, pub map: crate::world::MapKind }
+pub struct TestCfg { pub seed: u32, pub class: Class, pub time: Option<f32>, pub yaw: Option<f32>, pub pitch: Option<f32>, pub shots: Vec<(u32, String)>, pub acts: Vec<(u32, String)>, pub exit: u32, pub frame: u32, pub menu: bool, pub autopick: bool, pub camp: bool, pub orbit: f32, pub dist: f32, pub held: Vec<KeyCode>, pub no_foliage: bool, pub map: crate::world::MapKind, pub cos: bool }
 
 /// scripted tests only exist in dev builds
 pub fn active() -> bool { cfg!(feature = "dev") && std::env::var("EW_TEST").is_ok() }
@@ -15,7 +15,7 @@ impl TestCfg {
     pub fn from_env() -> Option<Self> {
         if !cfg!(feature = "dev") { return None; }
         let s = std::env::var("EW_TEST").ok()?;
-        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6, held: vec![], no_foliage: false, map: crate::world::MapKind::Forest };
+        let mut t = TestCfg { seed: 12345, class: Class::Warrior, time: None, yaw: None, pitch: None, shots: vec![], acts: vec![], exit: 200, frame: 0, menu: false, autopick: false, camp: false, orbit: 0.0, dist: 6.6, held: vec![], no_foliage: false, map: crate::world::MapKind::Forest, cos: false };
         for kv in s.split(';') {
             let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
             match k {
@@ -31,6 +31,7 @@ impl TestCfg {
                 "autopick" => t.autopick = true,
                 "camp" => t.camp = true,
                 "nofoliage" => t.no_foliage = true,
+                "cos" => t.cos = true,
                 "map" => t.map = match v { "swamp" => crate::world::MapKind::Swamp, "desert" => crate::world::MapKind::Desert, "volcanic" | "fire" => crate::world::MapKind::Volcanic, _ => crate::world::MapKind::Forest },
                 "orbit" => t.orbit = v.parse().unwrap_or(0.0),
                 "dist" => t.dist = v.parse().unwrap_or(6.6),
