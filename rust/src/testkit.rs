@@ -50,7 +50,7 @@ pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::h
         if let Some(v) = t.pitch { p.pitch = v; }
         cr.orbit = t.orbit; cr.max_d = t.dist;
     }
-    keys.release(KeyCode::KeyQ);
+    keys.release(KeyCode::KeyQ); keys.release(KeyCode::F1);
     for k in t.held.clone() { keys.press(k); }
     for (af, a) in t.acts.clone() {
         if af != f { continue; }
@@ -58,6 +58,7 @@ pub fn run_test(mut c: Commands, mut t: ResMut<TestCfg>, mut ui: ResMut<crate::h
             "host" => ui.req_host = true, "join" => ui.req_join = Some("127.0.0.1".into()), "start" => ui.start = Some(t.class),
             // animation stills: freeze attack progress, pick the combo step, swap weapons
             "swap" => keys.press(KeyCode::KeyQ),
+            "f1" => keys.press(KeyCode::F1),
             "tab" => ui.screen = crate::hud::Screen::Character,
             // hold movement keys: run, sprint, strafe, backpedal; "stop" lets go
             "w" => t.held.push(KeyCode::KeyW), "s" => t.held.push(KeyCode::KeyS), "d" => t.held.push(KeyCode::KeyD), "shift" => t.held.push(KeyCode::ShiftLeft),

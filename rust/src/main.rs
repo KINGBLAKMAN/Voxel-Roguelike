@@ -11,6 +11,7 @@ mod icons;
 mod augments;
 mod bot;
 mod combat;
+mod devmenu;
 mod director;
 mod enemies;
 mod events;
@@ -94,6 +95,9 @@ fn main() {
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
     .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     app.add_systems(Update, player::weapon_trails.after(game_tick));
+    app.init_resource::<devmenu::DevQueue>().init_resource::<devmenu::DevMenu>()
+        .add_systems(Startup, devmenu::setup_dev.after(hud::setup_hud))
+        .add_systems(Update, devmenu::dev_menu.after(hud::ui_flow).before(cursor_lock));
     app.init_resource::<icons::Icons>().init_resource::<charsheet::Panel>()
         .add_systems(Startup, (icons::build_icons, charsheet::setup_tips))
         .add_systems(Update, (charsheet::update_panel, charsheet::update_tips).chain().after(hud::update_hud));
@@ -193,7 +197,7 @@ pub struct Sim<'w, 's> {
 /// one frame of the game: input, the player, weapons, enemies, projectiles, zones, pickups, the director, relics, camera
 #[allow(clippy::too_many_arguments)]
 fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, paused: Res<Paused>, ctl: Res<Controls>,
-    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>, bot: Option<Res<bot::BotCfg>>) {
+    mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>, bot: Option<Res<bot::BotCfg>>, mut devq: Option<ResMut<devmenu::DevQueue>>) {
     let s = &mut s;
     let Ok((ce, mut proj)) = camq.get_single_mut() else { return };
     if paused.0 && link.is_none() { return; }
@@ -221,6 +225,10 @@ fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mo
         for a in now { test_act(&mut cx, &a); }
         if t.acts.iter().any(|(f, a)| a == "god" && *f <= t.frame) { cx.p.hp = cx.p.max_hp; }
     }
+    // dev menu cheats
+    if let Some(q) = devq.as_mut() { for a in std::mem::take(&mut q.0) { test_act(&mut cx, &a); } }
+    if cx.g.flags.contains_key("dev_god") { cx.p.hp = cx.p.max_hp; cx.p.dead = false; }
+    if cx.g.flags.contains_key("dev_nocd") { cx.g.cds = [0.0; 4]; }
     cx.g.run_t += dt;
     // guard and dodge, for every class
     let rmb = input && mouse.pressed(MouseButton::Right) && (ctl.locked || ctl.pad);
@@ -367,6 +375,21 @@ fn test_act(cx: &mut Ctx, a: &str) {
         "chest" => { let p = cx.p.body.pos + cx.p.fwd() * 4.0; director::drop_chest(cx, p, false); }
         "ab" => { let i: usize = v.parse().unwrap_or(0); cx.g.cds[i] = 0.0; abilities::use_ability(cx, i); }
         "bomb" => { let p = cx.p.body.pos + cx.p.fwd() * 2.0; cx.drop_pick(p, PickKind::Bomb, 0.0); }
+        "god" => { if cx.g.flags.remove("dev_god").is_none() { cx.g.flags.insert("dev_god", 1.0); } }
+        "nocd" => { if cx.g.flags.remove("dev_nocd").is_none() { cx.g.flags.insert("dev_nocd", 1.0); } }
+        "heal" => { cx.p.hp = cx.p.max_hp; cx.p.stam = cx.g.st.stam_max; cx.p.hunger = 100.0; }
+        "lvl5" => { for _ in 0..5 { let n = cx.g.xp_need(); cx.gain_xp(n); } }
+        "gold" => { cx.g.gold += v.parse::<u32>().unwrap_or(500); }
+        "rerolls" => { cx.g.rerolls += 3; }
+        "minutes+1" => { cx.g.run_t += 60.0; }
+        "swapw" => { cx.p.widx = 1 - cx.p.widx; cx.p.charging = false; attach_weapon(cx.c, cx.pal, cx.mats, cx.p); }
+        "killall" => { for i in 0..cx.g.enemies.len() { if !cx.g.enemies[i].dead && !cx.g.enemies[i].t.passive { cx.damage(i, 1.0e7, Hit { quiet: true, ..default() }); } } }
+        "maxrelics" => { for r in relics::RELICS.iter() { cx.g.mods.insert(format!("r.{}", r.id), relics::RMAX); } }
+        "allups" => {
+            for ab in abilities::class_abilities(cx.p.cls) { for m in abilities::MODS.iter().filter(|m| m.0 == ab) { cx.g.mods.insert(format!("{}.{}", ab, m.1), m.4); } }
+            for w in player::class_weapons(cx.p.cls) { for m in abilities::WMODS.iter().filter(|m| m.0 == w) { cx.g.mods.insert(format!("w.{}.{}", w, m.1), m.4); } }
+        }
+        "aug" => { let a = &augments::AUGS[(cx.r() * augments::AUGS.len() as f32) as usize % augments::AUGS.len()]; let k = format!("x.{}", a.id); let r = cx.g.m(&k); if (r as usize) < a.ranks.len() { cx.g.mods.insert(k, r + 1); cx.toast(a.name, a.ranks[r as usize], 2.0); } }
         _ => {}
     }
 }

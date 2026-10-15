@@ -118,6 +118,7 @@ Everything is generated in code; there are no art files.
 
 ## Tools
 
+- **Dev build:** `Emberwild-<version>-dev.exe` keeps its own save (`save-dev.json`) with every class, relic and Ember level unlocked, so testing never touches your real progress. During a run, **F1** opens the dev menu: god mode, no cooldowns, full heal, levels, run gold, chests, rerolls, max relics, all upgrades, random chaos augments, weapon swap, time skips to each boss, time of day, hordes, kill everything, boss spawns, every event and Camp gold.
 - **Crash log:** if the game crashes, it writes `crash-<time>.log` (the error and a backtrace) to `%APPDATA%/Emberwild/`. Send that file along with a bug report.
 - **Balance bot** (dev build only): run `Emberwild-<version>-dev.exe --bot` from a command prompt.
   - The game plays complete runs on its own in a small window, simulating several steps per frame so runs go much faster than real time. It aims, kites, draws the bow, casts abilities, dodges, eats, opens chests and picks level-up cards.

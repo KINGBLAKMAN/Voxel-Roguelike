@@ -60,6 +60,7 @@ pub const EMBERS: [&str; 11] = [
 ];
 
 pub fn data_dir() -> PathBuf { dir() }
+fn file() -> &'static str { if cfg!(feature = "dev") { "save-dev.json" } else { "save.json" } }
 fn dir() -> PathBuf {
     let base = std::env::var("APPDATA").map(PathBuf::from).or_else(|_| std::env::var("XDG_DATA_HOME").map(PathBuf::from)).or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join(".local/share"))).unwrap_or_else(|_| PathBuf::from("."));
     base.join("Emberwild")
@@ -67,12 +68,18 @@ fn dir() -> PathBuf {
 impl Save {
     pub fn load() -> Self {
         if crate::testkit::active() || crate::bot::active() { return Save::default(); }
-        std::fs::read_to_string(dir().join("save.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        let mut s: Save = std::fs::read_to_string(dir().join(file())).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        // the dev build keeps its own save with every class, relic and Ember level open
+        if cfg!(feature = "dev") {
+            for u in UNLOCKS.iter() { if !s.has(u.0) { s.unlocks.push(u.0.to_string()); } }
+            s.max_ember = 10;
+        }
+        s
     }
     pub fn write(&self) {
         if crate::testkit::active() || crate::bot::active() { return; }
         let d = dir(); let _ = std::fs::create_dir_all(&d);
-        if let Ok(s) = serde_json::to_string_pretty(self) { let tmp = d.join("save.json.tmp"); if std::fs::write(&tmp, s).is_ok() { let _ = std::fs::rename(tmp, d.join("save.json")); } }
+        if let Ok(s) = serde_json::to_string_pretty(self) { let tmp = d.join(format!("{}.tmp", file())); if std::fs::write(&tmp, s).is_ok() { let _ = std::fs::rename(tmp, d.join(file())); } }
     }
     pub fn up(&self, id: &str) -> u32 { *self.upgrades.get(id).unwrap_or(&0) }
     pub fn has(&self, id: &str) -> bool { self.unlocks.iter().any(|u| u == id) }
