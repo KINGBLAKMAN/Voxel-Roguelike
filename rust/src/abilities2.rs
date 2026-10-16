@@ -32,11 +32,15 @@ fn flat_aim(cx: &Ctx) -> Vec3 { let d = cx.p.aim_pt - cx.p.body.pos; let d = Vec
 // ================= the risen dead =================
 pub struct Minion { pub body: Body, pub rig: Rig, pub yaw: f32, pub life: f32, pub atk: f32, pub archer: bool, pub ghost: bool, pub ph: f32, pub rise: f32, pub swing: f32 }
 const MINION_CAP: usize = 24;
+/// the army grows with Raise Dead: +1 skeleton allowed per 2 levels (up to 48)
+fn minion_cap(cx: &Ctx) -> usize { MINION_CAP + (crate::abilities::alv(cx, "raise") as usize / 2).min(24) }
+/// Raise Dead's level multiplier, for skeleton damage, attack speed and staying power
+fn rpw(cx: &Ctx) -> f32 { crate::abilities::pw(cx, "raise") }
 
 /// a skeleton claws up out of the ground beside you
 pub fn spawn_minion(cx: &mut Ctx, at: Vec3, archer: bool) {
     let mut pos = at; pos.y = cx.ground(at.x, at.z, at.y + 2.0);
-    if cx.g.minions.len() >= MINION_CAP { let m = cx.g.minions.remove(0); if let Some(r) = m.rig.root { cx.c.entity(r).despawn_recursive(); } }
+    if cx.g.minions.len() >= minion_cap(cx) { let m = cx.g.minions.remove(0); if let Some(r) = m.rig.root { cx.c.entity(r).despawn_recursive(); } }
     let rig = {
         let mut b = cx.builder();
         let r = humanoid(&mut b, pos, &Look { skin: 0xe8e4d8, shirt: 0xd8d4c6, pants: 0xd0ccbc, thin: true, eye_glow: Some(0x7affb0), ..default() });
@@ -46,7 +50,7 @@ pub fn spawn_minion(cx: &mut Ctx, at: Vec3, archer: bool) {
         r
     };
     let n1 = cx.g.perks.iter().any(|p| p == "Grave Pact");
-    let life = 15.0 + 6.0 * cx.m("raise.long") as f32 + if n1 { 4.0 } else { 0.0 };
+    let life = (15.0 + 6.0 * cx.m("raise.long") as f32 + if n1 { 4.0 } else { 0.0 }) * rpw(cx).sqrt();
     let yaw = cx.p.yaw;
     cx.g.minions.push(Minion { body: Body::new(pos, 0.3, 1.7), rig, yaw, life, atk: 0.4, archer, ghost: cx.g.net.ghost, ph: cx.rr(0.0, TAU), rise: 0.6, swing: 1.0 });
     cx.gfx().decal(pos, true, 1.0, 3.0, Some(0x7affb0));
@@ -61,7 +65,8 @@ fn minion_die(cx: &mut Ctx, m: Minion) {
     if cx.m("raise.legion") > 0 && !m.ghost {
         cx.play("bone");
         cx.gfx().ring(m.body.pos, 0x7affb0, 0.3, 3.0, 0.3);
-        cx.aoe(m.body.pos, 3.0, &mut |cx, i, _| cx.damage(i, 22.0, Hit { kb: 5.0, src: Some(p), col: 0x7affb0, quiet: true, ..default() }));
+        let dm = (22.0 * rpw(cx)).round();
+        cx.aoe(m.body.pos, 3.0, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 5.0, src: Some(p), col: 0x7affb0, quiet: true, ..default() }));
     }
     if let Some(r) = m.rig.root { cx.c.entity(r).despawn_recursive(); }
 }
@@ -73,6 +78,7 @@ pub fn update_minions(cx: &mut Ctx) {
     let was_ghost = cx.g.net.ghost;
     let n1 = cx.g.perks.iter().any(|p| p == "Grave Pact");
     let legion = cx.m("raise.legion") > 0;
+    let (cap, haste) = (minion_cap(cx), 1.0 / rpw(cx).sqrt());
     let mut keep = vec![];
     for mut m in list.drain(..) {
         cx.g.net.ghost = m.ghost;
@@ -91,16 +97,16 @@ pub fn update_minions(cx: &mut Ctx) {
                 if dist <= reach + 0.3 && m.atk <= 0.0 {
                     let dmg = (9.0 * (1.0 + cx.g.minutes() * 0.08) * if n1 { 1.3 } else { 1.0 } * cx.g.flags.get("raise_pw").copied().unwrap_or(1.0)).round();
                     if m.archer {
-                        m.atk = 1.3;
+                        m.atk = 1.3 * haste;
                         let from = pos + Vec3::Y * 1.4; let to = ep + Vec3::Y * eh * 0.6;
                         player_arrow(cx, from, (to - from).normalize() * 40.0, dmg, 3.0, false, 1.2, 0x8a8478, Some(0x7affb0), 0, false, false);
                     } else {
-                        m.atk = 0.8; m.swing = 0.0;
+                        m.atk = 0.8 * haste; m.swing = 0.0;
                         cx.damage(i, dmg, Hit { kb: 3.0, src: Some(pos), col: 0x9affc0, quiet: true, ..default() });
                         let hp = ep + Vec3::Y * eh * 0.6; cx.fx.sparks(hp, 0x9affc0, 3, 5.0);
                     }
                     // Army of the Dead: their kills can rise to join them
-                    if legion && cx.g.enemies[i].dead && !m.ghost && list_len(&keep, cx) < MINION_CAP && cx.r() < 0.35 { let at = ep; cx.later(0.5, move |cx| spawn_minion(cx, at, false)); }
+                    if legion && cx.g.enemies[i].dead && !m.ghost && list_len(&keep, cx) < cap && cx.r() < 0.35 { let at = ep; cx.later(0.5, move |cx| spawn_minion(cx, at, false)); }
                 }
             } else {
                 let d = Vec3::new(cx.p.body.pos.x - pos.x, 0.0, cx.p.body.pos.z - pos.z); let dist = d.length();
@@ -208,7 +214,7 @@ fn spike_line(cx: &mut Ctx, from: Vec3, dir: Vec3, len: f32) {
             set_tf(cx, e, |tr| { tr.translation = Vec3::new(p.x + q, p.y - h + h * k, p.z); tr.rotation = rot; });
             if shards && (a - 0.12).abs() < cx.dt * 0.5 {
                 for _ in 0..3 { let an = cx.rr(0.0, TAU); let s = shard_mesh(cx, 0xe8e2d0, 1.0); let mut pr = Proj::new(p + Vec3::Y * h * 0.8, Vec3::new(an.cos(), 0.3, an.sin()) * 22.0); pr.e = Some(s); pr.r = 0.25; pr.life = 0.5; pr.grav = 10.0;
-                    pr.on_hit = Some(Box::new(|cx, q, i| { if let Some(i) = i { let s = q.pos; cx.damage(i, 9.0, Hit { kb: 1.0, src: Some(s), col: 0xe8e2d0, quiet: true, ..default() }); } })); spawn_proj(cx, pr); }
+                    pr.on_hit = Some(Box::new(|cx, q, i| { if let Some(i) = i { let s = q.pos; let dm = (9.0 * cx.g.flags.get("spear_pw").copied().unwrap_or(1.0)).round(); cx.damage(i, dm, Hit { kb: 1.0, src: Some(s), col: 0xe8e2d0, quiet: true, ..default() }); } })); spawn_proj(cx, pr); }
             }
         }
         // the wall slows anything pushing through it
@@ -254,7 +260,7 @@ fn gore_blast(cx: &mut Ctx, p: Vec3, depth: u32) {
     });
     if cx.m("corpse.plague") > 0 {
         let mut z = crate::combat::Zone::new(p, r * 0.8, 3.0); z.every = 0.5;
-        z.on_tick = Some(Box::new(|cx, z| { let (c, rr) = (z.pos, z.r); cx.aoe(c, rr, &mut |cx, i, _| { cx.damage(i, 5.0, Hit { quiet: true, col: 0x9aff6a, ..default() }); cx.status(i, Status { poison: 1.5, slow: 0.6, ..default() }); }); }));
+        z.on_tick = Some(Box::new(|cx, z| { let (c, rr) = (z.pos, z.r); let dm = (5.0 * cx.g.flags.get("corpse_pw").copied().unwrap_or(1.0)).round(); cx.aoe(c, rr, &mut |cx, i, _| { cx.damage(i, dm, Hit { quiet: true, col: 0x9aff6a, ..default() }); cx.status(i, Status { poison: 1.5, slow: 0.6, ..default() }); }); }));
         z.on_frame = Some(Box::new(|cx, z| { if cx.r() < 0.6 { let a = cx.rr(0.0, TAU); let rr = cx.r().sqrt() * z.r; cx.fx.emit(false, z.pos + Vec3::new(a.cos() * rr, 0.3, a.sin() * rr), Vec3::Y * 0.6, 1.2, 0.5, 1.4, hexc(0x6a9a3a), -0.2, 0.5, 0.35); } }));
         zone(cx, z);
     }
@@ -284,7 +290,7 @@ fn soul_drain(cx: &mut Ctx) -> bool {
             took += (before - cx.g.enemies.get(i).map(|e| e.hp).unwrap_or(0.0)).max(0.0);
             if harvest && cx.g.enemies[i].dead { let at = cx.g.enemies[i].body.pos; cx.later(0.3, move |cx| spawn_minion(cx, at, false)); }
         }
-        if took > 0.0 { cx.heal((took * heal_k).min(cx.p.max_hp * 0.05), true); }
+        if took > 0.0 { cx.heal((took * heal_k).min(cx.p.max_hp * 0.05 * pw(cx, "drain").sqrt()), true); }
     }));
     z.on_frame = Some(Box::new(move |cx, _z| {
         let h = cx.hand();
@@ -343,7 +349,7 @@ fn smoke_roll(cx: &mut Ctx) -> bool {
     let r = 4.2 * cx.g.st.area * (1.0 + 0.05 * lv as f32);
     let flash = cx.m("smoke.flash") > 0;
     // a levelled roll leaves little bombs in its wake
-    for k in 0..lv / 2 { let a = k as f32 * 2.4; let at = pp + Vec3::new(a.cos(), 0.0, a.sin()) * 1.5; cx.later(0.3 + 0.12 * k as f32, move |cx| { let mut g = at; g.y = cx.ground(g.x, g.z, at.y + 2.0); blast(cx, g, true); }); }
+    for k in 0..lv / 2 { let a = k as f32 * 2.4; let at = pp + Vec3::new(a.cos(), 0.0, a.sin()) * 1.5; cx.later(0.3 + 0.12 * k as f32, move |cx| { let mut g = at; g.y = cx.ground(g.x, g.z, at.y + 2.0); let k = pw(cx, "smoke"); blast(cx, g, true, k); }); }
     if flash { cx.play("snap"); cx.gfx().flare(pp + Vec3::Y, 0xffffff, 6.0, 0.15, true); cx.aoe(pp, r, &mut |cx, i, _| cx.status(i, Status { stun: 1.2, ..default() })); }
     let mut z = crate::combat::Zone::new(pp, r, 4.0); z.every = 0.3;
     z.on_tick = Some(Box::new(|cx, z| { let (c, rr) = (z.pos, z.r); cx.aoe(c, rr, &mut |cx, i, _| { if !cx.g.enemies[i].boss { cx.status(i, Status { fear: 0.8, slow: 0.6, ..default() }); } }); }));
@@ -357,7 +363,7 @@ fn smoke_roll(cx: &mut Ctx) -> bool {
         { let mut g = cx.gfx(); g.decal(pp, false, 2.6, 5.0, Some(0x6a6e76)); }
         cx.gfx().debris(pp + Vec3::Y * 0.3, &[0x8a8e96, 0x5a5e66], 14, 5.0, 0.08, 3.0);
         let mut c = crate::combat::Zone::new(pp, 2.8, 5.0); c.every = 0.4;
-        c.on_tick = Some(Box::new(|cx, z| { let (p, rr) = (z.pos, z.r); cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, 5.0, Hit { quiet: true, col: 0xc8c8d0, ..default() }); cx.status(i, Status { slow: 1.0, ..default() }); }); }));
+        c.on_tick = Some(Box::new(|cx, z| { let (p, rr) = (z.pos, z.r); let dm = (5.0 * pw(cx, "smoke")).round(); cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, dm, Hit { quiet: true, col: 0xc8c8d0, ..default() }); cx.status(i, Status { slow: 1.0, ..default() }); }); }));
         zone(cx, c);
     }
     // Ghost: vanish, and every shot finds a vital spot while you're hidden
@@ -412,13 +418,13 @@ fn fuse(cx: &mut Ctx, at: Vec3, stuck: Option<u32>, small: bool) {
         set_tf(cx, e, |tr| { tr.translation = pos + Vec3::new(sh, 0.0, 0.0); tr.rotation = Quat::from_rotation_z(0.25); });
         cx.fx.emit(true, pos + Vec3::Y * 0.4, Vec3::new(cx.rr(-1.5, 1.5), cx.rr(1.0, 3.0), cx.rr(-1.5, 1.5)), 0.25, 0.14, 0.02, hexc(0xffd27a) * 3.0, 8.0, 1.0, 1.0);
     }));
-    z.on_end = Some(Box::new(move |cx, z| { let p = z.pos; blast(cx, p, small); }));
+    z.on_end = Some(Box::new(move |cx, z| { let p = z.pos; let k = cx.g.flags.get("dyn_pw").copied().unwrap_or(1.0); blast(cx, p, small, k); }));
     zone(cx, z);
 }
-fn blast(cx: &mut Ctx, p: Vec3, small: bool) {
+fn blast(cx: &mut Ctx, p: Vec3, small: bool, k: f32) {
     let big = cx.m("dynamite.big") as f32;
     let r = if small { 2.6 } else { 4.6 } * (1.0 + 0.3 * big) * cx.g.st.area;
-    let dmg = (if small { 25.0 } else { 62.0 } * (1.0 + 0.3 * big) * (1.0 + cx.g.minutes() * 0.06) * cx.g.flags.get("dyn_pw").copied().unwrap_or(1.0)).round();
+    let dmg = (if small { 25.0 } else { 62.0 } * (1.0 + 0.3 * big) * (1.0 + cx.g.minutes() * 0.06) * k).round();
     cx.play("bomb"); cx.shake(if small { 0.3 } else { 0.7 }); cx.punch(if small { 0.2 } else { 0.6 });
     cx.fx.burst(p + Vec3::Y * 0.5, 0xff7a22, if small { 20 } else { 50 }, r * 2.4, 0.55, 0.7, 2.0, 0.0);
     cx.fx.burst(p + Vec3::Y * 0.5, 0xffe08a, if small { 8 } else { 20 }, r * 1.4, 0.35, 0.5, 0.0, 0.0);
@@ -427,8 +433,8 @@ fn blast(cx: &mut Ctx, p: Vec3, small: bool) {
     { let mut g = cx.gfx(); g.flare(p + Vec3::Y, 0xffb04a, if small { 3.0 } else { 7.0 }, 0.3, true); g.ring(p, 0xff8a3a, 0.4, r * 1.3, 0.35); g.shock(p, 0xffb04a, 0.4, r * 1.2, 0.35, 1.6); g.decal(p, false, r * 0.7, 8.0, None); if !small { g.impact(p + Vec3::Y, 0xffd27a, 2.4); } }
     cx.aoe(p, r, &mut |cx, i, _| { cx.damage(i, dmg, Hit { kb: 10.0, up: 8.0, src: Some(p), col: 0xff8a3a, ..default() }); });
     if !small && cx.m("dynamite.keg") > 0 {
-        fire_pool(cx, p, r * 0.6, 4.0, 6.0, false);
-        cx.later(0.8, move |cx| { cx.play("boom"); { let mut g = cx.gfx(); g.ring(p, 0xff8a3a, 0.5, r * 1.5, 0.4); g.shock(p, 0xff8a3a, 0.5, r * 1.4, 0.4, 1.2); } cx.aoe(p, r * 1.4, &mut |cx, i, _| { cx.damage(i, 30.0, Hit { kb: 6.0, up: 5.0, src: Some(p), col: 0xff8a3a, ..default() }); cx.status(i, Status { stun: 0.6, ..default() }); }); });
+        fire_pool(cx, p, r * 0.6, 4.0, (6.0 * k).round(), false);
+        cx.later(0.8, move |cx| { cx.play("boom"); { let mut g = cx.gfx(); g.ring(p, 0xff8a3a, 0.5, r * 1.5, 0.4); g.shock(p, 0xff8a3a, 0.5, r * 1.4, 0.4, 1.2); } cx.aoe(p, r * 1.4, &mut |cx, i, _| { cx.damage(i, (30.0 * k).round(), Hit { kb: 6.0, up: 5.0, src: Some(p), col: 0xff8a3a, ..default() }); cx.status(i, Status { stun: 0.6, ..default() }); }); });
     }
 }
 

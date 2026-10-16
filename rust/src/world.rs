@@ -34,7 +34,9 @@ impl MapKind {
     pub fn lava(self) -> bool { self == MapKind::Volcanic }
 }
 /// the playable area is a square of +-HALF blocks around the origin, ringed by cliffs
-pub const HALF: i32 = 112;
+pub const HALF: i32 = 64;
+/// points of interest sit one per cell of this grid (at most)
+pub const POI_GRID: i32 = 40;
 pub fn in_bounds(x: f32, z: f32, m: f32) -> bool { x.abs() < HALF as f32 - m && z.abs() < HALF as f32 - m }
 
 /// Block look: base colour, optional top colour, optional side colour for "wrapped" grass/snow, jitter, tinting and glow.
@@ -161,9 +163,9 @@ impl Voxels {
             }
         };
         // the walls of the arena: the ground climbs into cliffs near the edge
-        let edge = xi.abs().max(zi.abs()) as f32 + self.n_h.get(x * 0.05, z * 0.05) * 5.0 - (HALF - 16) as f32;
+        let edge = xi.abs().max(zi.abs()) as f32 + self.n_h.get(x * 0.05, z * 0.05) * 5.0 - (HALF - 10) as f32;
         if edge > 0.0 {
-            let k = (edge / 14.0).min(1.0);
+            let k = (edge / 9.0).min(1.0);
             h = h.max(SEA as f32 + 2.0) + k * k * (24.0 + c * 6.0 + hl * 5.0);
             if k > 0.45 { bio = Bio::Peak; }
         }
@@ -176,10 +178,10 @@ impl Voxels {
         let s = self.seed;
         let mut p = None;
         if hash2(gx, gz, s + 101) < 0.62 && !(gx == 0 && gz == 0) {
-            let x = gx * 64 + 16 + (hash2(gx, gz, s + 102) * 32.0) as i32;
-            let z = gz * 64 + 16 + (hash2(gx, gz, s + 103) * 32.0) as i32;
+            let x = gx * POI_GRID + 9 + (hash2(gx, gz, s + 102) * (POI_GRID - 18) as f32) as i32;
+            let z = gz * POI_GRID + 9 + (hash2(gx, gz, s + 103) * (POI_GRID - 18) as f32) as i32;
             let col = self.column(x, z);
-            if col.h > SEA + 1 && col.h < 38 && in_bounds(x as f32, z as f32, 26.0) {
+            if col.h > SEA + 1 && col.h < 38 && in_bounds(x as f32, z as f32, 16.0) {
                 let tr = hash2(gx, gz, s + 104);
                 let kind = if tr < 0.34 { PoiKind::Ruin } else if tr < 0.6 { PoiKind::Camp } else if tr < 0.8 { PoiKind::Shrine } else { PoiKind::Altar };
                 p = Some(Poi { kind, x, z, y: col.h, r: if kind == PoiKind::Shrine { 6 } else { 7 }, gx, gz });
@@ -189,7 +191,7 @@ impl Voxels {
         p
     }
     pub fn poi_near(&self, x: f32, z: f32, m: f32) -> Option<Poi> {
-        let p = self.poi((x / 64.0).floor() as i32, (z / 64.0).floor() as i32)?;
+        let g = POI_GRID as f32; let p = self.poi((x / g).floor() as i32, (z / g).floor() as i32)?;
         let (dx, dz) = (x - p.x as f32, z - p.z as f32);
         if dx * dx + dz * dz < (p.r as f32 + m).powi(2) { Some(p) } else { None }
     }
@@ -325,7 +327,7 @@ impl Voxels {
             };
             // points of interest: flatten the ground around them, then build
             let mut done = vec![];
-            for gz in (z0 - 14).div_euclid(64)..=(z0 + CS + 14).div_euclid(64) { for gx in (x0 - 14).div_euclid(64)..=(x0 + CS + 14).div_euclid(64) {
+            for gz in (z0 - 14).div_euclid(POI_GRID)..=(z0 + CS + 14).div_euclid(POI_GRID) { for gx in (x0 - 14).div_euclid(POI_GRID)..=(x0 + CS + 14).div_euclid(POI_GRID) {
                 let Some(p) = self.poi(gx, gz) else { continue };
                 if done.contains(&(gx, gz)) { continue; }
                 done.push((gx, gz));

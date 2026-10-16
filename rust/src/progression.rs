@@ -1,7 +1,7 @@
 //! Level-up choices. Every pick draws three cards from one weighted pool: ability and weapon upgrades (with a
 //! mastery per ability once it has two ranks), relics (new or ranked up), chaos augments and general boons.
 use crate::abilities::{ab_info, ab_level, capped, class_abilities, growth, unbound, unbound_count, LV_CAP, MODS, WMODS};
-use crate::augments::{AUGS, AUG_COLOR};
+use crate::augments::{AUGS, AUG_COLOR, AUG_SLOTS};
 use crate::combat::weapon_info;
 use crate::game::*;
 use crate::models::Class;
@@ -63,9 +63,12 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
         }
     }
     for w in class_weapons(cls) {
+        // weapons level forever too: every upgrade is a level, and Hone cards add more once the weapon has one
+        let wl = crate::abilities::wlv(g, w);
+        if wl > 1 || g.lvl >= 6 { out.push(Card { kind: CardKind::Upgrade, key: format!("hw.{}", w), name: format!("Hone {}", weapon_info(w).0), desc: format!("Weapon level {} to {}: {}.", wl, wl + 1, crate::abilities::hone_desc(w)), tag: format!("{}  -  weapon level {}  (no limit)", weapon_info(w).0, wl), color: class_color(cls), w: 0.6 }); }
         for m in WMODS.iter().filter(|m| m.0 == w) {
             let key = format!("w.{}.{}", w, m.1); let r = g.m(&key);
-            if r < m.4 { out.push(Card { kind: CardKind::Upgrade, key, name: m.2.into(), desc: m.3.into(), tag: format!("{} upgrade - rank {}/{}", weapon_info(w).0, r + 1, m.4), color: class_color(cls), w: 0.8 }); }
+            if r < m.4 { out.push(Card { kind: CardKind::Upgrade, key, name: m.2.into(), desc: m.3.into(), tag: format!("{} upgrade - rank {}/{}  (+1 weapon level)", weapon_info(w).0, r + 1, m.4), color: class_color(cls), w: 0.8 }); }
         }
     }
     // evolutions: the most exciting card in the game, so they come up often once unlocked
@@ -81,11 +84,15 @@ fn options(g: &Game, cls: Class) -> Vec<Card> {
         let evo_hint = if r + 1 == RMAX { crate::relics::EVOS.iter().find(|e| e.0 == rl.id).map(|e| format!(" Max rank: evolves with {}.", e.2)).unwrap_or_default() } else { String::new() };
         out.push(Card { kind: CardKind::Relic, key: format!("r.{}", rl.id), name: rl.name.into(), desc: format!("{}{}", rl.ranks[r as usize], evo_hint), tag: if r > 0 { format!("Relic - rank {}/{}", r + 1, RMAX) } else { "New relic".into() }, color: rl.color, w: if r > 0 { 1.7 } else if owned < 2 { 2.4 } else { 1.3 } });
     }
-    // two chaos augments per run, so they're a choice
+    // three chaos augments per run, so they're a choice; past their written ranks they keep growing through Amplify cards
     let chaos_owned = AUGS.iter().filter(|a| g.m(&format!("x.{}", a.id)) > 0).count();
     for a in AUGS.iter() {
         let r = g.m(&format!("x.{}", a.id));
-        if r as usize >= a.ranks.len() || (r == 0 && chaos_owned >= 2) { continue; }
+        if r == 0 && chaos_owned >= AUG_SLOTS { continue; }
+        if r as usize >= a.ranks.len() {
+            out.push(Card { kind: CardKind::Chaos, key: format!("x.{}", a.id), name: format!("Amplify {}", a.name), desc: format!("Rank {} to {}: {}", r, r + 1, crate::augments::amp_desc(a.id)), tag: format!("Chaos augment - rank {}  (no limit)", r + 1), color: AUG_COLOR, w: 0.9 });
+            continue;
+        }
         out.push(Card { kind: CardKind::Chaos, key: format!("x.{}", a.id), name: a.name.into(), desc: a.ranks[r as usize].into(), tag: if r > 0 { format!("Chaos augment - rank {}/{}", r + 1, a.ranks.len()) } else { "Chaos augment".into() }, color: AUG_COLOR, w: if g.lvl < 3 { 0.4 } else if r > 0 { 1.1 } else { 1.2 } });
     }
     // the rare card that feeds every ability at once

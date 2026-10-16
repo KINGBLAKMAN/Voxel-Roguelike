@@ -80,7 +80,11 @@ Every card you take for an ability raises its level: its named upgrades and mast
 - **Smite** drops one more sword per level, so a well-fed Smite rains 10, 20 or 30 swords across the horde.
 - Meteor showers grow, Raise Dead calls more skeletons, Fan the Hammer fires more shots in a wider arc, Deadeye marks more targets, Corpse Explosion detonates more bodies, and so on for all 24 abilities, along with more damage and shorter cooldowns.
 
-Levels have no ceiling, but only two abilities can break past level 10: **the first two to reach 10 become Unbound** (gold frames in the HUD and the character panel) and keep growing forever. The other two stop at level 10, still strong, and their cards stop appearing. Rare **Surge** (+2 levels) and **Ascendance** (+1 to every ability) cards turn up too.
+Levels have no ceiling, but only two abilities can break past level 10: **the first two to reach 10 become Unbound** (gold frames in the HUD and the character panel) and keep growing forever. The other two stop at level 10, still strong, and their cards stop appearing. Rare **Surge** (+2 levels) and **Ascendance** (+1 to every ability) cards turn up too. Raise Dead's level also makes the skeletons hit harder, attack faster, last longer and raises the army's size limit (24, plus one per two levels).
+
+### Weapon levels
+
+Weapons level up without limit too, and they don't count towards the two-Unbound rule. Every weapon upgrade is a level, and once a weapon has one (or from player level 6) **Hone** cards add more. Each level gives +6% weapon damage, and the weapon grows its own way: melee weapons reach 3% further, the Fire Staff's explosions grow 4%, and every 4 levels the Longbow fires another arrow, the Frost Wand another shard, the Skull Staff another skull, the Scepter another bolt and the revolvers hold 2 more rounds. The HUD shows the weapon's level.
 
 Each ability also has 3 named upgrades plus a **Mastery** that unlocks once you've put 2 ranks into it, and each weapon has 3. Some examples:
 
@@ -91,6 +95,8 @@ Each ability also has 3 named upgrades plus a **Mastery** that unlocks once you'
 ## Chaos augments
 
 Chaos augments bend the rules of the whole run rather than strengthening one ability, and they stack into mayhem: **Chain Reaction** (kills explode), **Echo** (abilities recast themselves), **Arcane Surge** (every cast fires seeking bolts), **Stormcaller** (crits call lightning), **Frenzy** (kills cut cooldowns), **Gravity Well** (black holes swallow the horde), **Overload** (every 5th cast is a huge nova), **Ricochet** (projectiles bounce), **Phoenix Heart** (cheat death once) and **Berserker** (stronger at low health).
+
+A run holds up to three different augments. They have no rank limit either: once an augment's written ranks are taken, **Amplify** cards keep growing it (more explode chance, more bolts, faster black holes, Overload every 4th, then 3rd, then 2nd cast, another Phoenix rise every 4 ranks, and so on). Arcane Surge bolts and Overload novas also scale with the level of the ability you cast, so augments snowball with Unbound abilities.
 
 ## Relics
 
@@ -108,7 +114,7 @@ Relics are auto-firing weapons any class can pick up. You can carry 4, and each 
 
 ## The horde
 
-Monsters don't wander: they hunt you. A director spawns packs in a ring just around the players (they claw up out of the ground), and both the headcount and their toughness climb with every minute you survive, across all three maps; the stage clock and threat level (Calm to Apocalypse) sit at the top of the screen. New kinds join as the run goes on: zombies and slimes first, then bats, skeletons, spiders, **bloaters** (they swell and burst; kill them in a crowd for chain reactions), cultists and club-swinging **brutes**, then monsters with jobs: **Gorehorn** chargers, **Shieldbearers** that block hits from the front, **Bone Shamans** that heal and haste the horde, **Ember Imps** that bomb from above and **Necromancers** that raise the dead. The Bone Wastes have **Sand Wurms** that tunnel and erupt under you. Monsters steer around lava and burn if they're knocked into it. Stragglers that fall far behind are recycled to the front of the fight.
+Monsters don't wander: they hunt you. A director spawns packs in a ring just around the players (they claw up out of the ground), and both the headcount and their toughness climb with every minute you survive, across all three maps, up to about 400 at once by the last stage. From the Restless tier on, a wall of 12 to 30 monsters rises across your path every 20 to 30 seconds, so you have to cut through the horde rather than kite it; the stage clock and threat level (Calm to Apocalypse) sit at the top of the screen. New kinds join as the run goes on: zombies and slimes first, then bats, skeletons, spiders, **bloaters** (they swell and burst; kill them in a crowd for chain reactions), cultists and club-swinging **brutes**, then monsters with jobs: **Gorehorn** chargers, **Shieldbearers** that block hits from the front, **Bone Shamans** that heal and haste the horde, **Ember Imps** that bomb from above and **Necromancers** that raise the dead. The Bone Wastes have **Sand Wurms** that tunnel and erupt under you. Monsters steer around lava and burn if they're knocked into it. Stragglers that fall far behind are recycled to the front of the fight.
 
 - Every 75 to 100 seconds there's an event: a full ring of the dead rising around you, a bat swarm from one direction, or an elite war band.
 - Every third night is a **Blood Moon**, and from minute 6 telegraphed eruptions land where you're heading.
@@ -154,7 +160,7 @@ Every sound is synthesised at startup. A mixer keeps fights readable: each sound
 
 ## Tools
 
-- **Dev build:** `Emberwild-<version>-dev.exe` keeps its own save (`save-dev.json`) with every cosmetic owned and every Ember level unlocked, so testing never touches your real progress. During a run, **F1** opens the dev menu: god mode, no cooldowns, full heal, levels, run gold, chests, rerolls, max relics, all upgrades, +5 levels to any ability, random chaos augments, weapon swap, skip to the stage boss, open a portal, go to the next stage, time of day, hordes, kill everything, boss spawns, every event and Camp gold.
+- **Dev build:** `Emberwild-<version>-dev.exe` keeps its own save (`save-dev.json`) with every cosmetic owned and every Ember level unlocked, so testing never touches your real progress. During a run, **F1** opens the dev menu: god mode, no cooldowns, full heal, levels, run gold, chests, rerolls, max relics, all upgrades, +5 levels to any ability, +5 weapon levels, random chaos augments, +3 to every augment, weapon swap, skip to the stage boss, open a portal, go to the next stage, time of day, hordes, kill everything, boss spawns, every event and Camp gold.
 - **Crash log:** if the game crashes, it writes `crash-<time>.log` (the error and a backtrace) to `%APPDATA%/Emberwild/`. Send that file along with a bug report.
 - **Balance bot** (dev build only): run `Emberwild-<version>-dev.exe --bot` from a command prompt.
   - The game plays complete runs on its own in a small window, simulating several steps per frame so runs go much faster than real time. It aims, kites, draws the bow, casts abilities, dodges, eats, opens chests and picks level-up cards.
@@ -170,7 +176,7 @@ Every sound is synthesised at startup. A mixer keeps fights readable: each sound
 
 ## The world
 
-Each map is a walled-in arena about 220 blocks across. The Greenwood has rolling meadows, forests that open into glades and lakes with reeds and lily pads; the Drowned Fen is low bog full of pools, mud, willows and mist; the Bone Wastes have long dune ridges, striped mesas, cacti and palm-shaded oases; the Ember Throne is basalt and ash with obsidian spires, glowing vents and rivers of lava. Ruins and camps hold chests, shrines bless you, and altars offer trials. The day and night cycle continues (each new map starts at dawn), and the music builds as the horde closes in.
+Each map is a walled-in arena about 128 blocks across, small enough that you can't outrun the horde forever: run in a straight line and you hit the cliffs, and the director spawns packs ahead of you along your heading. The Greenwood has rolling meadows, forests that open into glades and lakes with reeds and lily pads; the Drowned Fen is low bog full of pools, mud, willows and mist; the Bone Wastes have long dune ridges, striped mesas, cacti and palm-shaded oases; the Ember Throne is basalt and ash with obsidian spires, glowing vents and rivers of lava. Ruins and camps hold chests, shrines bless you, and altars offer trials. The day and night cycle continues (each new map starts at dawn), and the music builds as the horde closes in.
 
 - **Water:** you float at shoulder depth, swim with a front crawl (Space to rise, swim into a bank to climb out) and tread water when still, with splashes, strokes and ripples.
 - **Lava:** it burns hard and throws you back out, so a misstep hurts but doesn't trap you.

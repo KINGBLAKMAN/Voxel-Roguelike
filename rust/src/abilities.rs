@@ -102,6 +102,25 @@ pub fn cd_of(cx: &Ctx, id: &str) -> f32 { ab_info(id).cd * cx.g.st.cd * (1.0 - 0
 // makes it bigger: more arrows, swords, skeletons, meteors, wider arcs, more damage. Levels have no ceiling, but
 // only two abilities may break past level 10: the first two to get there become Unbound; the rest stop at 10.
 pub const LV_CAP: u32 = 10;
+/// weapon level: 1 + every upgrade taken for it + every Hone card. Uncapped, and outside the two-Unbound rule
+pub fn wlv(g: &Game, id: &str) -> u32 { 1 + WMODS.iter().filter(|m| m.0 == id).map(|m| g.m(&format!("w.{}.{}", id, m.1))).sum::<u32>() + g.m(&format!("hw.{}", id)) }
+/// +6% weapon damage per level
+pub fn wpw(g: &Game, id: &str) -> f32 { 1.0 + 0.06 * (wlv(g, id) - 1) as f32 }
+/// every 4 weapon levels: one more arrow, shard, skull or bolt, two more rounds in the cylinder
+pub fn wex(g: &Game, id: &str) -> u32 { (wlv(g, id) - 1) / 4 }
+/// what a Hone card does for a weapon
+pub fn hone_desc(id: &str) -> &'static str {
+    match id {
+        "longbow" => "+6% damage; every 4 levels, +1 arrow",
+        "frostwand" => "+6% damage; every 4 levels, +1 shard",
+        "skullstaff" => "+6% damage; every 4 levels, +1 skull",
+        "scepter" => "+6% damage; every 4 levels, +1 bolt",
+        "firestaff" => "+6% damage and +4% explosion size",
+        "revolvers" => "+6% damage; every 4 levels, +2 rounds per cylinder",
+        "rifle" => "+6% damage",
+        _ => "+6% damage and +3% reach",
+    }
+}
 pub fn ab_level(g: &Game, id: &str) -> u32 { 1 + g.m(&format!("lv.{}", id)) + MODS.iter().filter(|m| m.0 == id).map(|m| g.m(&format!("{}.{}", id, m.1))).sum::<u32>() }
 pub fn unbound(g: &Game, id: &str) -> bool { g.m(&format!("ub.{}", id)) > 0 }
 pub fn unbound_count(g: &Game, cls: Class) -> usize { class_abilities(cls).iter().filter(|a| unbound(g, a)).count() }
@@ -153,10 +172,10 @@ pub fn use_ability(cx: &mut Ctx, i: usize) {
     if !cast(cx, id) { return; }
     cx.g.cds[i] = cd_of(cx, id);
     { let aim = cx.p.aim_pt.to_array(); let me = cx.g.net.my_id; cx.g.net.send(crate::net::Msg::Cast { id: me, ab: id.to_string(), aim }); }
-    if crate::augments::on_cast(cx, false) {
+    if crate::augments::on_cast(cx, id, false) {
         cx.later(0.35, move |cx| {
             if cx.p.dead || cx.p.leap.is_some() { return; }
-            if cast(cx, id) { let p = cx.p.body.pos + Vec3::Y * 2.4; cx.pop(p, "ECHO".into(), 3); afterimage(cx, 0xff7ae8, 0.5); crate::augments::on_cast(cx, true); }
+            if cast(cx, id) { let p = cx.p.body.pos + Vec3::Y * 2.4; cx.pop(p, "ECHO".into(), 3); afterimage(cx, 0xff7ae8, 0.5); crate::augments::on_cast(cx, id, true); }
         });
     }
 }
@@ -371,7 +390,7 @@ pub fn update_traps(cx: &mut Ctx) {
             let dm = (32.0 * (1.0 + 0.6 * spiked as f32) * if mini { 0.6 } else { 1.0 } * pw(cx, "snare")).round();
             cx.damage(v, dm, Hit { col: 0xd9b46a, ..default() });
             cx.status(v, Status { stun: (3.0 + spiked as f32) * if mini { 0.5 } else { 1.0 }, ..default() });
-            if boom > 0 { explode_fire(cx, pos + Vec3::Y * 0.5, if mini { 2.5 } else { 4.0 }, if mini { 20.0 } else { 40.0 }, 0, false); }
+            if boom > 0 { explode_fire(cx, pos + Vec3::Y * 0.5, if mini { 2.5 } else { 4.0 }, (if mini { 20.0 } else { 40.0 } * crate::abilities::pw(cx, "snare")).round(), 0, false); }
             if field { cx.later(0.05, move |cx| { for k in 0..4 { let an = k as f32 / 4.0 * TAU + cx.rr(-0.4, 0.4); let d = cx.rr(2.0, 3.5); let mut to = Vec3::new(pos.x + an.cos() * d, 0.0, pos.z + an.sin() * d); to.y = cx.ground(to.x, to.z, pos.y + 2.0); throw_trap(cx, to, true); } }); }
         }
         cx.g.net.ghost = false;
@@ -449,7 +468,7 @@ fn storm_cloud(cx: &mut Ctx, c: Vec3, r: f32, life: f32, frost: bool, eye: bool)
         if z.t < 0.35 || z.t > z.life - 0.5 { return; }
         cx.play("bow");
         let (p, rr) = (z.pos, z.r);
-        cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, 5.0, Hit { kb: 0.5, src: Some(p), quiet: true, ..default() }); if frost { cx.status(i, Status { slow: 1.5, ..default() }); } });
+        let dm = (5.0 * cx.g.flags.get("storm_pw").copied().unwrap_or(1.0)).round(); cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 0.5, src: Some(p), quiet: true, ..default() }); if frost { cx.status(i, Status { slow: 1.5, ..default() }); } });
     }));
     zone(cx, z);
 }
@@ -513,7 +532,7 @@ fn mirror_image(cx: &mut Ctx, pos: Vec3) {
     z.on_tick = Some(Box::new(|cx, z| {
         let Some(&f) = cx.foes(z.pos, 18.0).first() else { return };
         let from = z.pos + Vec3::Y * 1.4; let e = &cx.g.enemies[f]; let d = e.body.pos + Vec3::Y * e.body.h * 0.5 - from;
-        cx.play("arcane"); crate::relics::seek_bolt(cx, from, d, 16.0, 0xd08aff, false, 0.2, 26.0, 4.0);
+        cx.play("arcane"); let dm = (16.0 * crate::abilities::pw(cx, "blink")).round(); crate::relics::seek_bolt(cx, from, d, dm, 0xd08aff, false, 0.2, 26.0, 4.0);
     }));
     z.on_frame = Some(Box::new(move |cx, z| { let y = yaw + z.t * 0.8; let p = z.pos; set_tf(cx, root, |t| t.rotation = Quat::from_rotation_y(y)); if cx.r() < 0.4 { let j = Vec3::new(cx.rr(-0.4, 0.4), cx.rr(0.0, 1.8), cx.rr(-0.4, 0.4)); cx.fx.emit(true, p + j, Vec3::Y, 0.5, 0.3, 0.04, hexc(0xd08aff) * 2.0, 0.0, 0.0, 0.8); } }));
     z.on_end = Some(Box::new(|cx, z| { let p = z.pos + Vec3::Y; cx.fx.burst(p, 0xd08aff, 20, 4.0, 0.4, 0.3, 0.0, 0.0); cx.gfx().debris(p, &[0xc4a8ff, 0x8a5aff], 10, 4.0, 0.12, 3.0); }));
@@ -536,7 +555,7 @@ fn nova(cx: &mut Ctx) -> bool {
         let e = shard_mesh(cx, 0xbff4ff, 2.6);
         let mut p = Proj::new(p0 + Vec3::Y, Vec3::new(an.cos(), 0.0, an.sin()) * 30.0); p.e = Some(e); p.r = 0.3; p.life = 0.8; p.pierce = true;
         p.trail = Some(Box::new(|cx, p, _| cx.fx.emit(true, p.pos, Vec3::ZERO, 0.25, 0.3, 0.04, hexc(0x8fe6ff) * 2.5, 0.0, 0.0, 0.8)));
-        p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 9.0, Hit { kb: 2.0, src: Some(s), col: 0x8fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, ..default() }); } }));
+        p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; let dm = (9.0 * crate::abilities::pw(cx, "nova")).round(); cx.damage(i, dm, Hit { kb: 2.0, src: Some(s), col: 0x8fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, ..default() }); } }));
         spawn_proj(cx, p);
     }
     true
@@ -607,13 +626,13 @@ fn orb_burst(cx: &mut Ctx, c: Vec3, sc: f32, split: u32) {
         cx.gfx().impact(c, 0xd08aff, 2.0 * sc); cx.punch(0.2 * sc);        cx.play("boom");
         { let mut g = cx.gfx(); g.flare(c, 0xd08aff, 6.0 * sc, 0.35, true); g.sphere(c, 0xb46aff, 0.3, r, 0.35); g.ring(c - Vec3::Y * 0.5, 0xd08aff, 0.5, r, 0.4); g.shock(c - Vec3::Y * 0.8, 0xd08aff, 0.4, r, 0.35, 1.4); }
         cx.fx.burst(c, 0xd08aff, 40, 6.0, 0.5, 0.45, 0.0, 0.0); cx.shake(0.15);
-        cx.aoe(c, r, &mut |cx, i, _| cx.damage(i, (20.0 * sc).round(), Hit { kb: 6.0, src: Some(c), col: 0xd08aff, ..default() }));
+        let dm = (20.0 * sc * crate::abilities::pw(cx, "orb")).round(); cx.aoe(c, r, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 6.0, src: Some(c), col: 0xd08aff, ..default() }));
         if split > 0 { let n = 1 + 2 * split; for i in 0..n { let an = i as f32 / n as f32 * TAU;
             let e = glow_ball(cx, 0xd08aff, 0.3);
             let mut p = Proj::new(c, Vec3::new(an.cos(), 0.1, an.sin()) * 15.0); p.e = Some(e); p.r = 0.55; p.life = 0.75; p.pierce = true; p.orient = Orient::Fixed;
             p.trail = Some(Box::new(|cx, p, _| cx.fx.emit(true, p.pos, Vec3::ZERO, 0.3, 0.4, 0.05, hexc(0xd08aff) * 2.5, 0.0, 0.0, 1.0)));
-            p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 12.0, Hit { kb: 3.0, src: Some(s), col: 0xd08aff, ..default() }); } }));
-            p.on_expire = Some(Box::new(|cx, p, _| { let s = p.pos; cx.fx.burst(s, 0xd08aff, 14, 4.0, 0.35, 0.3, 0.0, 0.0); cx.aoe(s, 2.0, &mut |cx, i, _| cx.damage(i, 10.0, Hit { kb: 3.0, src: Some(s), col: 0xd08aff, ..default() })); }));
+            p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; let dm = (12.0 * crate::abilities::pw(cx, "orb")).round(); cx.damage(i, dm, Hit { kb: 3.0, src: Some(s), col: 0xd08aff, ..default() }); } }));
+            p.on_expire = Some(Box::new(|cx, p, _| { let s = p.pos; cx.fx.burst(s, 0xd08aff, 14, 4.0, 0.35, 0.3, 0.0, 0.0); let dm = (10.0 * crate::abilities::pw(cx, "orb")).round(); cx.aoe(s, 2.0, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 3.0, src: Some(s), col: 0xd08aff, ..default() })); }));
             spawn_proj(cx, p); } }
     });
 }
@@ -754,7 +773,7 @@ fn meteor_impact(cx: &mut Ctx, c: Vec3, r: f32, dmg: f32, big: bool, inferno: bo
     zone(cx, z);
     if inferno {
         let mut z = Zone::new(c, r * 0.8, 5.0); z.every = 0.5;
-        z.on_tick = Some(Box::new(|cx, z| { let (p, rr) = (z.pos, z.r); cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, 6.0, Hit { quiet: true, col: 0xff7a22, ..default() }); cx.status(i, Status { burn: 2.0, ..default() }); }); }));
+        z.on_tick = Some(Box::new(|cx, z| { let (p, rr) = (z.pos, z.r); let dm = (6.0 * crate::abilities::pw(cx, "meteor")).round(); cx.aoe(p, rr, &mut |cx, i, _| { cx.damage(i, dm, Hit { quiet: true, col: 0xff7a22, ..default() }); cx.status(i, Status { burn: 2.0, ..default() }); }); }));
         z.on_frame = Some(Box::new(|cx, z| { for _ in 0..5 { let an = cx.rr(0.0, TAU); let rr = cx.r().sqrt() * z.r; let col = hexc(cx.pick(&[0xff6a1a, 0xffb03a, 0xff3a10])) * 2.5; let v = Vec3::new(cx.rr(-0.3, 0.3), cx.rr(1.5, 3.5), cx.rr(-0.3, 0.3)); cx.fx.emit(true, z.pos + Vec3::new(an.cos() * rr, 0.2, an.sin() * rr), v, 0.6, 0.6, 0.08, col, -1.0, 0.5, 1.0); } }));
         zone(cx, z);
     }
@@ -927,7 +946,7 @@ fn slam_land(cx: &mut Ctx, s: SlamSt) {
                 cx.play("heavy"); cx.fx.smoke(p, 0x8a7458, 3, 1.5, 0.7, 0.9); cx.fx.burst(p + Vec3::Y * 0.3, 0xff9a4a, 8, 4.0, 0.35, 0.35, 4.0, 0.0);
                 let h = cx.rr(1.4, 2.4); earth_pillars(cx, &[(p, h)], 0.9);
                 cx.gfx().decal(p, true, 1.4, 5.0, Some(0xff9a4a));
-                cx.aoe(p, 1.7, &mut |cx, i, _| { cx.damage(i, 22.0, Hit { kb: 2.0, up: 7.0, src: Some(p), col: 0xffb070, quiet: true }); cx.status(i, Status { stun: 0.4, ..default() }); });
+                let dm = (22.0 * cx.g.flags.get("slam_pw").copied().unwrap_or(1.0)).round(); cx.aoe(p, 1.7, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 2.0, up: 7.0, src: Some(p), col: 0xffb070, quiet: true }); cx.status(i, Status { stun: 0.4, ..default() }); });
             }); }
         }
     }
@@ -942,7 +961,7 @@ fn cry(cx: &mut Ctx) -> bool {
     // a levelled cry hits like a shockwave
     if lv >= 1.0 { let c = cx.p.body.pos; let dm = (12.0 * lv).round(); { let mut g = cx.gfx(); g.ring(c, 0xff5b4c, 0.5, 5.0 + lv * 0.3, 0.4); g.shock(c, 0xff5b4c, 0.5, 5.0 + lv * 0.3, 0.35, 1.6); } cx.aoe(c, 5.0 + lv * 0.3, &mut |cx, i, _| cx.damage(i, dm, Hit { kb: 7.0, up: 4.0, src: Some(c), col: 0xff5b4c, ..default() })); }
     cx.g.flags.insert("cry_leech", 0.1 + 0.1 * rage);
-    cx.heal(if rally { 24.0 } else { 20.0 }, false);
+    cx.heal(if rally { 24.0 } else { 20.0 } * crate::abilities::pw(cx, "cry"), false);
     cx.play("shout"); cx.shake(0.4); cx.p.pose(Pose::Shout, 0.8);
     { let pp = cx.p.body.pos + Vec3::Y * 1.6; let war = cx.fx.tex.circles["war"].clone(); let lines = cx.fx.tex.burst.clone(); let mut g = cx.gfx(); g.card(pp, 0xff5b4c, war, Vec3::splat(1.0), Vec3::splat(5.0), 0.4, 0.0, 0.0, 6.0); g.card(pp, 0xffd0a0, lines, Vec3::splat(2.0), Vec3::splat(9.0), 0.35, 0.3, 0.0, 5.0); }
     cx.punch(0.5);
@@ -999,7 +1018,7 @@ fn banner(cx: &mut Ctx, p: Vec3, yaw: f32, dur: f32) {
 fn mend(cx: &mut Ctx) -> bool {
     let amt = cx.p.max_hp * 0.25 * (1.0 + 0.15 * cx.m("mend.greater") as f32 + 0.03 * alv(cx, "mend") as f32);
     cx.g.flags.insert("mend_pw", pw(cx, "mend"));
-    let hot = 4.0 * (1.0 + cx.m("mend.renew") as f32);
+    let hot = 4.0 * (1.0 + cx.m("mend.renew") as f32) * (1.0 + 0.04 * alv(cx, "mend") as f32);
     cx.heal(amt, false); cx.g.buffs.insert("hot", hot);
     cx.play("heal"); cx.p.pose(Pose::Pray, 0.9);
     let pp = cx.p.body.pos;
@@ -1046,8 +1065,8 @@ fn lotus(cx: &mut Ctx, pos: Vec3, s: f32, life: f32, bloom: bool) {
     if bloom {
         z.on_tick = Some(Box::new(|cx, z| {
             let (p, r) = (z.pos, z.r);
-            cx.aoe(p, r, &mut |cx, i, _| cx.damage(i, 9.0, Hit { src: Some(p), col: 0xffe48a, quiet: true, ..default() }));
-            if !cx.p.dead && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < r { cx.sustain(cx.p.max_hp * 0.012); }
+            let mp = cx.g.flags.get("mend_pw").copied().unwrap_or(1.0); let dm = (9.0 * mp).round(); cx.aoe(p, r, &mut |cx, i, _| cx.damage(i, dm, Hit { src: Some(p), col: 0xffe48a, quiet: true, ..default() }));
+            if !cx.p.dead && Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < r { cx.sustain(cx.p.max_hp * 0.012 * mp); }
         }));
         let r = z.r; cx.gfx().circle(c, 0x8dff9e, r, life, "nature", 0.5, None, None);
     }
@@ -1142,14 +1161,15 @@ fn shield(cx: &mut Ctx) -> bool {
     let sph = cx.pal.sphere.clone();
     let dome = mesh_part(cx, root, sph, dome_m, Transform::from_xyz(0.0, 0.9, 0.0).with_scale(Vec3::new(1.7, 1.5, 1.7)));
     let mut shields = vec![];
-    for k in 0..6 {
+    let ns = (6 + alv(cx, "shield") / 2).min(16);
+    for k in 0..ns {
         let s = empty(cx, Transform::default()); cx.c.entity(root).add_child(s);
         let mut b = cx.builder(); b.shadow = false;
         let v = Vec3::new;
         b.glow(s, v(0.7, 0.75, 0.06), 0xffd35a, v(0.0, 0.1, 0.0));
         let low = b.glow(s, v(0.5, 0.5, 0.06), 0xffd35a, v(0.0, -0.35, 0.0)); b.rot(low, 0.0, 0.0, PI / 4.0);
         b.glow(s, v(0.1, 0.8, 0.08), 0xffffff, v(0.0, 0.0, 0.0)); b.glow(s, v(0.5, 0.1, 0.08), 0xffffff, v(0.0, 0.15, 0.0));
-        shields.push((s, k as f32 / 6.0 * TAU));
+        shields.push((s, k as f32 / ns as f32 * TAU));
     }
     let aegis = cx.m("shield.aegis") > 0; let thorns = cx.m("shield.thorns") > 0; let retri = cx.m("shield.retri") > 0;
     let mut z = Zone::new(pp, 4.5, dur); z.follow = true; z.ents.push(root);
@@ -1172,8 +1192,8 @@ fn shield(cx: &mut Ctx) -> bool {
         let c = z.pos; cx.play("boom");
         { let mut g = cx.gfx(); g.ring(c, 0xffe48a, 0.5, 6.5, 0.5); g.shock(c, 0xffe48a, 0.5, 6.5, 0.45, 2.2); g.pillar(c, 0xffe48a, 1.5, 12.0, 0.6); }
         cx.fx.burst(c + Vec3::Y, 0xffe48a, 50, 8.0, 0.6, 0.4, 0.0, 0.0);
-        for k in 0..6 { let an = k as f32 / 6.0 * TAU; spin_blade(cx, c + Vec3::Y, Vec3::new(an.sin(), 0.0, an.cos()), 20.0, 0xffd35a); }
-        cx.aoe(c, 6.5, &mut |cx, i, _| { cx.damage(i, 50.0, Hit { kb: 8.0, up: 5.0, src: Some(c), col: 0xffe48a, ..default() }); cx.status(i, Status { stun: 0.8, ..default() }); });
+        let sk = cx.g.flags.get("shield_pw").copied().unwrap_or(1.0); let nb = 6 + ((sk - 1.0) / 0.16) as usize; for k in 0..nb.min(18) { let an = k as f32 / nb.min(18) as f32 * TAU; spin_blade(cx, c + Vec3::Y, Vec3::new(an.sin(), 0.0, an.cos()), (20.0 * sk).round(), 0xffd35a); }
+        let dm = (50.0 * sk).round(); cx.aoe(c, 6.5, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 8.0, up: 5.0, src: Some(c), col: 0xffe48a, ..default() }); cx.status(i, Status { stun: 0.8, ..default() }); });
     })); }
     zone(cx, z);
     true
@@ -1185,7 +1205,7 @@ fn consecrate(cx: &mut Ctx) -> bool {
     let r = 6.0 * cx.g.st.area * (1.0 + 0.25 * cx.m("consecrate.wide") as f32 + 0.05 * alv(cx, "consecrate") as f32);
     let dmg = (9.0 * (1.0 + 0.5 * cx.m("consecrate.purge") as f32) * pw(cx, "consecrate")).round();
     let sanct = cx.m("consecrate.sanct") > 0;
-    let life = 6.0 + if march { 3.0 } else { 0.0 };
+    let life = (6.0 + if march { 3.0 } else { 0.0 }) * (1.0 + 0.04 * alv(cx, "consecrate") as f32).min(2.5);
     cx.play("holy"); cx.p.pose(Pose::Kneel, 0.8);
     { let holy = cx.fx.tex.circles["holy"].clone(); let mut g = cx.gfx(); g.card(c + Vec3::Y * 1.5, 0xffd35a, holy, Vec3::splat(1.0), Vec3::splat(r * 1.4), 0.4, 0.0, 0.6, 5.0); g.impact(c + Vec3::Y * 1.0, 0xffd35a, 1.8); }
     { let mut g = cx.gfx(); g.ring(c, 0xffd35a, 0.5, r, 0.5); g.shock(c, 0xffd35a, 0.5, r, 0.4, 1.4); }
@@ -1194,8 +1214,9 @@ fn consecrate(cx: &mut Ctx) -> bool {
     // eight white obelisks with burning gold runes rise around the edge of the holy ground
     let root = empty(cx, Transform::from_translation(c));
     let mut obs = vec![];
-    for k in 0..8 {
-        let an = k as f32 / 8.0 * TAU;
+    let nob = (8 + alv(cx, "consecrate") / 2).min(20);
+    for k in 0..nob {
+        let an = k as f32 / nob as f32 * TAU;
         let o = empty(cx, Transform::from_xyz(an.cos() * r, -3.0, an.sin() * r)); cx.c.entity(root).add_child(o);
         let mut b = cx.builder();
         let v = Vec3::new;
@@ -1211,7 +1232,7 @@ fn consecrate(cx: &mut Ctx) -> bool {
     z.on_tick = Some(Box::new(move |cx, z| {
         let (p, rr) = (z.pos, z.r);
         cx.aoe(p, rr, &mut |cx, i, _| cx.damage(i, dmg, Hit { src: Some(p), col: 0xffd35a, quiet: true, ..default() }));
-        if Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < rr { let h = cx.p.max_hp * 0.012 * if sanct { 1.6 } else { 1.0 }; cx.sustain(h); }
+        if Vec2::new(cx.p.body.pos.x - p.x, cx.p.body.pos.z - p.z).length() < rr { let h = cx.p.max_hp * 0.012 * if sanct { 1.6 } else { 1.0 } * crate::abilities::pw(cx, "consecrate").sqrt(); cx.sustain(h); }
     }));
     z.on_frame = Some(Box::new(move |cx, z| {
         let t = z.t; let p = z.pos;
@@ -1247,14 +1268,14 @@ pub fn update_abilities(cx: &mut Ctx) {
             // the ground tears up behind the charge
             st.dust -= dt;
             if st.dust <= 0.0 { st.dust = 0.05; kick_dirt(cx, pp, 2, 3.0); cx.fx.smoke(pp, 0xb8a888, 1, 1.0, 0.6, 0.8); let g = Vec3::new(pp.x, cx.ground(pp.x, pp.z, pp.y + 1.0), pp.z); cx.gfx().decal(g, true, 0.8, 3.0, None); }
-            if st.ruin { st.drop -= dt; if st.drop <= 0.0 { st.drop = 0.07; let g = Vec3::new(pp.x, cx.ground(pp.x, pp.z, pp.y + 1.0), pp.z); fire_pool(cx, g, 1.5, 4.0, 6.0, false); } }
+            if st.ruin { st.drop -= dt; if st.drop <= 0.0 { st.drop = 0.07; let g = Vec3::new(pp.x, cx.ground(pp.x, pp.z, pp.y + 1.0), pp.z); let dm = (6.0 * cx.g.flags.get("charge_pw").copied().unwrap_or(1.0)).round(); fire_pool(cx, g, 1.5, 4.0, dm, false); } }
             cx.g.ab.charge = Some(st);
         } else {
             cx.c.entity(st.wedge).despawn_recursive();
             { let mut g = cx.gfx(); g.ring(pp, 0xff8a6a, 0.3, 3.0, 0.3); g.shock(pp, 0xff8a6a, 0.3, 3.0, 0.3, 1.0); }
             cx.shake(0.2);
             if st.wave { let c = pp; cx.play("boom"); { let mut g = cx.gfx(); g.ring(c, 0xffd0a0, 0.5, 4.5, 0.45); g.shock(c, 0xffd0a0, 0.5, 4.5, 0.4, 1.6); } cx.fx.smoke(c, 0xb8a888, 10, 2.5, 1.0, 1.2); let dm = (30.0 * cx.g.flags.get("charge_pw").copied().unwrap_or(1.0)).round(); cx.aoe(c, 4.5, &mut |cx, i, _| { cx.damage(i, dm, Hit { kb: 8.0, up: 6.0, src: Some(c), ..default() }); cx.status(i, Status { stun: 1.0, ..default() }); }); }
-            if st.ruin { explode_fire(cx, pp + Vec3::Y * 0.6, 4.5, 40.0, 0, false); cx.gfx().pillar(pp, 0xff7a2a, 1.6, 10.0, 0.6); }
+            if st.ruin { let dm = (40.0 * cx.g.flags.get("charge_pw").copied().unwrap_or(1.0)).round(); explode_fire(cx, pp + Vec3::Y * 0.6, 4.5, dm, 0, false); cx.gfx().pillar(pp, 0xff7a2a, 1.6, 10.0, 0.6); }
         }
     }
     // ---- roll (Blade Dance)
@@ -1278,5 +1299,5 @@ pub fn update_abilities(cx: &mut Ctx) {
     if let Some(s) = cx.g.ab.slam { if cx.p.leap.is_none() { cx.g.ab.slam = None; slam_land(cx, s); } }
     // ---- Battle Cry: the warrior burns with a red aura while it lasts
     if cx.g.buff("cry") > 0.0 && cx.r() < 0.6 { let an = cx.rr(0.0, TAU); let p = pp + Vec3::new(an.cos() * 0.5, cx.rr(0.2, 1.8), an.sin() * 0.5); let c = hexc(cx.pick(&[0xff5b4c, 0xffb03a])) * 2.5; cx.fx.emit(true, p, Vec3::Y * cx.rr(1.0, 2.5), 0.4, 0.3, 0.04, c, -1.0, 0.5, 1.0); }
-    if cx.g.buff("hot") > 0.0 { let a = cx.g.flags.entry("hot_acc").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; let h = cx.p.max_hp * 0.025; cx.sustain(h); } }
+    if cx.g.buff("hot") > 0.0 { let a = cx.g.flags.entry("hot_acc").or_insert(0.0); *a += dt; if *a >= 1.0 { *a -= 1.0; let h = cx.p.max_hp * 0.025 * cx.g.flags.get("mend_pw").copied().unwrap_or(1.0); cx.sustain(h); } }
 }

@@ -409,7 +409,8 @@ pub fn update_hud(mut ui: ResMut<UiState>, r: Res<HudRefs>, mut q: UiQ, mut g: R
         set_bg(&mut q, *glow, col(info.color, if ready { 1.0 } else { 0.35 }));
     }
     let wid = p.weapon_id();
-    set_text(&mut q, r.weapon, &if wid == "revolvers" { if p.reload > 0.0 { format!("{}\nreloading", weapon_info(wid).0) } else { format!("{}\n{} / {}", weapon_info(wid).0, p.ammo, crate::combat::CYLINDER) } } else { weapon_info(wid).0.to_string() });
+    let wl = crate::abilities::wlv(&g, wid); let wname = if wl > 1 { format!("{}  Lv {}", weapon_info(wid).0, wl) } else { weapon_info(wid).0.to_string() };
+    set_text(&mut q, r.weapon, &if wid == "revolvers" { if p.reload > 0.0 { format!("{}\nreloading", wname) } else { format!("{}\n{} / {}", wname, p.ammo, crate::combat::cylinder(&g)) } } else { wname });
     set_text(&mut q, r.food, &format!("{} meat  {} berry", g.food_meat, g.food_berries));
     // clock, threat, kills, day
     let m = g.minutes(); let (tn, tc) = threat(m);

@@ -98,6 +98,7 @@ fn main() {
     .add_systems(Startup, (start_world, audio::setup_audio, audio::setup_music, (uikit::build, icons::build_icons, hud::setup_hud, camp::setup_camp, settings::setup_settings).chain()))
     .add_systems(Update, (settings::gamepad_bridge, settings::apply_settings, hud::ui_flow, run_control.after(scene::stream_chunks), cursor_lock, mouse_look, game_tick, hud::update_hud, net_day, hud::button_hover, camp::update_camp, camp::update_shop, camp::update_join, settings::update_settings_ui, hud::menu_camera, audio::play_sfx, audio::update_music).chain());
     app.add_systems(Update, player::weapon_trails.after(game_tick));
+    if cfg!(feature = "dev") && std::env::var("EW_PERF").is_ok() { app.add_systems(Update, perf_log); }
     app.init_resource::<devmenu::DevQueue>().init_resource::<devmenu::DevMenu>()
         .add_systems(Startup, devmenu::setup_dev.after(hud::setup_hud))
         .add_systems(Update, devmenu::dev_menu.after(hud::ui_flow).before(cursor_lock));
@@ -243,6 +244,7 @@ pub struct Sim<'w, 's> {
 #[allow(clippy::too_many_arguments)]
 fn game_tick(mut s: Sim, time: Res<Time>, keys_in: Res<ButtonInput<KeyCode>>, mouse: Res<ButtonInput<MouseButton>>, paused: Res<Paused>, ctl: Res<Controls>,
     mut camq: Query<(Entity, &mut Projection), With<MainCam>>, mut test: Option<ResMut<testkit::TestCfg>>, ui: Res<hud::UiState>, link: Option<Res<net::Link>>, bot: Option<Res<bot::BotCfg>>, mut devq: Option<ResMut<devmenu::DevQueue>>) {
+    let _timer = SimTimer(std::time::Instant::now());
     let s = &mut s;
     let Ok((ce, mut proj)) = camq.get_single_mut() else { return };
     if paused.0 && link.is_none() { return; }
@@ -448,14 +450,25 @@ fn eat(cx: &mut Ctx) {
     let p = cx.p.body.pos + Vec3::Y * 1.6; cx.fx.burst(p, if meat { 0xd06a6a } else { 0xd23a4e }, 10, 2.0, 0.4, 0.2, 0.0, 8.0);
 }
 
+/// wall time spent in game_tick (microseconds), for the dev perf log
+static SIM_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+struct SimTimer(std::time::Instant);
+impl Drop for SimTimer { fn drop(&mut self) { SIM_US.fetch_add(self.0.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed); } }
+/// dev (EW_PERF=1): once a second, the average and worst frame time with the live enemy count
+fn perf_log(time: Res<Time<Real>>, g: Res<Game>, mut acc: Local<(f32, u32, f32)>) {
+    let d = time.delta_secs(); acc.0 += d; acc.1 += 1; acc.2 = acc.2.max(d);
+    if acc.0 >= 1.0 { let live = g.enemies.iter().filter(|e| !e.dead && !e.t.passive && !e.t.prop).count(); let sim = SIM_US.swap(0, std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0 / acc.1 as f32; println!("perf: {:.1} ms avg, {:.1} ms worst, {:.2} ms sim, {} live, {} frames", acc.0 / acc.1 as f32 * 1000.0, acc.2 * 1000.0, sim, live, acc.1); *acc = (0.0, 0, 0.0); }
+}
+
 fn test_act(cx: &mut Ctx, a: &str) {
     let (k, v) = a.split_once('=').unwrap_or((a, ""));
     match k {
-        "horde" | "hordefar" => {
-            let n: u32 = v.parse().unwrap_or(10); let (r0, r1) = if k == "horde" { (7.0, 12.0) } else { (15.0, 21.0) };
+        "horde" | "hordefar" | "hordering" => {
+            let n: u32 = v.parse().unwrap_or(10); let (r0, r1) = if k == "horde" { (7.0, 12.0) } else if k == "hordering" { (10.0, 40.0) } else { (15.0, 21.0) };
+            let spread = if k == "hordering" { std::f32::consts::TAU } else { 2.2 };
             let pp = cx.p.body.pos; let f = cx.p.fwd();
             for i in 0..n {
-                let an = (i as f32 / n as f32 - 0.5) * 2.2 + f.x.atan2(f.z);
+                let an = (i as f32 / n as f32 - 0.5) * spread + f.x.atan2(f.z);
                 let r = cx.rr(r0, r1);
                 if let Some(sp) = cx.w.surface_spot(pp.x + an.sin() * r, pp.z + an.cos() * r) {
                     let k = cx.pick(&[enemies::Kind::Zombie, enemies::Kind::Zombie, enemies::Kind::Skeleton, enemies::Kind::Spider, enemies::Kind::Slime, enemies::Kind::Brute]);
@@ -506,7 +519,11 @@ fn test_act(cx: &mut Ctx, a: &str) {
             for ab in abilities::class_abilities(cx.p.cls) { for m in abilities::MODS.iter().filter(|m| m.0 == ab) { cx.g.mods.insert(format!("{}.{}", ab, m.1), m.4); } }
             for w in player::class_weapons(cx.p.cls) { for m in abilities::WMODS.iter().filter(|m| m.0 == w) { cx.g.mods.insert(format!("w.{}.{}", w, m.1), m.4); } }
         }
-        "aug" => { let a = &augments::AUGS[(cx.r() * augments::AUGS.len() as f32) as usize % augments::AUGS.len()]; let k = format!("x.{}", a.id); let r = cx.g.m(&k); if (r as usize) < a.ranks.len() { cx.g.mods.insert(k, r + 1); cx.toast(a.name, a.ranks[r as usize], 2.0); } }
+        "aug" => { let a = &augments::AUGS[(cx.r() * augments::AUGS.len() as f32) as usize % augments::AUGS.len()]; let k = format!("x.{}", a.id); let r = cx.g.m(&k); cx.g.mods.insert(k, r + 1); if r == 0 && a.id == "storm" { cx.g.st.crit += 0.05; } cx.toast(a.name, a.ranks.get(r as usize).copied().unwrap_or(augments::amp_desc(a.id)), 2.0); }
+        // dev: every augment +n ranks (n defaults to 3)
+        "allaug" => { let n: u32 = v.parse().unwrap_or(3); for a in augments::AUGS.iter() { let k = format!("x.{}", a.id); let r = cx.g.m(&k); if r == 0 && a.id == "storm" { cx.g.st.crit += 0.05; } cx.g.mods.insert(k, r + n); } }
+        // dev: +n levels to both class weapons
+        "wlv" => { let n: u32 = v.parse().unwrap_or(5); for w in player::class_weapons(cx.p.cls) { *cx.g.mods.entry(format!("hw.{}", w)).or_insert(0) += n; } }
         _ => {}
     }
 }

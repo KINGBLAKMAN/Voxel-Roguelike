@@ -150,8 +150,11 @@ fn build(c: &mut Commands, icons: &Icons, g: &Game, p: &Player, kit: &crate::uik
     }
     section(c, right, "Relics", rel);
     let aug: Vec<Entity> = AUGS.iter().filter_map(|a| { let r = g.m(&format!("x.{}", a.id)); (r > 0).then(|| (a, r)) }).map(|(a, r)| {
-        let body = a.ranks.iter().take(r as usize).cloned().collect::<Vec<_>>().join("\n");
-        tile(c, icons, glyph_for(a.id, a.name, a.ranks[0]), AUG_COLOR, AUG_COLOR, 54.0, roman(r), Some(Tip { title: a.name.into(), tag: format!("Chaos augment  |  rank {}/{}", r, a.ranks.len()), body, color: AUG_COLOR }), None)
+        let mut body = a.ranks.iter().take(r as usize).cloned().collect::<Vec<_>>().join("\n");
+        let n = a.ranks.len() as u32;
+        if r > n { body += &format!("\nAmplified x{}: each rank {}", r - n, crate::augments::amp_desc(a.id).to_lowercase()); }
+        let tag = if r > n { format!("Chaos augment  |  rank {}  (amplified)", r) } else { format!("Chaos augment  |  rank {}/{}", r, n) };
+        tile(c, icons, glyph_for(a.id, a.name, a.ranks[0]), AUG_COLOR, AUG_COLOR, 54.0, &if r > 10 { r.to_string() } else { roman(r).to_string() }, Some(Tip { title: a.name.into(), tag, body, color: AUG_COLOR }), None)
     }).collect();
     section(c, right, "Chaos augments", aug);
     let boons: Vec<Entity> = PERKS.iter().filter_map(|b| { let n = g.perks.iter().filter(|q| *q == b.1).count(); (n > 0).then(|| (b, n)) }).map(|(b, n)| {

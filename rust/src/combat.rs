@@ -33,7 +33,7 @@ pub struct Trap { pub ghost: bool, pub pos: Vec3, pub life: f32, pub armed: f32,
 
 pub fn spawn_proj(cx: &mut Ctx, mut p: Proj) {
     if cx.g.projs.len() >= 700 { let o = cx.g.projs.remove(0); if let Some(e) = o.e { cx.c.entity(e).despawn_recursive(); } }
-    if p.owner == Owner::Player && p.bnc == 0 && !cx.g.net.ghost { p.bnc = cx.m("x.bounce"); }
+    if p.owner == Owner::Player && p.bnc == 0 && !cx.g.net.ghost { p.bnc = cx.m("x.bounce").min(12); }
     p.ghost = cx.g.net.ghost;
     cx.g.projs.push(p);
 }
@@ -259,17 +259,19 @@ pub fn replay_primary(cx: &mut Ctx, charge: f32) {
 
 // ---------------- the Gunslinger's guns ----------------
 pub const CYLINDER: i32 = 12;
+/// rounds per reload: 12, and 2 more every 4 revolver levels
+pub fn cylinder(g: &Game) -> i32 { CYLINDER + 2 * crate::abilities::wex(g, "revolvers").min(12) as i32 }
 fn reload_time(cx: &Ctx) -> f32 { 1.1 * (1.0 - 0.2 * cx.m("w.revolvers.quick") as f32) * if cx.g.perks.iter().any(|p| p == "Speed Loader") { 0.7 } else { 1.0 } }
 /// trigger handling: the revolvers empty their cylinders then twirl through a reload; the rifle works its lever between shots
 fn guns(cx: &mut Ctx, id: &'static str, lmb: bool) {
     let dt = cx.dt;
     if cx.p.reload > 0.0 {
         cx.p.reload -= dt;
-        if cx.p.reload <= 0.0 { cx.p.reload = 0.0; cx.p.ammo = CYLINDER; cx.play("reload"); }
+        if cx.p.reload <= 0.0 { cx.p.reload = 0.0; cx.p.ammo = cylinder(cx.g); cx.play("reload"); }
         return;
     }
     // a half-empty cylinder tops itself up after a pause
-    if id == "revolvers" && !lmb && cx.p.ammo < CYLINDER && cx.g.atk_t < -1.2 { start_reload(cx); return; }
+    if id == "revolvers" && !lmb && cx.p.ammo < cylinder(cx.g) && cx.g.atk_t < -1.2 { start_reload(cx); return; }
     if !lmb || cx.g.atk_t > 0.0 { return; }
     let quick = cx.m("w.revolvers.quick") as f32;
     cx.g.atk_t = weapon_rate(id) * if id == "revolvers" { 1.0 - 0.15 * quick } else { 1.0 - 0.3 * cx.m("w.rifle.lever") as f32 };
@@ -294,7 +296,7 @@ pub fn fire_gun(cx: &mut Ctx, id: &str) {
     let from = cx.hand() - cx.p.right() * if left { 0.64 } else { 0.0 };
     let mut dir = (cx.p.aim_pt - from).normalize();
     if !rifle { dir = (dir + Vec3::new(cx.rr(-0.015, 0.015), cx.rr(-0.015, 0.015), cx.rr(-0.015, 0.015))).normalize(); }
-    let dmg = if rifle { 38.0 * (1.0 + 0.4 * cx.m("w.rifle.big") as f32) } else { 10.0 * (1.0 + 0.35 * cx.m("w.revolvers.hollow") as f32) };
+    let dmg = if rifle { 38.0 * (1.0 + 0.4 * cx.m("w.rifle.big") as f32) } else { 10.0 * (1.0 + 0.35 * cx.m("w.revolvers.hollow") as f32) } * crate::abilities::wpw(cx.g, id);
     cx.play(if rifle { "rifle" } else { "gun" });
     muzzle(cx, from, dir, rifle);
     bullet(cx, from, dir, dmg, rifle, if rifle { 0 } else { cx.m("w.revolvers.rico") }, rifle && cx.m("w.rifle.explo") > 0, false);
@@ -396,13 +398,13 @@ pub fn fire_arrow(cx: &mut Ctx, charge: f32) {
     let mut dir = (cx.p.aim_pt - from).normalize(); dir.y += 0.02; let dir = dir.normalize();
     let full = charge >= 0.99;
     let sp = crate::noise::lerp(32.0, 72.0, charge);
-    let dmg = crate::noise::lerp(10.0, 40.0, charge).round();
+    let dmg = (crate::noise::lerp(10.0, 40.0, charge) * crate::abilities::wpw(cx.g, "longbow")).round();
     cx.play("bow"); cx.p.cast_kick = 1.0; cx.p.swing_t = 0.0; cx.p.swing_dur = 0.42; cx.p.swing_kind = 1;
     let split = if full && cx.m("w.longbow.split") > 0 { 3 } else { 0 };
     let blast = full && cx.m("w.longbow.blast") > 0;
     player_arrow(cx, from, dir * sp, dmg, if full { 3.0 } else { 9.0 }, full, 3.0, 0x6a4528, if full { Some(0xb8ff8a) } else { None }, split, false, blast);
     if full { cx.fx.burst(from, 0xb8ff8a, 12, 4.0, 0.3, 0.3, 0.0, 0.0); cx.shake(0.08); }
-    let extra = 2 * cx.m("w.longbow.multi");
+    let extra = 2 * cx.m("w.longbow.multi") + crate::abilities::wex(cx.g, "longbow").min(8);
     for k in 1..=extra { let a = if k % 2 == 1 { 1.0 } else { -1.0 } * ((k + 1) / 2) as f32 * 0.07; let d = Quat::from_rotation_y(a) * dir; player_arrow(cx, from, d * sp, (dmg * 0.5).round(), if full { 3.0 } else { 9.0 }, false, 3.0, 0x6a4528, None, 0, false, false); }
 }
 
@@ -419,7 +421,9 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
     let side = cx.p.swing_side;
     cx.play(match id { "daggers" => "knife", "scythe" => "reap", _ if heavy => "heavy", _ => "swing" });
     let reach = if (id == "greatsword" && cx.m("w.greatsword.reach") > 0) || (id == "scythe" && cx.m("w.scythe.reach") > 0) { 1.3 } else { 1.0 };
-    let (range, arc) = (range0 * reach, arc0 * if reach > 1.0 { 1.15 } else { 1.0 });
+    let lvr = (1.0 + 0.03 * (crate::abilities::wlv(cx.g, id) - 1) as f32).min(1.6);
+    let wp = crate::abilities::wpw(cx.g, id);
+    let (range, arc) = (range0 * reach * lvr, (arc0 * if reach > 1.0 { 1.15 } else { 1.0 } * lvr.sqrt()).min(PI * 1.9));
     // the arc of light lands with the blade, after the wind-up
     let (tilt, overhead) = (if id == "greatsword" { 0.0 } else { side * 0.25 }, combo == 2);
     cx.later(cx.p.swing_dur * 0.24, move |cx| {
@@ -437,7 +441,7 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
         let e = shard_mesh(cx, 0xa98aff, 2.2);
         let mut p = Proj::new(from, d * 40.0); p.e = Some(e); p.r = 0.35; p.life = 0.8; p.pierce = true;
         p.trail = Some(Box::new(|cx, p, _| cx.fx.emit(true, p.pos, Vec3::ZERO, 0.25, 0.3, 0.05, hexc(0xa98aff) * 2.5, 0.0, 0.0, 0.9)));
-        p.on_hit = Some(Box::new(|cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 16.0, Hit { kb: 2.0, src: Some(s), col: 0xa98aff, ..default() }); cx.fx.sparks(s, 0xa98aff, 6, 6.0); } }));
+        p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 16.0 * wp, Hit { kb: 2.0, src: Some(s), col: 0xa98aff, ..default() }); cx.fx.sparks(s, 0xa98aff, 6, 6.0); } }));
         spawn_proj(cx, p);
     }
     cx.later(cx.p.swing_dur * 0.27, move |cx| {
@@ -453,7 +457,7 @@ fn melee_swing(cx: &mut Ctx, id: &'static str) {
             if d > range || dy.abs() > 2.6 { continue; }
             let ang = ((dx * f.x + dz * f.z) / hd.max(0.01)).clamp(-1.0, 1.0).acos();
             if ang > arc / 2.0 && d > 0.6 { continue; }
-            let mut dm = dmg0;
+            let mut dm = dmg0 * wp;
             if id == "daggers" && n % 3 == 0 { dm *= 2.0; }
             if id == "mace" { dm *= 1.0 + 0.25 * cx.m("w.mace.heavy") as f32; }
             if id == "greatsword" && cx.m("w.greatsword.exec") > 0 && hp / mhp < 0.35 { dm *= 1.6; }
@@ -551,41 +555,42 @@ fn cast_primary(cx: &mut Ctx, id: &str) {
     match id {
         "firestaff" => {
             cx.play("staff");
-            let rad = 3.0 * cx.g.st.fire_rad * cx.g.st.area * (1.0 + 0.3 * cx.m("w.firestaff.big") as f32);
+            let wp = crate::abilities::wpw(cx.g, id);
+            let rad = 3.0 * cx.g.st.fire_rad * cx.g.st.area * (1.0 + 0.3 * cx.m("w.firestaff.big") as f32) * (1.0 + 0.04 * (crate::abilities::wlv(cx.g, id) - 1) as f32).min(2.0);
             let cl = cx.m("w.firestaff.cluster"); let tr = cx.m("w.firestaff.trail") > 0;
             let e = glow_ball(cx, 0xff6a1a, 0.32);
             let mut p = Proj::new(from, dir * 30.0); p.e = Some(e); p.r = 0.35; p.life = 2.2; p.orient = Orient::Fixed;
             p.trail = Some(Box::new(|cx, p, _| { for _ in 0..3 { let j = Vec3::new(cx.rr(-0.1, 0.1), cx.rr(-0.1, 0.1), cx.rr(-0.1, 0.1)); let v = Vec3::new(cx.rr(-0.6, 0.6), cx.rr(0.0, 1.2), cx.rr(-0.6, 0.6));
                 let c = hexc([0xff6a1a, 0xffb03a, 0xff3a10][(cx.r() * 3.0) as usize % 3]) * 3.0; cx.fx.emit(true, p.pos + j, v, 0.45, 0.6, 0.08, c, -1.0, 1.0, 1.0); }
                 if cx.r() < 0.3 { cx.fx.emit(false, p.pos, Vec3::Y * 0.8, 0.8, 0.3, 0.9, hexc(0x3a3330), -0.5, 1.0, 0.4); } }));
-            let boom = move |cx: &mut Ctx, p: &mut Proj, _: Option<usize>| { explode_fire(cx, p.pos, rad, 20.0, cl, false); if tr { let mut g = p.pos; g.y = cx.ground(g.x, g.z, g.y + 1.0); fire_pool(cx, g, rad * 0.75, 3.0, 5.0, false); } };
+            let boom = move |cx: &mut Ctx, p: &mut Proj, _: Option<usize>| { explode_fire(cx, p.pos, rad, 20.0 * wp, cl, false); if tr { let mut g = p.pos; g.y = cx.ground(g.x, g.z, g.y + 1.0); fire_pool(cx, g, rad * 0.75, 3.0, 5.0, false); } };
             p.on_hit = Some(Box::new(boom)); p.on_world = Some(Box::new(boom)); p.on_expire = Some(Box::new(boom));
             spawn_proj(cx, p);
             cx.fx.burst(from, 0xff8a2a, 6, 2.0, 0.25, 0.3, 0.0, 0.0);
         }
         "frostwand" => {
             cx.play("wand");
-            let n = 1 + 2 * cx.m("w.frostwand.fork"); let thr = if cx.m("w.frostwand.brittle") > 0 { 3 } else { 5 }; let lance = cx.m("w.frostwand.lance") > 0;
+            let n = 1 + 2 * cx.m("w.frostwand.fork") + crate::abilities::wex(cx.g, id).min(8); let wp = crate::abilities::wpw(cx.g, id); let thr = if cx.m("w.frostwand.brittle") > 0 { 3 } else { 5 }; let lance = cx.m("w.frostwand.lance") > 0;
             for k in 0..n {
                 let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.08 };
                 let d = (Quat::from_rotation_y(a) * dir + Vec3::new(cx.rr(-0.02, 0.02), cx.rr(-0.02, 0.02), 0.0)).normalize();
                 let e = shard_mesh(cx, 0xbff4ff, 1.6);
                 let mut p = Proj::new(from, d * 46.0); p.e = Some(e); p.r = 0.25; p.life = 1.4; p.pierce = lance;
                 p.trail = Some(Box::new(|cx, p, _| { let v = Vec3::new(cx.rr(-0.3, 0.3), cx.rr(-0.3, 0.3), cx.rr(-0.3, 0.3)); cx.fx.emit(true, p.pos, v, 0.3, 0.3, 0.04, hexc(0x8fe6ff) * 2.5, 0.0, 1.0, 0.8); }));
-                p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 6.0, Hit { kb: 1.0, src: Some(s), col: 0x8fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, chill: 1, thr, ..default() }); cx.fx.burst(s, 0xbff4ff, 6, 3.0, 0.3, 0.2, 0.0, 0.0); } }));
+                p.on_hit = Some(Box::new(move |cx, p, i| { if let Some(i) = i { let s = p.pos; cx.damage(i, 6.0 * wp, Hit { kb: 1.0, src: Some(s), col: 0x8fe6ff, ..default() }); cx.status(i, Status { slow: 2.0, chill: 1, thr, ..default() }); cx.fx.burst(s, 0xbff4ff, 6, 3.0, 0.3, 0.2, 0.0, 0.0); } }));
                 p.on_world = Some(Box::new(|cx, p, _| cx.fx.burst(p.pos, 0xbff4ff, 6, 3.0, 0.3, 0.2, 0.0, 0.0)));
                 spawn_proj(cx, p);
             }
         }
         "skullstaff" => {
             cx.play("soul");
-            let n = 1 + cx.m("w.skullstaff.twin"); let plague = cx.m("w.skullstaff.plague") > 0; let burst = cx.m("w.skullstaff.burst") > 0;
-            for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.16 }; skull_bolt(cx, from, Quat::from_rotation_y(a) * dir * 24.0, 13.0, plague, burst); }
+            let n = 1 + cx.m("w.skullstaff.twin") + crate::abilities::wex(cx.g, id).min(6); let wp = crate::abilities::wpw(cx.g, id); let plague = cx.m("w.skullstaff.plague") > 0; let burst = cx.m("w.skullstaff.burst") > 0;
+            for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.16 }; skull_bolt(cx, from, Quat::from_rotation_y(a) * dir * 24.0, 13.0 * wp, plague, burst); }
         }
         _ => {
             cx.play("scepter");
-            let n = 1 + cx.m("w.scepter.twin"); let split = cx.m("w.scepter.split") > 0; let nova = cx.m("w.scepter.nova") > 0;
-            for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.12 }; holy_bolt(cx, from, Quat::from_rotation_y(a) * dir * 30.0, 14.0, 0.24, split, nova); }
+            let n = 1 + cx.m("w.scepter.twin") + crate::abilities::wex(cx.g, "scepter").min(6); let wp = crate::abilities::wpw(cx.g, "scepter"); let split = cx.m("w.scepter.split") > 0; let nova = cx.m("w.scepter.nova") > 0;
+            for k in 0..n { let a = if k == 0 { 0.0 } else { (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2) as f32 * 0.12 }; holy_bolt(cx, from, Quat::from_rotation_y(a) * dir * 30.0, 14.0 * wp, 0.24, split, nova); }
         }
     }
 }

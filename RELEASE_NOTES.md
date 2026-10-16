@@ -1,3 +1,25 @@
+## Emberwild 0.9.1: no more kiting, everything scales forever
+
+**Downloads:**
+- `Emberwild-0.9.1-windows.zip` is the game.
+- `Emberwild-0.9.1-windows-dev.zip` is the game plus the developer tools.
+
+### The horde has to be fought
+- **Smaller arenas:** each map is now about 128 blocks across (was about 220), with a narrower cliff band. Ruins, camps, shrines and altars are packed closer together.
+- **A much bigger horde:** up to about 400 monsters at once by the last stage (was about 200). Packs come faster and larger, and "The horde closes in" and swarm events bring up to 90.
+- **No running away:** when you run, many packs spawn ahead of you along your heading. From the Restless tier on, a wall of 12 to 30 monsters rises across your path every 20 to 30 seconds.
+- Each monster has slightly less health to make up for the numbers. Area abilities shine.
+- **Performance:** a spatial grid for crowd separation and area hits, and less animation and particle work for far-off monsters in a big horde.
+
+### Everything scales forever
+- **Weapon levels:** every weapon upgrade is a level, and **Hone** cards keep going without limit. +6% damage per level, longer melee reach, bigger fireballs, and every 4 levels another arrow, shard, skull or bolt, or 2 more revolver rounds. The HUD shows the weapon's level.
+- **Raise Dead's level** also makes skeletons attack faster and last longer, and raises the army limit (24, plus one per two levels).
+- **Chaos augments have no rank limit:** **Amplify** cards keep growing an augment past its written ranks. A run now holds 3 augments (was 2). Arcane Surge and Overload scale with the level of the ability you cast.
+- Ability scaling audit: every ability's damage, including delayed hits, zones and follow-up blasts, now grows with its level.
+
+### Dev build
+- New dev menu entries: +5 weapon levels, +3 to every augment. "Spawn a horde" now spawns 60.
+
 ## Emberwild 0.9.0: three maps, two new classes, infinite abilities
 
 **Downloads:**

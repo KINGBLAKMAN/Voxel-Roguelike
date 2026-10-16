@@ -29,6 +29,27 @@ pub struct Hit { pub kb: f32, pub up: f32, pub src: Option<Vec3>, pub col: u32, 
 #[derive(Default, Clone, Copy)]
 pub struct Status { pub stun: f32, pub slow: f32, pub freeze: f32, pub burn: f32, pub poison: f32, pub fear: f32, pub chill: u8, pub thr: u8, pub push: Option<Vec3> }
 
+/// a uniform spatial hash of the enemy list (4 m cells), rebuilt each frame so area queries and separation stay cheap with hundreds alive
+#[derive(Default)]
+pub struct Grid { pub cells: HashMap<(i32, i32), Vec<u32>>, pub n: usize }
+pub const CELL: f32 = 4.0;
+impl Grid {
+    pub fn build(&mut self, es: &[Enemy]) {
+        for v in self.cells.values_mut() { v.clear(); }
+        if self.cells.len() > 4096 { self.cells.clear(); }
+        for (i, e) in es.iter().enumerate() { if e.dead { continue; } self.cells.entry(Self::key(e.body.pos.x, e.body.pos.z)).or_default().push(i as u32); }
+        self.n = es.len();
+    }
+    pub fn key(x: f32, z: f32) -> (i32, i32) { ((x / CELL).floor() as i32, (z / CELL).floor() as i32) }
+    /// usable only while the enemy list hasn't been reshuffled since the build
+    pub fn fresh(&self, es: &[Enemy]) -> bool { self.n == es.len() && self.n > 0 }
+    /// candidate indices within r (plus a cell of slack) of (x, z)
+    pub fn visit(&self, x: f32, z: f32, r: f32, f: &mut dyn FnMut(usize)) {
+        let (a, b) = Self::key(x - r - 2.0, z - r - 2.0); let (c, d) = Self::key(x + r + 2.0, z + r + 2.0);
+        for cx in a..=c { for cz in b..=d { if let Some(v) = self.cells.get(&(cx, cz)) { for &i in v { f(i as usize); } } } }
+    }
+}
+
 #[derive(Resource)]
 pub struct Game {
     pub enemies: Vec<Enemy>, pub projs: Vec<crate::combat::Proj>, pub zones: Vec<crate::combat::Zone>, pub traps: Vec<crate::combat::Trap>, pub pickups: Vec<Pickup>,
@@ -41,6 +62,7 @@ pub struct Game {
     /// the run is three stages on three maps: which one we're on, how long we've been here and where we're headed
     pub stage: u32, pub stage_t: f32, pub map: MapKind, pub route: MapKind, pub pending_stage: Option<(u32, MapKind, u32)>,
     pub minions: Vec<crate::abilities2::Minion>,
+    pub grid: Grid,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -48,7 +70,7 @@ impl Default for Game {
             next_id: 1, run_t: 0.0, kills: 0, hitstop: 0.0, st: Stats::base(), mods: HashMap::new(), perks: vec![], lvl: 1, xp: 0.0, cds: [0.0; 4], atk_t: 0.0,
             buffs: HashMap::new(), food_meat: 1, food_berries: 3, hits: 0, perk_queue: 0, level_pending: 0, regen_acc: 0.0, over: false, flash: 0.0,
             dir: Default::default(), rel: Default::default(), flags: HashMap::new(), rerolls: 2, chest_pending: 0, boss: None, ab: Default::default(), heal_budget: 0.0, last_hit: -10.0, gold: 0, locked: vec![], ev: Default::default(), prompt: String::new(), net: Default::default(), dmg_taken: 0.0, healed: 0.0,
-            stage: 0, stage_t: 0.0, map: MapKind::Forest, route: MapKind::Swamp, pending_stage: None, minions: vec![] }
+            stage: 0, stage_t: 0.0, map: MapKind::Forest, route: MapKind::Swamp, pending_stage: None, minions: vec![], grid: Default::default() }
     }
 }
 impl Game {
@@ -89,7 +111,7 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     pub fn shake(&mut self, s: f32) { self.cam.shake = (self.cam.shake + s * self.cam.shake_mul).min(1.0); }
     pub fn play(&mut self, name: &'static str) { self.sfx.play(name); }
     pub fn toast(&mut self, a: &str, b: &str, d: f32) { self.g.toasts.push((a.to_string(), b.to_string(), d)); }
-    pub fn pop(&mut self, pos: Vec3, text: String, kind: u8) { if self.g.popups.len() < 60 { self.g.popups.push(Popup { pos, text, kind }); } }
+    pub fn pop(&mut self, pos: Vec3, text: String, kind: u8) { if self.g.popups.len() < if self.g.enemies.len() > 250 { 40 } else { 60 } { self.g.popups.push(Popup { pos, text, kind }); } }
     pub fn ground(&mut self, x: f32, z: f32, y: f32) -> f32 { self.w.ground_at(x, z, y) }
     pub fn ppos(&self) -> Vec3 { self.p.body.pos }
     pub fn hand(&mut self) -> Vec3 {
@@ -179,13 +201,22 @@ impl<'a, 'w, 's> Ctx<'a, 'w, 's> {
     /// every live enemy near a point (by index); visit with f(ctx, index, dist)
     pub fn near(&self, c: Vec3, r: f32) -> Vec<(usize, f32)> {
         let mut out = vec![];
-        for (i, e) in self.g.enemies.iter().enumerate() { if e.dead || e.ai.hidden { continue; } let d = Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(); if d < r + e.body.w && (e.body.pos.y - c.y).abs() < r + 2.0 { out.push((i, d)); } }
+        let es = &self.g.enemies;
+        let mut test = |i: usize| { let e = &es[i]; if e.dead || e.ai.hidden { return; } let d = Vec2::new(e.body.pos.x - c.x, e.body.pos.z - c.z).length(); if d < r + e.body.w && (e.body.pos.y - c.y).abs() < r + 2.0 { out.push((i, d)); } };
+        if r < 24.0 && self.g.grid.fresh(es) {
+            self.g.grid.visit(c.x, c.z, r, &mut test);
+            // anything spawned since the build isn't hashed yet
+            for i in self.g.grid.n..es.len() { test(i); }
+        } else { for i in 0..es.len() { test(i); } }
+        out.sort_unstable_by_key(|x| x.0);
         out
     }
     pub fn aoe(&mut self, c: Vec3, r: f32, f: &mut dyn FnMut(&mut Ctx, usize, f32)) -> usize { let v = self.near(c, r); let n = v.len(); for (i, d) in v { if !self.g.enemies[i].dead { f(self, i, d); } } n }
     /// hostile targets sorted by distance
     pub fn foes(&self, pos: Vec3, r: f32) -> Vec<usize> {
-        let mut v: Vec<(f32, usize)> = self.g.enemies.iter().enumerate().filter(|(_, e)| !e.dead && !e.ai.hidden && !e.t.passive && !e.t.prop).map(|(i, e)| (Vec2::new(e.body.pos.x - pos.x, e.body.pos.z - pos.z).length(), i)).filter(|(d, _)| *d < r).collect();
+        let es = &self.g.enemies; let mut v: Vec<(f32, usize)> = vec![];
+        let mut test = |i: usize| { let e = &es[i]; if e.dead || e.ai.hidden || e.t.passive || e.t.prop { return; } let d = Vec2::new(e.body.pos.x - pos.x, e.body.pos.z - pos.z).length(); if d < r { v.push((d, i)); } };
+        if r < 24.0 && self.g.grid.fresh(es) { self.g.grid.visit(pos.x, pos.z, r, &mut test); for i in self.g.grid.n..es.len() { test(i); } } else { for i in 0..es.len() { test(i); } }
         v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap()); v.into_iter().map(|x| x.1).collect()
     }
 

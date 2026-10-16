@@ -179,12 +179,12 @@ impl Default for SpawnOpts { fn default() -> Self { SpawnOpts { size: 1.0, color
 
 pub fn spawn_enemy(cx: &mut Ctx, k: Kind, pos: Vec3, o: SpawnOpts) -> Option<usize> {
     let live = cx.g.enemies.iter().filter(|e| !e.dead).count();
-    if live >= 210 + if o.force { 30 } else { 0 } { return None; }
+    if live >= 420 + if o.force { 30 } else { 0 } { return None; }
     let t = etype(k);
     let mi = cx.g.minutes();
     // health grows both linearly and by a compounding rate, so late-game builds have to keep scaling too
     // abilities stack without limit now, so the horde's toughness keeps compounding across all three maps
-    let diff = (1.0 + mi * 0.08) * 1.05f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
+    let diff = (1.0 + mi * 0.06) * 1.05f32.powf(mi) * (1.0 + (cx.dc.day as f32 - 1.0) * 0.06) * cx.g.mods_hp();
     let quiet = t.passive || t.prop;
     let mut seed = cx.fx.rng.load(std::sync::atomic::Ordering::Relaxed);
     let mut rng = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed % 10000) as f32 / 10000.0 };
@@ -335,7 +335,10 @@ fn animate(cx: &mut Ctx, i: usize, moving: bool) {
 
 pub fn visual(cx: &mut Ctx, i: usize, moving: bool) {
     let dt = cx.dt;
-    animate(cx, i, moving);
+    // far from the player in a big horde: limbs only update every 4th frame
+    let far = cx.g.enemies.len() > 150 && cx.g.enemies[i].body.pos.distance(cx.p.body.pos) > 35.0;
+    let fr = (cx.g.run_t * 60.0) as u32;
+    if !far || (cx.g.enemies[i].id + fr) % 4 == 0 { animate(cx, i, moving); } else { cx.g.enemies[i].ph += dt * if moving { 9.0 } else { 2.0 }; }
     let rnd = cx.r();
     let (r0, r1, r2) = (cx.r(), cx.r(), cx.r());
     let e = &mut cx.g.enemies[i];
@@ -362,7 +365,7 @@ pub fn visual(cx: &mut Ctx, i: usize, moving: bool) {
     }
     let e = &cx.g.enemies[i];
     let (pos, w, h) = (e.body.pos, e.body.w, e.body.h);
-    let near = pos.distance(cx.p.body.pos) < 50.0;
+    let near = pos.distance(cx.p.body.pos) < if cx.g.enemies.len() > 250 { 30.0 } else { 50.0 };
     if near && e.burn > 0.0 && rnd < 0.7 { let c = hexc(if e.poison > 0.0 { 0x7aff5a } else if r2 < 0.5 { 0xff6a1a } else { 0xffb03a }) * 2.5; cx.fx.emit(true, pos + Vec3::new((r0 - 0.5) * 2.0 * w, r1 * h, (r2 - 0.5) * 2.0 * w), Vec3::Y * 2.0, 0.4, 0.4, 0.05, c, -1.0, 0.0, 1.0); }
     let e = &cx.g.enemies[i];
     if near && e.elite && rnd < 0.4 { let col = e.affix.map(|a| affix_info(a).1).unwrap_or(0x6ff3ff); cx.fx.emit(true, pos + Vec3::new((r0 - 0.5) * 2.0, 0.5 + r1 * h, (r2 - 0.5) * 2.0), Vec3::Y, 0.6, 0.3, 0.05, hexc(col) * 2.0, 0.0, 0.0, 0.8); }
@@ -546,7 +549,13 @@ pub fn update_enemies(cx: &mut Ctx) {
     }
     // keep the horde from stacking into one blob
     let n = cx.g.enemies.len();
-    if n < 240 { for a in 0..n { if cx.g.enemies[a].dead || cx.g.enemies[a].t.prop { continue; } for b in a + 1..n {
+    let mut grid = std::mem::take(&mut cx.g.grid);
+    grid.build(&cx.g.enemies);
+    let mut cand: Vec<usize> = Vec::with_capacity(32);
+    for a in 0..n { if cx.g.enemies[a].dead || cx.g.enemies[a].t.prop { continue; }
+        cand.clear(); let pa0 = cx.g.enemies[a].body.pos;
+        let wa0 = cx.g.enemies[a].body.w; grid.visit(pa0.x, pa0.z, wa0 + 1.0, &mut |b| if b > a { cand.push(b) });
+        for &b in &cand {
         if cx.g.enemies[b].dead || cx.g.enemies[b].t.prop { continue; }
         let (pa, pb) = (cx.g.enemies[a].body.pos, cx.g.enemies[b].body.pos);
         let r = cx.g.enemies[a].body.w + cx.g.enemies[b].body.w + 0.1;
@@ -557,10 +566,12 @@ pub fn update_enemies(cx: &mut Ctx) {
             let (wa, ha, wb, hb) = (cx.g.enemies[a].body.w, cx.g.enemies[a].body.h, cx.g.enemies[b].body.w, cx.g.enemies[b].body.h);
             if !collides(cx.w, pa.x - nx, pa.y, pa.z - nz, wa, ha) { cx.g.enemies[a].body.pos.x -= nx; cx.g.enemies[a].body.pos.z -= nz; }
             if !collides(cx.w, pb.x + nx, pb.y, pb.z + nz, wb, hb) { cx.g.enemies[b].body.pos.x += nx; cx.g.enemies[b].body.pos.z += nz; } }
-    } } }
+    } }
+    cx.g.grid = grid;
     // sweep the dead
     let mut k = 0;
     while k < cx.g.enemies.len() { if cx.g.enemies[k].dead { let e = cx.g.enemies.swap_remove(k); if e.rig.root.is_some() { despawn_rig(cx, &e); } } else { k += 1; } }
+    let mut grid = std::mem::take(&mut cx.g.grid); grid.build(&cx.g.enemies); cx.g.grid = grid;
 }
 fn despawn(cx: &mut Ctx, i: usize) {
     let e = &mut cx.g.enemies[i];

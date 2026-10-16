@@ -18,12 +18,12 @@ pub struct Director {
     pub pack: f32, pub event: f32, pub boss: f32, pub urn: f32, pub animal: f32, pub ev_i: u32,
     pub guarded: HashSet<(i32, i32)>, pub cleared: HashSet<(i32, i32)>, pub used: HashSet<(i32, i32)>, pub chest_out: HashSet<(i32, i32)>,
     pub chests: Vec<Chest>, pub trial: Option<Trial>, pub heat: f32, pub hazard: f32, pub next_boss: usize, pub warned: bool, pub endless_t: f32,
-    pub portal: Option<Portal>,
+    pub portal: Option<Portal>, pub arc: f32,
 }
 impl Default for Director {
     fn default() -> Self {
         Director { pack: 1.5, event: 70.0, boss: 300.0, urn: 2.0, animal: 3.0, ev_i: 0, guarded: HashSet::new(), cleared: HashSet::new(), used: HashSet::new(), chest_out: HashSet::new(),
-            chests: vec![], trial: None, heat: 0.0, hazard: 10.0, next_boss: 0, warned: false, endless_t: 120.0, portal: None }
+            chests: vec![], trial: None, heat: 0.0, hazard: 10.0, next_boss: 0, warned: false, endless_t: 120.0, portal: None, arc: 25.0 }
     }
 }
 
@@ -33,23 +33,30 @@ pub fn threat(m: f32) -> (&'static str, u32) { let mut t = THREAT[0]; for q in T
 /// how many hostiles should be hunting right now
 fn horde_target(cx: &Ctx) -> f32 {
     let m = cx.g.minutes();
-    let mut n = 6.0 + m * 7.5 + (cx.dc.day as f32 - 1.0) * 3.0;
+    let mut n = 10.0 + m * 14.0 + (cx.dc.day as f32 - 1.0) * 3.0;
     if cx.dc.night { n *= 1.3; }
     if cx.dc.blood { n *= 1.4; }
     if cx.g.dir.trial.is_some() { n += 10.0; }
     if cx.g.ember() >= 6 { n *= 1.25; }
     if cx.g.flags.contains_key("curse") { n *= 1.6; }
-    n.min(205.0)
+    n.min(400.0)
 }
 
-/// a spawn point on a ring around `a`; spots in front of the player are pushed further out so the horde rises at the edge of sight
+/// a spawn point on a ring around `a`; spots in front of the player are pushed further out so the horde rises at the edge of sight.
+/// A player on the run gets cut off: many spawns land ahead along their heading, and spots past the arena wall slide back inside it
 pub fn ring_spot(cx: &mut Ctx, a: Vec3, yaw: f32, r0: f32, r1: f32) -> Option<Vec3> {
     let (fx, fz) = (yaw.sin(), yaw.cos());
-    for _ in 0..10 {
-        let an = cx.rr(0.0, TAU);
+    let v = cx.p.body.vel.with_y(0.0);
+    let running = (cx.p.body.pos - a).length() < 1.0 && v.length() > 3.0;
+    let lim = HALF as f32 - 4.0;
+    for t in 0..16 {
+        let an = if running && t < 8 && cx.r() < 0.45 { v.z.atan2(v.x) + cx.rr(-0.7, 0.7) } else { cx.rr(0.0, TAU) };
         let mut d = cx.rr(r0, r1);
         if an.cos() * fx + an.sin() * fz > 0.6 { d += 8.0; }
-        if let Some(s) = cx.w.surface_spot(a.x + an.cos() * d, a.z + an.sin() * d) {
+        let (x, z) = ((a.x + an.cos() * d).clamp(-lim, lim), (a.z + an.sin() * d).clamp(-lim, lim));
+        // squashed against the wall too close to the target: try another angle
+        if Vec2::new(x - a.x, z - a.z).length() < r0 * 0.6 { continue; }
+        if let Some(s) = cx.w.surface_spot(x, z) {
             if (s.y - a.y).abs() < 14.0 && cx.w.poi_near(s.x, s.z, 2.0).is_none() { return Some(s); }
         }
     }
@@ -132,20 +139,25 @@ pub fn update_director(cx: &mut Ctx) {
     let m = cx.g.minutes();
     cx.g.dir.pack -= dt;
     if cx.g.dir.pack <= 0.0 {
-        cx.g.dir.pack = (1.0 - m * 0.05).max(0.3);
+        cx.g.dir.pack = (1.0 - m * 0.05).max(0.18);
         let want = horde_target(cx) * if final_boss_up(cx) { 0.5 } else { 1.0 };
         if hostile < want {
             let b = cx.w.column(pp.x.floor() as i32, pp.z.floor() as i32).b;
             let mut k = pick_kind(cx, b);
             if etype(k).ranged && ranged > want * 0.22 { k = cx.pick(&[Kind::Zombie, Kind::Spider, Kind::Slime]); }
             let (lo, hi) = pack_size(k);
-            let n = ((want - hostile).ceil() as u32).min(lo + (cx.r() * (hi - lo + 1) as f32) as u32 + (m / 4.0) as u32);
+            let n = ((want - hostile).ceil() as u32).min(lo + (cx.r() * (hi - lo + 1) as f32) as u32 + (m / 2.5) as u32);
             let elite = cx.r() < ((0.02 + m * 0.012 + if cx.dc.blood { 0.08 } else { 0.0 }) * if cx.g.ember() >= 3 { 2.0 } else { 1.0 }).clamp(0.0, 0.45);
             spawn_pack(cx, pp, yaw, k, n, PackOpts { elite, ..default() });
         }
     }
     if !final_boss_up(cx) { cx.g.dir.event -= dt; }
     if cx.g.dir.event <= 0.0 { cx.g.dir.event = cx.rr(75.0, 100.0) * (1.0 - m * 0.02).max(0.6); let i = cx.g.dir.ev_i; cx.g.dir.ev_i += 1; horde_event(cx, i); }
+    // past Restless, a wall of the dead rises across your path every so often: you fight through it or get pinned
+    if m >= 3.0 && !final_boss_up(cx) {
+        cx.g.dir.arc -= dt;
+        if cx.g.dir.arc <= 0.0 { cx.g.dir.arc = cx.rr(20.0, 30.0); if hostile < want_cap(cx) { horde_arc(cx, pp, yaw, m); } }
+    }
     boss_schedule(cx);
     // from the Dangerous tier on, the ground itself turns on you: telegraphed eruptions land where you're heading
     let hz0 = if cx.g.ember() >= 7 { 3.0 } else { 6.0 };
@@ -197,6 +209,23 @@ pub fn eruption(cx: &mut Ctx, c: Vec3, r: f32, delay: f32) {
     });
 }
 
+fn want_cap(cx: &Ctx) -> f32 { horde_target(cx) + 40.0 }
+/// a 120° arc of the horde ahead of the player (along their heading when they run)
+fn horde_arc(cx: &mut Ctx, pp: Vec3, yaw: f32, m: f32) {
+    let v = cx.p.body.vel.with_y(0.0);
+    let c = if v.length() > 3.0 { v.z.atan2(v.x) } else { (yaw.cos()).atan2(yaw.sin()) };
+    let n = (12 + (m * 1.2) as u32).min(30);
+    let r = cx.rr(18.0, 22.0); let lim = HALF as f32 - 3.0;
+    for k in 0..n {
+        let an = c + (k as f32 / (n - 1) as f32 - 0.5) * TAU / 3.0;
+        let (x, z) = ((pp.x + an.cos() * r).clamp(-lim, lim), (pp.z + an.sin() * r).clamp(-lim, lim));
+        let Some(s) = cx.w.surface_spot(x, z) else { continue };
+        let kind = if m > 6.0 && k % 5 == 0 { Kind::Skeleton } else if m > 9.0 && k % 6 == 0 { Kind::Shieldbearer } else { Kind::Zombie };
+        spawn_enemy(cx, kind, s, SpawnOpts::default());
+    }
+    if cx.r() < 0.5 { cx.play("rise"); }
+}
+
 /// set pieces that break up the steady stream
 fn horde_event(cx: &mut Ctx, i: u32) {
     let m = cx.g.minutes(); let pp = cx.p.body.pos; let yaw = cx.p.yaw;
@@ -204,23 +233,25 @@ fn horde_event(cx: &mut Ctx, i: u32) {
     match i % 3 {
         0 => {
             // encircled: a full ring of the dead rises all around you at once
-            let n = (14 + (m * 3.0) as u32).min(44); let r = cx.rr(19.0, 23.0);
+            let n = (16 + (m * 4.0) as u32).min(90); let r = cx.rr(19.0, 23.0);
             cx.announce("The horde closes in!", "They rise all around you", 2.8);
             for k in 0..n {
                 let an = k as f32 / n as f32 * TAU;
-                let Some(s) = cx.w.surface_spot(pp.x + an.cos() * r, pp.z + an.sin() * r) else { continue };
+                let lim = HALF as f32 - 3.0;
+                let Some(s) = cx.w.surface_spot((pp.x + an.cos() * r).clamp(-lim, lim), (pp.z + an.sin() * r).clamp(-lim, lim)) else { continue };
                 let kind = if m > 5.0 && k % 4 == 0 { Kind::Skeleton } else if m > 8.0 && k % 7 == 0 { Kind::Bloater } else { Kind::Zombie };
                 spawn_enemy(cx, kind, s, SpawnOpts { force: true, ..default() });
             }
         }
         1 => {
             // a shrieking swarm from one direction
-            let n = (10 + (m * 2.5) as u32).min(40); let an = cx.rr(0.0, TAU);
+            let n = (12 + (m * 3.5) as u32).min(90); let an = cx.rr(0.0, TAU);
             let dir = ["east", "south", "west", "north"][((an / (TAU / 4.0)).round() as usize) % 4];
             cx.announce("A swarm descends!", &format!("Bats pour in from the {}", dir), 2.8);
             for _ in 0..n {
                 let d = cx.rr(26.0, 34.0); let sp = an + cx.rr(-0.35, 0.35);
-                if let Some(s) = cx.w.surface_spot(pp.x + sp.cos() * d, pp.z + sp.sin() * d) { let y = s.y + cx.rr(3.0, 6.0); spawn_enemy(cx, Kind::Bat, Vec3::new(s.x, y, s.z), SpawnOpts { force: true, ..default() }); }
+                let lim = HALF as f32 - 3.0;
+                if let Some(s) = cx.w.surface_spot((pp.x + sp.cos() * d).clamp(-lim, lim), (pp.z + sp.sin() * d).clamp(-lim, lim)) { let y = s.y + cx.rr(3.0, 6.0); spawn_enemy(cx, Kind::Bat, Vec3::new(s.x, y, s.z), SpawnOpts { force: true, ..default() }); }
             }
         }
         _ => {
@@ -230,7 +261,7 @@ fn horde_event(cx: &mut Ctx, i: u32) {
             if at.is_none() { return; }
             spawn_pack(cx, pp, yaw, lead, 1 + (m / 6.0) as u32, PackOpts { at, elite: true, force: true, ..default() });
             let follow = if lead == Kind::Brute { Kind::Zombie } else { lead };
-            spawn_pack(cx, pp, yaw, follow, 4 + (m / 2.0) as u32, PackOpts { at, elite: true, force: true, ..default() });
+            spawn_pack(cx, pp, yaw, follow, (4 + (m / 1.5) as u32).min(60), PackOpts { at, elite: true, force: true, ..default() });
         }
     }
 }
@@ -436,7 +467,7 @@ pub fn find_interact(cx: &mut Ctx) -> Option<(String, Interact)> {
     let mut best = 3.2; let mut out = None;
     for (i, c) in cx.g.dir.chests.iter().enumerate() { if c.open || c.t < 0.0 { continue; } let d = c.pos.distance(pp); if d < best { best = d; out = Some(("Open chest".to_string(), Interact::Chest(i))); } }
     if out.is_some() { return out; }
-    let p = cx.w.poi((pp.x / 64.0).floor() as i32, (pp.z / 64.0).floor() as i32)?;
+    let g = POI_GRID as f32; let p = cx.w.poi((pp.x / g).floor() as i32, (pp.z / g).floor() as i32)?;
     if cx.g.dir.used.contains(&(p.gx, p.gz)) { return None; }
     let d = Vec2::new(pp.x - p.x as f32 - 0.5, pp.z - p.z as f32 - 0.5).length();
     match p.kind {
@@ -450,7 +481,7 @@ pub fn interact(cx: &mut Ctx, it: Interact) { match it { Interact::Chest(i) => o
 /// ruins and camps get guards and a chest when you come near; shrines and altars give off motes
 pub fn update_pois(cx: &mut Ctx) {
     let pp = cx.p.body.pos;
-    let (gx0, gz0) = ((pp.x / 64.0).floor() as i32, (pp.z / 64.0).floor() as i32);
+    let g = POI_GRID as f32; let (gx0, gz0) = ((pp.x / g).floor() as i32, (pp.z / g).floor() as i32);
     for gz in gz0 - 1..=gz0 + 1 { for gx in gx0 - 1..=gx0 + 1 {
         let Some(p) = cx.w.poi(gx, gz) else { continue };
         let key = (gx, gz);
